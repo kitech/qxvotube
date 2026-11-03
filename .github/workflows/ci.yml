@@ -1,0 +1,403 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+# Ported from qxmusic/.github/workflows/ci.yml (same-家族 CI template).
+# 依据 qxmusic CI 移植，去掉 Go（go163-music-core/libncm）模块部分。
+# Projects built here:
+#   - qlvotube   : Qt3 (linux) / Qt4 (linux) / Qt5 (mac) / Qt6 (linux) desktop frontend
+#   - qskvotube  : QSkinny (Qsk*) 前端占位骨架（Qt6，从源码构建 QSkinny 后编译）
+#
+# Notes:
+#   - Qt 3.3.8 / Qt 4.8.7 均消费 qtchina/qt_build_scripts release tag qt4.8 下
+#     的预编译 tarball（无缓存，每次下载，同 qxmusic 的用法）。tag 名叫 "qt4.8"
+#     是历史原因：该 release 同时托管 qt338sh / qt487sh / tde-qt3 资产。
+#   - hjson-cpp 仍走 vcpkg，triplet 与 qlvotube.pro 硬编码路径一致
+#     （/opt/vcpkg/installed/x64-{linux,osx}-dynamic）。
+#   - 无音频后端、无 libncm：qlvotube 裁掉了 audio.pri/cxaudio 与 NCM，
+#     因此 apt 不需要 libavformat/libavcodec 等 ffmpeg 包。
+#   - Ubuntu 24.04 跑 Qt3（上游同款）；Qt4.8.7 预编译包在新 glibc 下可用，
+#     放 ubuntu-22.04。
+#   - qskvotube 需要 QSkinny，CI 环境没有预编译包，故从 uwerat/qskinny 源码
+#     构建（与本地 /opt/qt/qskinny 同源同效果），再编译占位骨架。
+
+jobs:
+  build-qlvotube-qt3-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential pkg-config \
+            libcurl4-openssl-dev libfreetype-dev \
+            libx11-dev libxext-dev uuid-dev libxss-dev \
+            libsqlite3-dev
+      - name: Download and extract precompiled Qt3
+        run: |
+          sudo ln -sv /opt /opu
+          curl -sL "https://github.com/qtchina/qt_build_scripts/releases/download/qt4.8/tde-qt338sh-linux-cjkinput-x64.tar.gz" \
+            | sudo tar xzf - -C /opt
+      - name: Install vcpkg and hjson-cpp
+        run: |
+          sudo mkdir -p /opt/vcpkg
+          sudo chown "$(whoami)" /opt/vcpkg
+          git clone --depth 1 https://github.com/Microsoft/vcpkg.git /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh
+          /opt/vcpkg/vcpkg install hjson-cpp --triplet x64-linux-dynamic
+      - name: Build qlvotube with Qt3
+        run: |
+          export PATH=/opt/qt338sh/bin:$PATH
+          export QMAKESPEC=linux-g++
+          cd qlvotube
+          mkdir -p build-qt3 && cd build-qt3
+          /opt/qt338sh/bin/qmake -makefile ../qlvotube.pro
+          make
+      - name: Verify build
+        run: |
+          ls -lh qlvotube/build-qt3/qlvotube
+          ldd qlvotube/build-qt3/qlvotube | grep -E 'hjson|sqlite|curl' || true
+      - name: Prepare artifact
+        run: |
+          mkdir -p bin
+          cp qlvotube/build-qt3/qlvotube bin/qlvotube-qt3
+          chmod +x bin/qlvotube-qt3
+          # bundle libhjson 以便 release 消费（vcpkg rpath 在用户机器上不存在）。
+          # 按 soname 物理命名 —— upload-artifact 不保留符号链接。
+          cp /opt/vcpkg/installed/x64-linux-dynamic/lib/libhjson.so.2.6 bin/libhjson.so.2
+      - name: Upload qlvotube-qt3 as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qlvotube-qt3-linux
+          path: bin/
+          retention-days: 30
+
+  build-qlvotube-qt4-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential pkg-config \
+            libcurl4-openssl-dev libfreetype-dev \
+            libx11-dev libxext-dev uuid-dev libxss-dev \
+            libsqlite3-dev
+      - name: Download and extract precompiled Qt4.8.7
+        run: |
+          sudo ln -sv /opt /opu
+          curl -sL "https://github.com/qtchina/qt_build_scripts/releases/download/qt4.8/qt487sh-linux-x64.tar.gz" \
+            | sudo tar xzf - -C /opt
+          ls /opt/qt487sh/bin
+      - name: Install vcpkg and hjson-cpp
+        run: |
+          sudo mkdir -p /opt/vcpkg
+          sudo chown "$(whoami)" /opt/vcpkg
+          git clone --depth 1 https://github.com/Microsoft/vcpkg.git /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh
+          /opt/vcpkg/vcpkg install hjson-cpp --triplet x64-linux-dynamic
+      - name: Build qlvotube with Qt4.8.7
+        run: |
+          cd qlvotube
+          mkdir -p build-qt4 && cd build-qt4
+          /opt/qt487sh/bin/qmake ../qlvotube.pro
+          sed -i 's/\-O2/\-O1/g' Makefile
+          make
+      - name: Verify build
+        run: |
+          ls -lh qlvotube/build-qt4/qlvotube
+          ldd qlvotube/build-qt4/qlvotube | grep -E 'hjson|sqlite|curl' || true
+      - name: Prepare artifact
+        run: |
+          mkdir -p bin
+          cp qlvotube/build-qt4/qlvotube bin/qlvotube-qt4
+          chmod +x bin/qlvotube-qt4
+      - name: Upload qlvotube-qt4 as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qlvotube-qt4-linux
+          path: bin/
+          retention-days: 30
+
+  build-qlvotube-qt5-mac:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Install Qt5 and dependencies
+        run: |
+          brew install qt@5 freetype pkg-config
+          echo "/usr/local/opt/qt@5/bin" >> $GITHUB_PATH
+      - name: Verify Qt5 installation
+        run: |
+          qmake -v
+          which qmake
+      - name: Install vcpkg and hjson-cpp
+        run: |
+          sudo mkdir -p /opt/vcpkg
+          sudo chown "$(whoami)" /opt/vcpkg
+          git clone --depth 1 https://github.com/Microsoft/vcpkg.git /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh
+          /opt/vcpkg/vcpkg install hjson-cpp --triplet x64-osx-dynamic
+      - name: Build qlvotube with Qt5
+        run: |
+          cd qlvotube
+          export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+          qmake qlvotube.pro CONFIG-=app_bundle
+          make
+      - name: Verify build
+        run: ls -lh qlvotube/qlvotube
+      - name: Prepare artifact
+        run: |
+          mkdir -p bin
+          cp qlvotube/qlvotube bin/qlvotube-qt5
+          chmod +x bin/qlvotube-qt5
+      - name: Upload qlvotube-qt5 as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qlvotube-qt5-macos
+          path: bin/
+          retention-days: 30
+
+  build-qlvotube-qt6-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install aqtinstall
+        run: pip install aqtinstall==3.3.0
+      - name: Cache Qt
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aqtinstall
+          key: qt-linux-6.7.3-gcc_64
+      - name: Install Qt 6.7.3
+        run: |
+          aqt install-qt linux desktop 6.7.3 linux_gcc_64 \
+            -m qtshadertools \
+            --outputdir /opt/qt
+          echo "=== Installed Qt directories ==="
+          HOST_DIR=$(find /opt/qt/6.7.3 -maxdepth 1 -type d \( -name 'linux*' -o -name 'gcc*' \) | head -1)
+          echo "Detected host Qt dir: $HOST_DIR"
+          # 本地/上游 buildqt6.sh 硬编码 /opt/qt/6.7.3/gcc_64
+          sudo ln -sfn "$HOST_DIR" /opt/qt/6.7.3/gcc_64
+          echo "QTDIR=$HOST_DIR" >> $GITHUB_ENV
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential pkg-config \
+            libcurl4-openssl-dev libfreetype-dev \
+            libx11-dev libxext-dev uuid-dev libxss-dev \
+            libsqlite3-dev \
+            libgl-dev libegl-dev libfontconfig-dev libxkbcommon-dev
+      - name: Install vcpkg and hjson-cpp
+        run: |
+          sudo mkdir -p /opt/vcpkg
+          sudo chown "$(whoami)" /opt/vcpkg
+          git clone --depth 1 https://github.com/Microsoft/vcpkg.git /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh
+          /opt/vcpkg/vcpkg install hjson-cpp --triplet x64-linux-dynamic
+      - name: Build qlvotube with Qt6
+        run: |
+          cd qlvotube
+          mkdir -p build-qt6 && cd build-qt6
+          /opt/qt/6.7.3/gcc_64/bin/qmake ../qlvotube.pro
+          sed -i 's/\-O2/\-O1/g' Makefile
+          sed -i 's/\-std=c++11/\-std=c++17/g' Makefile
+          sed -i 's/\-std=gnu++11/\-std=c++17/g' Makefile
+          make
+      - name: Verify build
+        run: |
+          ls -lh qlvotube/build-qt6/qlvotube
+          ldd qlvotube/build-qt6/qlvotube | grep -E 'hjson|sqlite|curl' || true
+      - name: Prepare artifact
+        run: |
+          mkdir -p bin
+          cp qlvotube/build-qt6/qlvotube bin/qlvotube-qt6
+          chmod +x bin/qlvotube-qt6
+      - name: Upload qlvotube-qt6 as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qlvotube-qt6-linux
+          path: bin/
+          retention-days: 30
+
+  build-qskvotube-qt6-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install aqtinstall
+        run: pip install aqtinstall==3.3.0
+      - name: Cache Qt 6.8.1
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aqtinstall
+          key: qt-linux-6.8.1-gcc_64
+      - name: Install Qt 6.8.1
+        run: |
+          aqt install-qt linux desktop 6.8.1 linux_gcc_64 --outputdir /opt/qt
+          echo "=== Installed Qt directories ==="
+          HOST_DIR=$(find /opt/qt/6.8.1 -maxdepth 1 -type d \( -name 'linux*' -o -name 'gcc*' \) | head -1)
+          sudo ln -sfn "$HOST_DIR" /opt/qt/6.8.1/gcc_64
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake \
+            libgl-dev libegl-dev libfontconfig-dev libxkbcommon-dev \
+            libfreetype-dev libvulkan-dev
+      - name: Build QSkinny from source
+        run: |
+          git clone --depth 1 https://github.com/uwerat/qskinny.git /tmp/qskinny
+          cmake -B /tmp/qskinny/build -S /tmp/qskinny \
+            -DCMAKE_PREFIX_PATH=/opt/qt/6.8.1/gcc_64/lib/cmake \
+            -DBUILD_QML_EXPORT=OFF -DBUILD_INPUTCONTEXT=OFF \
+            -DBUILD_EXAMPLES=OFF -DBUILD_PLAYGROUND=OFF -DBUILD_TOOLS=OFF
+          cmake --build /tmp/qskinny/build
+          sudo cmake --install /tmp/qskinny/build --prefix /opt/qt/qskinny
+          ls /opt/qt/qskinny/lib/cmake
+      - name: Build qskvotube
+        run: |
+          cd qskvotube
+          cmake -B build -S . \
+            -DCMAKE_PREFIX_PATH="/opt/qt/6.8.1/gcc_64/lib/cmake;/opt/qt/qskinny/lib/cmake" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Verify build
+        run: ls -lh qskvotube/build/qskvotube
+      - name: Prepare artifact
+        run: |
+          mkdir -p bin
+          cp qskvotube/build/qskvotube bin/qskvotube-qt6
+          chmod +x bin/qskvotube-qt6
+      - name: Upload qskvotube-qt6 as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qskvotube-qt6-linux
+          path: bin/
+          retention-days: 30
+
+  package-release-linux:
+    runs-on: ubuntu-22.04
+    needs: [build-qlvotube-qt3-linux]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download qlvotube artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: qlvotube-qt3-linux
+          path: release/
+      - name: Organize files for packaging
+        run: |
+          mkdir -p release/bin release/lang
+          mv release/qlvotube-qt3 release/bin/qlvotube
+          # artifact 下载为平铺结构，把随包的 libhjson.so.2 一并归入 bin/
+          mv release/libhjson.so.2 release/bin/
+          cp -r qlvotube/lang/* release/lang/
+          cat > release/run.sh <<'EOF'
+          #!/bin/sh
+          # 启动 qlvotube（Qt3 构建）。bin/ 内含随包分发的 libhjson.so.2。
+          cd "$(dirname "$0")" || exit 1
+          export LD_LIBRARY_PATH="$(pwd)/bin:${LD_LIBRARY_PATH}"
+          exec ./bin/qlvotube "$@"
+          EOF
+          chmod +x release/run.sh
+          ls -lhR release/
+      - name: Create tarball
+        run: |
+          cd release
+          tar czvf ../qlvotube-linux-x86_64-${{ github.ref_name }}.tar.gz bin/ lang/ run.sh
+          cd ..
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qlvotube-linux-release
+          path: qlvotube-linux-x86_64-*.tar.gz
+          retention-days: 90
+
+  package-release-macos:
+    runs-on: ubuntu-22.04
+    needs: [build-qlvotube-qt5-mac]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: qlvotube-qt5-macos
+          path: release/
+      - name: Organize files for packaging
+        run: |
+          mkdir -p release/bin release/lang
+          mv release/qlvotube-qt5 release/bin/
+          cp -r qlvotube/lang/* release/lang/
+          ls -lhR release/
+      - name: Create tarball
+        run: |
+          cd release
+          tar czvf ../qlvotube-macos-x86_64-${{ github.ref_name }}.tar.gz bin/ lang/
+          cd ..
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qlvotube-macos-release
+          path: qlvotube-macos-x86_64-*.tar.gz
+          retention-days: 90
+
+  upload-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    needs: [package-release-linux, package-release-macos]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Linux release
+        uses: actions/download-artifact@v4
+        with:
+          name: qlvotube-linux-release
+          path: release/
+      - name: Download macOS release
+        uses: actions/download-artifact@v4
+        with:
+          name: qlvotube-macos-release
+          path: release/
+      - name: Prepare files for upload
+        run: |
+          find release/ -name '*.tar.gz' -exec mv {} . \;
+          ls -lh *.tar.gz
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --generate-notes \
+            ${{ contains(github.ref_name, '-') && '--prerelease' || '' }} \
+            qlvotube-*.tar.gz
+      - name: Upload assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            qlvotube-*.tar.gz --clobber
