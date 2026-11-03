@@ -1,0 +1,103 @@
+{
+ "app_title": "qlvotube",
+ "theme_dark": "Dark Theme",
+ "theme_light": "Light Theme",
+ "nav": {
+  "search": "Search",
+  "recommend": "Recommended",
+  "rank": "Ranking",
+  "mymusic": "My Music",
+  "created": "Created Playlists",
+  "collected": "Collected Playlists",
+  "categories": "Categories",
+  "rank_coming": "Rankings coming soon"
+ },
+ "content": {
+  "playall": "Play All",
+  "back": "Back",
+  "load_more": "Load more",
+  "loading": "Loading…",
+  "categories": "Categories"
+ },
+ "num": {
+  "wan": "W",
+  "yi": "Yi"
+ },
+ "player": {
+  "prev": "Previous",
+  "play": "Play",
+  "pause": "Pause",
+  "next": "Next",
+  "no_media": "No local audio file for this track",
+  "error": "Playback error"
+ },
+ "queue": {
+  "title": "Play Queue"
+ },
+ "style": {
+  "fusion": "Fusion",
+  "macos": "macOS",
+  "windows": "Windows 11",
+  "material": "Material You",
+  "github": "GitHub"
+ },
+ "tooltips": {
+  "lang": "Language",
+  "style": "Style",
+  "dark": "Dark Mode"
+ },
+ "menu": {
+  "file": "&File",
+  "edit": "&Edit",
+  "tool": "&Tools",
+  "help": "&Help",
+  "aboutqt": "About Qt",
+  "settings": "Settings…",
+  "about_qlvotube": "About qlvotube"
+ },
+ "user": {
+  "not_login": "Not logged in",
+  "click_to_login": "Not logged in · Click to log in",
+  "logged_in": "Logged in"
+ },
+ "settings": {
+  "window_title": "Settings",
+  "general_tab": "General",
+  "lang_label": "Language",
+  "dark_label": "Dark mode"
+ },
+ "action": {
+  "new": "New",
+  "quit": "Quit",
+  "undo": "Undo",
+  "redo": "Redo",
+  "dark_on": "Enable Dark Mode",
+  "dark_off": "Disable Dark Mode"
+ },
+ "title": {
+  "tip_lang": "Language",
+  "tip_style": "Style",
+  "tip_dark": "Dark Mode",
+  "dark_on": "On",
+  "dark_off": "Off"
+ },
+ "demo": {
+  "status_info": "Demo: Normal status message",
+  "status_warning": "Demo: Warning status message",
+  "status_error": "Demo: Error status message",
+  "status_clear": "Demo: Clear status bar",
+  "tray_bubble": "Demo: Tray bubble notification",
+  "status_widgets": "Demo: Status bar widgets",
+  "ready": "Demo: Status bar widgets reset",
+  "api_request": "Demo: API request (GET)"
+ },
+ "tray": {
+  "open": "Open Main Window",
+  "quit": "Quit"
+ },
+ "lang": {
+  "zh_CN": "简体中文",
+  "zh_TW": "繁體中文",
+  "en_US": "English"
+ }
+}

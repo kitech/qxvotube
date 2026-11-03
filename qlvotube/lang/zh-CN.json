@@ -1,0 +1,103 @@
+{
+ "app_title": "qlvotube",
+ "theme_dark": "深色主题",
+ "theme_light": "浅色主题",
+ "nav": {
+  "search": "搜索",
+  "recommend": "推荐",
+  "rank": "排行榜",
+  "mymusic": "我的音乐",
+  "created": "创建的歌单",
+  "collected": "收藏的歌单",
+  "categories": "分类",
+  "rank_coming": "排行榜即将支持"
+ },
+ "content": {
+  "playall": "播放全部",
+  "back": "返回",
+  "load_more": "加载更多",
+  "loading": "加载中…",
+  "categories": "分类"
+ },
+ "num": {
+  "wan": "万",
+  "yi": "亿"
+ },
+ "player": {
+  "prev": "上一首",
+  "play": "播放",
+  "pause": "暂停",
+  "next": "下一首",
+  "no_media": "该曲目暂无本地音频文件",
+  "error": "播放错误"
+ },
+ "queue": {
+  "title": "播放队列"
+ },
+ "style": {
+  "fusion": "Fusion",
+  "macos": "macOS",
+  "windows": "Windows 11",
+  "material": "Material You",
+  "github": "GitHub"
+ },
+ "tooltips": {
+  "lang": "语言",
+  "style": "风格",
+  "dark": "深色模式"
+ },
+ "menu": {
+  "file": "文件(&F)",
+  "edit": "编辑(&E)",
+  "tool": "工具(&T)",
+  "help": "帮助(&H)",
+  "aboutqt": "关于 Qt",
+  "settings": "设置…",
+  "about_qlvotube": "关于 qlvotube"
+ },
+ "user": {
+  "not_login": "未登录",
+  "click_to_login": "未登录 · 点击登录",
+  "logged_in": "已登录"
+ },
+ "settings": {
+  "window_title": "设置",
+  "general_tab": "通用",
+  "lang_label": "语言",
+  "dark_label": "深色模式"
+ },
+ "action": {
+  "new": "新建",
+  "quit": "退出",
+  "undo": "撤销",
+  "redo": "重做",
+  "dark_on": "开启深色模式",
+  "dark_off": "关闭深色模式"
+ },
+ "title": {
+  "tip_lang": "语言",
+  "tip_style": "风格",
+  "tip_dark": "深色模式",
+  "dark_on": "开",
+  "dark_off": "关"
+ },
+ "demo": {
+  "status_info": "演示：普通状态栏消息",
+  "status_warning": "演示：警告状态栏消息",
+  "status_error": "演示：错误状态栏消息",
+  "status_clear": "演示：清空状态栏",
+  "tray_bubble": "演示：托盘气泡通知",
+  "status_widgets": "演示：状态栏左右端控件",
+  "ready": "演示：状态栏左右端控件已重置",
+  "api_request": "演示：API 请求(GET)"
+ },
+ "tray": {
+  "open": "打开主窗口",
+  "quit": "退出"
+ },
+ "lang": {
+  "zh_CN": "简体中文",
+  "zh_TW": "繁體中文",
+  "en_US": "English"
+ }
+}
