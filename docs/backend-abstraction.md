@@ -120,11 +120,25 @@ public:
 
 | 引擎 | 实现 | 平台 | 编译 | 降级顺序 |
 |---|---|---|---|---|
-| ProcessMpv | QProcess 拉起 `mpv`(Linux `--wid=X11 winId`;Windows `--wid=HWND`;macOS 无必依赖 --wid,浮独立窗) | 全平台(需系统装 mpv;win 提供 portable 获取指引) | 恒编 | 1 |
-| LibMpv | 链接 libmpv OpenGL 渲染控件(qlmplayeradapter: Qt3 X11 用 XRENDER 纯 Qt/egl 已足、Qt6 自绘窗口) | linux/mac/win | 条件宏 `WITH_LIBMPV`(CI 默认关) | 2 |
-| QMediaPlayer | Qt6 only(win/mac 原生后端零额外依赖;linux 需 dev) | Qt6 build | 条件宏 `WITH_QTMEDIA` | 3 |
+| **CxVideo** | `anystik/cxvideo` 共享组件(见 `cxvideo-plan.md`/`cxvideo-detail.md`):公共 API 一套,**双解码内核** CXEngineMpv(libmpv 内嵌)+ CXEngineFfmpeg(自研 FFmpeg 三线程管线);Qt3 X11/QPainter 渲染、Qt6 QOpenGLWidget | 全 Qt 版本(Qt3/4/5/6)——**唯一 Qt3 可用的内嵌引擎** | 条件宏 `WITH_CXVIDEO`(组件存在即开) | **1(主推荐)** |
+| ProcessMpv | QProcess 拉起 `mpv`(Linux `--wid=X11 winId`;Windows `--wid=HWND`;macOS 无必依赖 --wid,浮独立窗) | 全平台(需系统装 mpv;win 提供 portable 获取指引) | 恒编 | 2 |
+| LibMpv | 链接 libmpv OpenGL 渲染控件(qlmplayeradapter: Qt3 X11 用 XRENDER 纯 Qt/egl 已足、Qt6 自绘窗口) | linux/mac/win | 条件宏 `WITH_LIBMPV`(CI 默认关) | 3 |
+| QMediaPlayer | Qt6 only(win/mac 原生后端零额外依赖;linux 需 dev) | Qt6 build | 条件宏 `WITH_QTMEDIA` | 4 |
+| QtAV | wang-bin/QtAV 或 digiKam fork(仅 Qt4/Qt5 可用;Qt6 需 digiKam fork 且无 QML,闭门维护,风险高,见 `qtav-evaluation.md`) | Qt4/Qt5/Qt6-widgets | 条件宏 `WITH_QTAV`(默认关,不入 CI) | 5(备选) |
+| Mdk | wang-bin/mdk-sdk(QMDKWidgetRenderer=QOpenGLWidget/QOpenGLWindow;QML Qt6 走 RHI qmlrhi 路线) | Qt5.4+/Qt6(widgets 与 Quick 双形态皆可) | 条件宏 `WITH_MDK`(默认关;闭源 SDK、需 key、约每月更新约束,见 `qtav-evaluation.md`) | 6(备选) |
 
-- 引擎选择:Config `videoengine` = "auto"|"processmpv"|"libmpv"|"qtmplayer";auto 按上述顺序探测(mpv 可执行文件在 PATH→present)。
+- 引擎选择:Config `videoengine` = "auto"|"cxvideo"|"processmpv"|"libmpv"|"qtmplayer"|"qtav"|"mdk";auto 按上述顺序探测(cxvideo 组件可链与内核探活→present;否则 mpv 可执行文件在 PATH→present)。
+
+### Qt6 双形态(widgets / QML-Quick)归属说明
+
+qlvotube 是 **Qt6 + Widgets**、qskvotube 是 **Qt6 + Quick/RHI**,两类前端在 Qt6 下的嵌入能力完全不同:
+
+| Qt6 形态 | 对应前端 | 可用嵌入引擎 |
+|---|---|---|
+| Widgets(QOpenGLWidget/QOpenGLWindow 路线) | qlvotube(q6) | CxVideo(主推荐)、ProcessMpv、QMediaPlayer、QtAV(digiKam fork,风险)、Mdk |
+| QML/Quick(RHI 场景图) | qskvotube(QSkinny) | **Mdk(qmlrhi)是唯一成熟的原生场景内嵌**;CxVideo 经 RendererProbe 以 QImage 帧回调模式接入(cxvideo-plan.md M5);ProcessMpv 仅浮窗/独立窗 |
+
+结论:QtAV 的 QML 渲染器在 Qt6 下死(RHI 重写被作者拒绝),故 Quick 侧内嵌只在 Mdk(闭源约束)与 CxVideo RendererProbe(我们的开源路)之间选择;工程主线维持 CxVideo + ProcessMpv。
 - StreamInfo 头映射到引擎参数:`httpHeaders` → mpv `--http-header-fields=`;`kind=separate` → 视频主 URL+`--audio-file=`;HLS/DASH 容器 mpv 原生;CMS m3u8 广告分片过滤按 host 黑名单(首版不做)。
 - B 站 Referer/UA 必传(引擎级统一注入)。
 
@@ -155,7 +169,10 @@ src/
   backend_cms.{h,cpp}   // LibreTV/Apple CMS
   backend_bili.{h,cpp}  // 内含 WbiSigner/QrPoll
   playerengine.{h,cpp}  // 接口 + 探测/工厂
+  engine_cxvideo.{h,cpp}// WITH_CXVIDEO:适配 anystik/cxvideo 的 CXVideoPlayer
   engine_mpvproc.{h,cpp}
   engine_libmpv.{h,cpp} // WITH_LIBMPV
   engine_qtmedia.{h,cpp}// WITH_QTMEDIA(Qt6)
+  engine_qtav.{h,cpp}   // WITH_QTAV(备选,默认不实例化)
+  engine_mdk.{h,cpp}    // WITH_MDK(备选,默认不实例化)
 ```
