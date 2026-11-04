@@ -1,0 +1,59 @@
+#ifndef CXENGINE_H
+#define CXENGINE_H
+
+#include "cxvideo_global.h"
+#include <qobject.h>
+#include <qstring.h>
+
+class CXVideoRenderer;
+
+// 引擎抽象(detail.md 第 3 节;UI 线程 API,线程→UI 经事件回投)
+class CXEngine : public QObject {
+    Q_OBJECT
+public:
+    virtual ~CXEngine() { }
+
+    virtual const char* name() const = 0;
+    virtual bool isAvailable() const = 0;
+
+    virtual bool open(const QString& url) { m_url = url; return true; }
+    virtual void close() { m_url = QString::null; }
+
+    virtual bool play() = 0;
+    virtual bool pause() = 0;
+    virtual bool stop() = 0;
+    virtual bool seek(long /*ms*/) { return false; }
+    virtual bool setRate(double /*r*/) { return false; }
+    virtual bool setVolume(int /*pct*/) { return false; }
+    virtual bool setMute(bool /*on*/) { return false; }
+
+    virtual long position() const { return 0; }
+    virtual long duration() const { return 0; }
+
+    // M1 起挂渲染器(renderer 由引擎侧驱动 showFrame)
+    virtual void setRenderer(CXVideoRenderer* r) { p_renderer = r; }
+    CXVideoRenderer* renderer() const { return p_renderer; }
+
+    const QString& url() const { return m_url; }
+
+signals:
+    void started();
+    void paused();
+    void stopped();
+    void finished();
+    void noticedError(int code, const QString& msg); // 避免与 QObject::error 撞名(Qt4)
+    void positionChanged(long ms);
+    void durationChanged(long ms);
+    void seekFinished(long ms);
+
+protected:
+    CXEngine() : QObject(), p_renderer(0) { }
+
+    QString m_url;
+    CXVideoRenderer* p_renderer;
+};
+
+// 工厂:按探测顺序返回可用引擎;无可用引擎返回 0
+CXEngine* cxEngineCreateDefault();
+
+#endif // CXENGINE_H
