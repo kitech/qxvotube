@@ -1,6 +1,7 @@
 #include "compat34.h"
 #include "cxvideoplayer.h"
 #include "cxengine.h"
+#include "eng_mpv.h"
 #include "renderer_probe.h"
 #include "cxframe.h"
 #ifdef QT3_BUILD
@@ -24,8 +25,13 @@ int main(int argc, char* argv[])
 #endif
     int failures = 0;
 
+    // Qt(QApplication/QCoreApplication 构造)会 setlocale(LC_ALL,"");
+    // libmpv 要求 LC_NUMERIC=C,须在 app 构造之后回拨(mpv 官方文档/示例)
+    cxSetLocaleNumericC();
+
     EXPECT(strcmp(CXVIDEO_VERSION, CXVIDEO_VERSION) == 0);
 
+    // ── 无引擎基线 ──
     CXVideoPlayer player;
     EXPECT(player.state() == CxStopped);
     EXPECT(player.position() == 0);
@@ -33,8 +39,7 @@ int main(int argc, char* argv[])
     EXPECT(player.volume() == 100);
     EXPECT(player.rate() == 1.0);
 
-    // M0:无可用内核,工厂恒 0,setEngine(Auto)==false 且不崩溃
-    EXPECT(!player.setEngine(CxEngineAuto));
+    EXPECT(!player.setEngine(CxEngineNone));
     EXPECT(player.engine() == 0);
     // open 无引擎走 CxErrEngine 路径
     EXPECT(!player.open("test.mp4"));
@@ -60,10 +65,23 @@ int main(int argc, char* argv[])
     f.width = 4;
     f.height = 4;
     f.isKey = true;
-    f.img = QImage(4, 4, 32);
+    f.img = cxNewImage(4, 4);
     f.img.fill(0);
     probe.showFrame(&f);
     probe.setPolling(false);
+
+    // ── 引擎探测(最后;cmdmpv 优先,其次 libmpv)──
+    if (player.setEngine(CxEngineAuto)) {
+        EXPECT(player.engine() != 0);
+        printf("engine probe: %s\n", player.engine()->name());
+        player.engine()->setHostWidget(0);
+        EXPECT(player.engine()->hostWidget() == 0);
+    } else {
+        printf("engine probe: none available (缺包降级)\n");
+    }
+    // libmpv 无头探测独立于工厂(cmdmpv 优先时也不跳过)
+    int libret = cxEngineMpvProbeLib();
+    EXPECT(libret == 0 || libret == 2);
 
     printf("cxvideo selftest: %d failures, version %s\n", failures, CXVIDEO_VERSION);
     return failures == 0 ? 0 : 1;

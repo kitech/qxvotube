@@ -1,12 +1,12 @@
 # cxvideo 详细设计
 
-对应 `cxvideo-plan.md` 的实施细节。目标仓:`anystik/cxvideo`;本文档为骨架任务与实现期代码契约。
+对应 `cxvideo-plan.md` 的实施细节。目标位置:本仓库 `cxvideo/qtav34/`;本文档为骨架任务与实现期代码契约。vendored 参照:`cxvideo/qtav56/`(原版快照,已去 qml)、`cxvideo/qtavqml/`(nejatafshar QML fork 快照)—— 溯源与差异统计见 `cxvideo/README.md`。
 
 ## 1. 目录结构
 
 ```
-anystik/cxvideo/
-  cxvideo.pri          qmake 集成(qlcomp 模式)
+cxvideo/qtav34/          (自研主线;qtav56/qtavqml 为同目录下 vendored 快照)
+  cxvideo.pri            qmake 集成(已实现,qlcomp compat34 复用)
   CMakeLists.txt       Qt5.15+/Qt6 可选
   src/
     cxvideo_global.h   版本/导出宏/compat 引入
@@ -211,7 +211,7 @@ while(!stop):
 
 ```
 # qlvotube.pro(qmake,Qt3~Qt6) 片段
-include($$PWD/../anystik/cxvideo/cxvideo.pri)
+include($$PWD/../cxvideo/qtav34/cxvideo.pri)
 # cxvideo.pri 内部: INCLUDEPATH + SRC 收集 + 平台库, 以及
 # Qt3: 加 CXVIDEO_QT3 define(Qt3 特征限定)
 # WITH_CX_ENGINE_MPV / WITH_CX_ENGINE_FFMPEG 条件宏按依赖探测定义(两内核默认恒编)

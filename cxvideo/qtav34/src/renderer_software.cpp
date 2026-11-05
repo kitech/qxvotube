@@ -3,7 +3,11 @@
 #include <qimage.h>
 
 CXRendererSoftware::CXRendererSoftware(QWidget* parent)
+#ifdef QT3_BUILD
     : QWidget(parent, 0)
+#else
+    : QWidget(parent)
+#endif
 {
     setMinimumSize(320, 180);
 }
@@ -41,7 +45,10 @@ void CXRendererSoftware::paintEvent(QPaintEvent*)
     int ih = img.height();
     if (iw <= 0 || ih <= 0)
         return;
-    double scale = qMin(double(s.width()) / iw, double(s.height()) / ih);
+    double scale = double(s.width()) / iw;
+    double scaleH = double(s.height()) / ih;
+    if (scaleH < scale)
+        scale = scaleH;
     int dw = int(iw * scale);
     int dh = int(ih * scale);
     int dx = (s.width() - dw) / 2;

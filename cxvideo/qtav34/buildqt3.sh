@@ -4,7 +4,7 @@ if [ x"$QTDIR" = x"" ]; then
     QTDIR=/opt/qt338sh
     export QTDIR
 fi
-HERE=`dirname "$0"`
+HERE=`cd $(dirname "$0") && pwd`
 cd "$HERE"
 
 mkdir -p build-qt3 && cd build-qt3

@@ -1,6 +1,6 @@
 #!/bin/sh
 set -x
-HERE=`dirname "$0"`
+HERE=`cd $(dirname "$0") && pwd`
 cd "$HERE"
 
 mkdir -p build-qt6 && cd build-qt6

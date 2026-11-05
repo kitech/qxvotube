@@ -120,7 +120,7 @@ public:
 
 | 引擎 | 实现 | 平台 | 编译 | 降级顺序 |
 |---|---|---|---|---|
-| **CxVideo** | `anystik/cxvideo` 共享组件(见 `cxvideo-plan.md`/`cxvideo-detail.md`):公共 API 一套,**双解码内核** CXEngineMpv(libmpv 内嵌)+ CXEngineFfmpeg(自研 FFmpeg 三线程管线);Qt3 X11/QPainter 渲染、Qt6 QOpenGLWidget | 全 Qt 版本(Qt3/4/5/6)——**唯一 Qt3 可用的内嵌引擎** | 条件宏 `WITH_CXVIDEO`(组件存在即开) | **1(主推荐)** |
+| **CxVideo** | 本仓库 `cxvideo/qtav34/` 自研组件(见 `cxvideo-plan.md`/`cxvideo-detail.md`/`cxvideo/README.md`):公共 API 一套,**双解码内核** CXEngineMpv(libmpv 内嵌)+ CXEngineFfmpeg(自研 FFmpeg 三线程管线);Qt3 X11/QPainter 渲染、Qt6 QOpenGLWidget | 全 Qt 版本(Qt3/4/5/6)——**唯一 Qt3 可用的内嵌引擎** | 条件宏 `WITH_CXVIDEO`(M0 骨架已双绿:Qt3/Qt6) | **1(主推荐)** |
 | ProcessMpv | QProcess 拉起 `mpv`(Linux `--wid=X11 winId`;Windows `--wid=HWND`;macOS 无必依赖 --wid,浮独立窗) | 全平台(需系统装 mpv;win 提供 portable 获取指引) | 恒编 | 2 |
 | LibMpv | 链接 libmpv OpenGL 渲染控件(qlmplayeradapter: Qt3 X11 用 XRENDER 纯 Qt/egl 已足、Qt6 自绘窗口) | linux/mac/win | 条件宏 `WITH_LIBMPV`(CI 默认关) | 3 |
 | QMediaPlayer | Qt6 only(win/mac 原生后端零额外依赖;linux 需 dev) | Qt6 build | 条件宏 `WITH_QTMEDIA` | 4 |
@@ -169,7 +169,7 @@ src/
   backend_cms.{h,cpp}   // LibreTV/Apple CMS
   backend_bili.{h,cpp}  // 内含 WbiSigner/QrPoll
   playerengine.{h,cpp}  // 接口 + 探测/工厂
-  engine_cxvideo.{h,cpp}// WITH_CXVIDEO:适配 anystik/cxvideo 的 CXVideoPlayer
+  engine_cxvideo.{h,cpp}// WITH_CXVIDEO:适配 cxvideo/qtav34 的 CXVideoPlayer
   engine_mpvproc.{h,cpp}
   engine_libmpv.{h,cpp} // WITH_LIBMPV
   engine_qtmedia.{h,cpp}// WITH_QTMEDIA(Qt6)

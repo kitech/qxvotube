@@ -4,7 +4,11 @@
 
 ## 定位
 
-**anystik/cxvideo** —— kitech/anystik 下的共享播放组件(与 qlappcom/qlcomp/qskcomp 同级),供 qxvotube/qlvotube/qskvotube 及后续 cx 系项目复用。设计通过符号链接 `../anystik/cxvideo` 引用,pollup_deps.sh 克隆 pull 进来。
+**qxvotube/cxvideo** —— 本仓库 `cxvideo/` 内的播放组件区,与源码同仓管理;供 qlvotube/qskvotube 复用。自研主目录 `cxvideo/qtav34`,另有两份 vendored 参照快照(见 `cxvideo/README.md`):
+
+- `cxvideo/qtav56/` —— wang-bin/QtAV 原版 master 快照(`18499f72`,2025-08-16),已删其 `qml/` 模块(widgets-only)
+- `cxvideo/qtavqml/` —— nejatafshar/QtAV fork 快照(`8af333e9`,2023-02),统一静态库含 QML,Qt5
+- 机制基准以 qtav56 为准(fork 与原版互不包含,86 文件级差异);qtavqml 仅 QML 参考
 
 - **一句话**:QtAV 的机制(三线程、渲染器抽象、时钟同步)+ mdk 的封装思路(libmpv 内核可选)+ **Qt3 首等公民**(这恰是两者都做不到的)→ 我们自己的跨 Qt 播放框架。
 - **API 兼容承诺**:同一组头文件、同一公共 API 在 **Qt3/Qt4/Qt5(可选)/Qt6** 全版本编译通过,业务码零 #ifdef(排除 Qt3 特征不足之处与 compat34 宏,见 cxvideo-detail.md)。
@@ -14,7 +18,7 @@
 
 | 决策点 | 结论 |
 |---|---|
-| 放置 | anystik 仓库 `cxvideo/`(另一仓库,骨架另立任务) |
+| 放置 | 本仓库 `cxvideo/qtav34/`(自研主线);`cxvideo/qtav56/` 与 `cxvideo/qtavqml/` 为 vendored 参照快照(详 `cxvideo/README.md`) |
 | 公共 API 风格 | QtAV 风格照搬改名:CXVideoPlayer / CXVideoRenderer / setRenderer / play / state 信号(详表见 cxvideo-detail.md) |
 | 解码内核 | **两个都要**:`CXEngineMpv`(libmpv C-API 内嵌)+ `CXEngineFfmpeg`(全自研 FFmpeg 线程管线);运行时枚举选择,失败自动降级 |
 | 功能目标 | 完整功能(对齐 QtAV 功能面):轨道选择/字幕/倍速/EQ/截图/硬解;分里程碑交付 |
@@ -54,7 +58,7 @@
 
 ## 构建
 
-- `cxvideo.pri`(qmake,qlcomp 模式):调用方 `include($$PWD/../anystik/cxvideo/cxvideo.pri) 或 INCLUDEPATH+LIBS`;Qt3 需 `CONFIG += qt32x` 兼容开关。
+- `cxvideo.pri`(qmake,qlcomp 模式):调用方 `include($$PWD/../cxvideo/qtav34/cxvideo.pri)`(M0 起新仓布局);Qt3 定义由 pri/调用方注入 `QT3_BUILD`(与 qlvotube 同款 isEmpty(QT_VERSION) 自判)。
 - `CMakeLists.txt`(可选,Qt5.15+/Qt6,布局与 qskcomp.cmake 对齐)。
 - 依赖:libmpv(M1 内核,系统包/自编译);FFmpeg(libavformat/avcodec/swscale/swresample ≥4.0,M2 内核);OpenALSoft/PulseAudio(M2);libass(可选,M3);libva/dxva(M4,条件编译)。
 - 代码不引用视频相关 Qt 模块(不用 QtMultimedia);Qt6 私有头只在 CXRendererGL 条件编译内使用,保持主模块干净。

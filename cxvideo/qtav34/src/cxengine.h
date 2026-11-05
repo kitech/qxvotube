@@ -6,6 +6,7 @@
 #include <qstring.h>
 
 class CXVideoRenderer;
+class QWidget;
 
 // 引擎抽象(detail.md 第 3 节;UI 线程 API,线程→UI 经事件回投)
 class CXEngine : public QObject {
@@ -17,7 +18,7 @@ public:
     virtual bool isAvailable() const = 0;
 
     virtual bool open(const QString& url) { m_url = url; return true; }
-    virtual void close() { m_url = QString::null; }
+    virtual void close() { m_url = QString(); }
 
     virtual bool play() = 0;
     virtual bool pause() = 0;
@@ -34,6 +35,10 @@ public:
     virtual void setRenderer(CXVideoRenderer* r) { p_renderer = r; }
     CXVideoRenderer* renderer() const { return p_renderer; }
 
+    // 宿主窗口(mpv wid 内嵌用;Qt3 渲染主路)
+    virtual void setHostWidget(QWidget* w) { p_host = w; }
+    QWidget* hostWidget() const { return p_host; }
+
     const QString& url() const { return m_url; }
 
 signals:
@@ -47,13 +52,16 @@ signals:
     void seekFinished(long ms);
 
 protected:
-    CXEngine() : QObject(), p_renderer(0) { }
+    CXEngine() : QObject(), p_renderer(0), p_host(0) { }
 
     QString m_url;
     CXVideoRenderer* p_renderer;
+    QWidget* p_host;
 };
 
-// 工厂:按探测顺序返回可用引擎;无可用引擎返回 0
+// 工厂:按类型创建(未实现内核返回 0);Auto→cxEngineCreateDefault
+CXEngine* cxEngineCreateFor(CxEngineType type);
+// auto 链:cmdmpv → libmpv(dlopen)→ ffmpeg(M2);全缺返回 0
 CXEngine* cxEngineCreateDefault();
 
 #endif // CXENGINE_H

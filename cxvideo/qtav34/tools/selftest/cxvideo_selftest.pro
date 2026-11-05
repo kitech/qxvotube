@@ -1,5 +1,6 @@
 TEMPLATE = app
 TARGET = cxvideo_selftest
+QT = core gui widgets
 
 CONFIG += moc
 VERSION = 0.1.0

@@ -8,11 +8,14 @@
 
 #define CXVIDEO_VERSION "0.1.0"
 
-// 引擎选择(auto 由工厂探测顺序决定,见 detail.md 引擎矩阵)
+// 引擎选择(auto 由工厂探测顺序决定,见 detail.md 引擎矩阵;
+// libmpv 与 cmdmpv 分引擎实现,探测顺序按用户要求 cmdmpv 优先)
 enum CxEngineType {
-    CxEngineAuto = 0,
-    CxEngineMpv = 1,      // libmpv C-API 内嵌
-    CxEngineFfmpeg = 2    // 自研 FFmpeg 三线程管线
+    CxEngineNone = 0,
+    CxEngineAuto,
+    CxEngineMpv,          // libmpv C-API 内嵌(dlopen)
+    CxEngineMpvCmd,       // mpv 命令行子进程(M1)
+    CxEngineFfmpeg        // 自研 FFmpeg 三线程管线
 };
 
 // 状态机(对应 QtAV State Playing/Paused/Stopped)
@@ -34,5 +37,9 @@ enum CxErrorCode {
     CxErrEngine = -15,       // 引擎底层错误
     CxErrWindowLost = -16    // 内嵌宿主窗口被销毁
 };
+
+// Locale 保底修复(mpv 硬性需求;详见 cxmpv_api.cpp 注释):
+// 在 QCoreApplication/QApplication 构造之后、第一次触碰播放器之前调用一次
+void cxSetLocaleNumericC();
 
 #endif // CXVIDEO_GLOBAL_H

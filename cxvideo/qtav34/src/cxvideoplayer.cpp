@@ -21,9 +21,10 @@ bool CXVideoPlayer::setEngine(CxEngineType type)
 {
     unwireEngine();
     m_engine = 0;
-    if (type == CxEngineAuto || type == CxEngineMpv || type == CxEngineFfmpeg) {
+    if (type == CxEngineAuto)
         m_engine = cxEngineCreateDefault();
-    }
+    else
+        m_engine = cxEngineCreateFor(type);
     wireEngine();
     return m_engine != 0;
 }
@@ -147,7 +148,7 @@ void CXVideoPlayer::wireEngine()
     connect(m_engine, SIGNAL(positionChanged(long)), this, SLOT(enginePositionChanged(long)));
     connect(m_engine, SIGNAL(durationChanged(long)), this, SLOT(engineDurationChanged(long)));
     connect(m_engine, SIGNAL(seekFinished(long)), this, SLOT(engineSeekFinished(long)));
-    connect(m_engine, SIGNAL(noticedError(int,QString)), this, SLOT(engineError(int,QString)));
+    connect(m_engine, SIGNAL(noticedError(int,const QString&)), this, SLOT(engineError(int,const QString&)));
 }
 
 void CXVideoPlayer::unwireEngine()

@@ -16,6 +16,7 @@ int main(int argc, char* argv[])
     }
 
     QApplication app(argc, argv);
+    cxSetLocaleNumericC(); // Qt 抢 locale 后回拨(mpv 硬性需求)
 
     if (showVersion) {
         printf("cxvideo_demo (qtav34) %s\n", CXVIDEO_VERSION);
@@ -37,7 +38,7 @@ int main(int argc, char* argv[])
     f.width = 64;
     f.height = 64;
     f.isKey = true;
-    f.img = QImage(64, 64, 32);
+    f.img = cxNewImage(64, 64);
     f.img.fill(0xff3366aa);
     view.showFrame(&f);
 
