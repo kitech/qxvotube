@@ -82,6 +82,10 @@ inline std::vector<Playlist> buildTestLibrary()
     p1.id = 1;
     p1.name = qFromUtf8("华语流行精选");
     p1.coverSeed = "pl-cpop";
+    /* 首条为 cxvideo_selftest --play-probe 生成的 1 秒静音 wav(实～播验证) */
+    p1.tracks.push_back(makeTrack(10, "测试音(本地1s)", "cxvideo",
+                                  "selftest", 1, "t-10",
+                                  "/tmp/opencode/cxvideo_selftest.wav"));
     p1.tracks.push_back(makeTrack(11, "夜空中最亮的星", "逃跑计划", "世界", 252, "t-11"));
     p1.tracks.push_back(makeTrack(12, "起风了", "买辣椒也用券", "起风了", 325, "t-12"));
     p1.tracks.push_back(makeTrack(13, "平凡之路", "朴树", "猎户星座", 304, "t-13"));

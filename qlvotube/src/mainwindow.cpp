@@ -24,6 +24,8 @@
 #include "userinfopanel.h"
 
 #include "compat34.h"
+#include "cxvideoplayer.h"
+#include "cxengine.h"
 #include "appearance.h"
 #include <qlabel.h>
 #include <qpushbutton.h>
@@ -107,6 +109,7 @@ MainWindow::MainWindow(QWidget* parent)
     , contentView(0)
     , queuePanel(0)
     , playerBar(0)
+    , m_player(0)
     , bodySplitter(0)
     , m_curPlaylistId(0)
     , m_curTrackIndex(-1)
@@ -123,6 +126,10 @@ MainWindow::MainWindow(QWidget* parent)
     , m_darkMenu(0)
     , forceQuit(false)
 {
+    /* Qt 抢占 locale 后回拨(mpv lib 内核硬性要求;首次触播前必须)
+     * 如 main() 后置连接更宜,但确保先于引擎第一次 open 调用即可 */
+    cxSetLocaleNumericC();
+
     // 初始化本地存储（对照 qldox mainwindow.cpp:513-521）
     QString dataDir = qGetHomePath() + "/.cache/qlvotube";
     Storage::instance().init(
@@ -266,7 +273,23 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onPrev()));
         QObject::connect(playerBar, SIGNAL(nextRequested()),
                          this, SLOT(onNext()));
+        QObject::connect(playerBar, SIGNAL(seekRequested(int)),
+                         this, SLOT(onSeekRequested(long)));
     }
+
+    /* 播放引擎接线(掌面延迟:首次选曲时真正 setEngine) */
+    m_player = new CXVideoPlayer(this);
+    m_player->setHostWidget(0); // M1: cmdmpv 内核自开窗口;UI 内嵌窗格 M2 排布
+
+    /* 引擎回执接线(进程型 cmdmpv 为 M1 主线;started/finished 已映射) */
+    QObject::connect(m_player, SIGNAL(started()), this, SLOT(onPlayerStarted()));
+    QObject::connect(m_player, SIGNAL(paused()), this, SLOT(onPlayerPaused()));
+    QObject::connect(m_player, SIGNAL(stopped()), this, SLOT(onPlayerStopped()));
+    QObject::connect(m_player, SIGNAL(finished()), this, SLOT(onPlayerFinished()));
+    QObject::connect(m_player, SIGNAL(positionChanged(long)), this, SLOT(onPlayerPosition(long)));
+    QObject::connect(m_player, SIGNAL(durationChanged(long)), this, SLOT(onPlayerDuration(long)));
+    QObject::connect(m_player, SIGNAL(noticedError(int,const QString&)),
+                     this, SLOT(onPlayerError(int,const QString&)));
 
     framelessHelper = new FramelessHelper(this);
     framelessHelper->setup(this);
@@ -516,6 +539,9 @@ void MainWindow::closeEvent(QCloseEvent* event)
         event->ignore();
         return;
     }
+    /* 借关闭事件明确停播:cmdmpv 走 killProcess;libmpv 走 terminate */
+    if (m_player != 0 && m_player->engine() != 0)
+        m_player->close();
     event->accept();
 }
 
@@ -641,10 +667,35 @@ void MainWindow::showTrackStub(int playlistId, int trackIndex)
     queuePanel->setQueue(pl->tracks, trackIndex);
     sideNav->setCurrentPlaylist(playlistId);
 
-    /* 播放引擎未接入：仅同步 UI（队列/进度条）并提示 */
-    playerBar->setPlaying(false);
-    SharedStatusBar::instance()->showMessage(
-        _("player.no_media") + qFromUtf8(" ") + t.title, 4000);
+    /* 曲目有 url → 走引擎;无 url 才占位提示(backend-abstraction.md Phase 1)
+     * url 待折叠:(仅 None);resolve 属后续 Phase 拉取 */
+    if (t.url.isEmpty()) {
+        playerBar->setPlaying(false);
+        SharedStatusBar::instance()->showMessage(
+            _("player.no_media") + qFromUtf8(" ") + t.title, 4000);
+    } else {
+        tryPlayTrack(t);
+    }
+}
+
+void MainWindow::ensurePlayerReady()
+{
+    if (m_player == 0)
+        return;
+    if (m_player->engine() == 0)
+        m_player->setEngine(CxEngineAuto); // cmdmpv→libmpv 探测链(auto)
+}
+
+void MainWindow::tryPlayTrack(const Track& t)
+{
+    ensurePlayerReady();
+    if (m_player == 0 || m_player->engine() == 0) {
+        SharedStatusBar::instance()->showMessage(
+            _("player.no_media") + qFromUtf8(" ") + t.title, 4000);
+        return;
+    }
+    m_player->open(t.url);
+    m_player->play(); // 外观层 play() 为 void;失败路径经 noticedError 走状态栏
 }
 
 void MainWindow::onTrackActivated(int playlistId, int trackIndex)
@@ -741,8 +792,67 @@ void MainWindow::onNavAction(int action)
 
 void MainWindow::onPlayPause()
 {
-    /* 播放引擎未接入：UI 壳演示 */
-    SharedStatusBar::instance()->showMessage(qFromUtf8("播放引擎未接入"), 2000);
+    if (m_player == 0 || m_player->engine() == 0) {
+        SharedStatusBar::instance()->showMessage(qFromUtf8("播放引擎未接入"), 2000);
+        return;
+    }
+    if (m_player->state() == CxPlaying)
+        m_player->pause();
+    else if (m_player->state() == CxPaused)
+        m_player->play();
+    else if (m_curPlaylistId >= 0 && m_curTrackIndex >= 0) {
+        /* 空闲状态点 Play:从选中曲目起播 */
+        const Playlist* pl = findPlaylist(m_library, m_curPlaylistId);
+        if (pl && m_curTrackIndex < (int)pl->tracks.size())
+            tryPlayTrack(pl->tracks[m_curTrackIndex]);
+    }
+}
+
+/* ── 播放引擎回执(cxvideo M1)── */
+void MainWindow::onPlayerStarted()
+{
+    if (playerBar) playerBar->setPlaying(true);
+}
+
+void MainWindow::onPlayerPaused()
+{
+    if (playerBar) playerBar->setPlaying(false);
+}
+
+void MainWindow::onPlayerStopped()
+{
+    if (playerBar) playerBar->setPlaying(false);
+}
+
+void MainWindow::onPlayerFinished()
+{
+    if (playerBar) playerBar->setPlaying(false);
+    /* 简易连播:顺序换下一首(引擎 finished 后 UI 流迁移) */
+    onNext();
+}
+
+void MainWindow::onPlayerPosition(long ms)
+{
+    if (playerBar) playerBar->setProgress((int)ms);
+}
+
+void MainWindow::onPlayerDuration(long ms)
+{
+    if (playerBar) playerBar->setDuration((int)ms);
+}
+
+void MainWindow::onPlayerError(int code, const QString& msg)
+{
+    (void)code;
+    if (playerBar) playerBar->setPlaying(false);
+    SharedStatusBar::instance()->showMessageTyped(msg, StatusError, 4000);
+}
+
+void MainWindow::onSeekRequested(long ms)
+{
+    /* cmdmpv 进程型 M1 暂不支持外控(M2 接 IPC);libmpv 内核可精细 seek */
+    if (m_player != 0 && m_player->engine() != 0)
+        m_player->seek(ms);
 }
 
 void MainWindow::onPrev()

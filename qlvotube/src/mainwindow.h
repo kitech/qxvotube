@@ -19,6 +19,7 @@ class SideNav;
 class ContentView;
 class QueuePanel;
 class PlayerBar;
+class CXVideoPlayer;
 class QSplitter;
 
 class MainWindow : public QMainWindow {
@@ -58,6 +59,16 @@ private slots:
     void onPrev();
     void onNext();
 
+    /* 播放引擎接线(cxvideo/qtav34;backend-abstraction.md Phase 1) */
+    void onPlayerStarted();
+    void onPlayerPaused();
+    void onPlayerStopped();
+    void onPlayerFinished();
+    void onPlayerPosition(long ms);
+    void onPlayerDuration(long ms);
+    void onPlayerError(int code, const QString& msg);
+    void onSeekRequested(long ms);
+
 private:
     struct MenuItemRef {
         const char* key;
@@ -85,6 +96,10 @@ private:
     void buildTray();
 
     void showTrackStub(int playlistId, int trackIndex);
+    void tryPlayTrack(const Track& t);
+    void ensurePlayerReady();
+
+    CXVideoPlayer* m_player;  /* 布局时段内建(CXVideoPlayer 见 cxvideo 说明) */
 
     void addMenuItem(void* menu, const QObject* receiver, const char* slot,
                      const char* key, bool darkToggle = false);

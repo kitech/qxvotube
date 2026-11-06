@@ -70,6 +70,8 @@ CXEngineMpvCmd::~CXEngineMpvCmd()
     m_url = QString();
 }
 
+// 环境旋钮(测试 headless 用;生产无设定时不追加):
+// CX_MPV_AO / CX_MPV_VO = 输出后端名(null / alsa / pulse ...)
 static void cxMpvCmdAppendArgs(QStringList& args)
 {
     // 进程型,输出静默,不抢键盘;播放结束即退出(keep-open=no)
@@ -81,6 +83,12 @@ static void cxMpvCmdAppendArgs(QStringList& args)
     args += "--pause=no";
     args += "--cache=yes";
     args += "--keep-open=no";
+    const char* ao = getenv("CX_MPV_AO");
+    if (ao != 0 && ao[0] != '\0')
+        args += QString("--ao=") + ao;
+    const char* vo = getenv("CX_MPV_VO");
+    if (vo != 0 && vo[0] != '\0')
+        args += QString("--vo=") + vo;
 }
 
 bool CXEngineMpvCmd::open(const QString& url)
@@ -120,7 +128,8 @@ bool CXEngineMpvCmd::open(const QString& url)
         return false;
     }
 #else // QT3_BUILD
-    // Qt3: QProcess::addArgument 逐个加入,start() 返回 bool
+    // Qt3: QProcess 无独立 program 参数;args[0]=mpv 路径,余为选项
+    proc->addArgument(m_binPath);
     const QStringList::Iterator itEnd = args.end();
     for (QStringList::Iterator it = args.begin(); it != itEnd; ++it)
         proc->addArgument(*it);

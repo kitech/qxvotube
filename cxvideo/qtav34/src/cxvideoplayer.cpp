@@ -29,10 +29,15 @@ bool CXVideoPlayer::setEngine(CxEngineType type)
     return m_engine != 0;
 }
 
-void CXVideoPlayer::setRenderer(CXVideoRenderer* r)
-{
+void CXVideoPlayer::setRenderer(CXVideoRenderer* r){
     if (m_engine != 0)
         m_engine->setRenderer(r);
+}
+
+void CXVideoPlayer::setHostWidget(QWidget* w)
+{
+    if (m_engine != 0)
+        m_engine->setHostWidget(w);
 }
 
 bool CXVideoPlayer::open(const QString& url)
@@ -42,12 +47,12 @@ bool CXVideoPlayer::open(const QString& url)
     m_volume = 100;
     m_muted = false;
     if (m_engine == 0) {
-        emit error(CxErrEngine, "no engine available");
+        emit noticedError(CxErrEngine, "no engine available");
         return false;
     }
     bool ok = m_engine->open(url);
     if (!ok) {
-        emit error(CxErrOpenFail, url);
+        emit noticedError(CxErrOpenFail, url);
         return false;
     }
     return true;
@@ -163,4 +168,4 @@ void CXVideoPlayer::engineFinished() { setState(CxStopped); }
 void CXVideoPlayer::enginePositionChanged(long ms) { Q_UNUSED(ms); }
 void CXVideoPlayer::engineDurationChanged(long ms) { Q_UNUSED(ms); }
 void CXVideoPlayer::engineSeekFinished(long ms) { Q_UNUSED(ms); }
-void CXVideoPlayer::engineError(int code, const QString& msg) { emit error(code, msg); }
+void CXVideoPlayer::engineError(int code, const QString& msg) { emit noticedError(code, msg); }

@@ -7,6 +7,7 @@
 
 class CXEngine;
 class CXVideoRenderer;
+class QWidget;
 
 // 公共编排层(QtAV 风格照搬,detail.md 第 2/3 节)
 class CXVideoPlayer : public QObject {
@@ -20,6 +21,7 @@ public:
     CXEngine* engine() const { return m_engine; }
 
     void setRenderer(CXVideoRenderer* r);
+    void setHostWidget(QWidget* w);
 
     bool open(const QString& url);
     void close();
@@ -47,7 +49,7 @@ signals:
     void positionChanged(long ms);
     void durationChanged(long ms);
     void seekFinished(long ms);
-    void error(int code, const QString& msg);
+    void noticedError(int code, const QString& msg);
 
 private slots:
     void engineStarted();

@@ -6,7 +6,6 @@ CXVIDEO = $$PWD
 QLCOMP34 = $$PWD/../../qlcomp
 
 CXVIDEO_CPP = \
-    $$QLCOMP34/compatcore34.cpp \
     $$CXVIDEO/src/cxmpv_api.cpp \
     $$CXVIDEO/src/eng_mpv_cmd.cpp \
     $$CXVIDEO/src/cxthread.cpp \
@@ -16,6 +15,11 @@ CXVIDEO_CPP = \
     $$CXVIDEO/src/cxvideoplayer.cpp \
     $$CXVIDEO/src/renderer_software.cpp \
     $$CXVIDEO/src/renderer_probe.cpp
+
+# compatcore34 归属 qlcomp;qlite.pri 的 compat34.cpp 内部已 include 它,
+# 宿主工程若已含 compat34(qlite)则不重复编,独立工程(cxvideo 自测)才补编:
+BASEHOST_HAS_CORE = $$find(SOURCES, compat34)
+isEmpty(BASEHOST_HAS_CORE): CXVIDEO_CPP = $$QLCOMP34/compatcore34.cpp $$CXVIDEO_CPP
 
 CXVIDEO_HDR = \
     $$CXVIDEO/src/cxvideo_global.h \

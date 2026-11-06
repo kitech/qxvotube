@@ -120,14 +120,14 @@ public:
 
 | 引擎 | 实现 | 平台 | 编译 | 降级顺序 |
 |---|---|---|---|---|
-| **CxVideo** | 本仓库 `cxvideo/qtav34/` 自研组件(见 `cxvideo-plan.md`/`cxvideo-detail.md`/`cxvideo/README.md`):公共 API 一套,**双解码内核** CXEngineMpv(libmpv 内嵌)+ CXEngineFfmpeg(自研 FFmpeg 三线程管线);Qt3 X11/QPainter 渲染、Qt6 QOpenGLWidget | 全 Qt 版本(Qt3/4/5/6)——**唯一 Qt3 可用的内嵌引擎** | 条件宏 `WITH_CXVIDEO`(M0 骨架已双绿:Qt3/Qt6) | **1(主推荐)** |
+| **CxVideo** | 本仓库 `cxvideo/qtav34/` 自研组件(见 `cxvideo-plan.md`/`cxvideo-detail.md`/`cxvideo/README.md`):公共 API 一套,**三引擎** `CXEngineMpvCmd`(mpv 命令行子进程)+ CXEngineMpv(libmpv dlopen 内嵌)+ CXEngineFfmpeg(自研 FFmpeg 三线程管线,M2);Qt3 X11/QPainter 渲染、Qt6 QOpenGLWidget **| 全 Qt 版本(Qt3/4/5/6)——**唯一 Qt3 可用的内嵌引擎**;cmdmpv/libmpv 分引擎,探测顺序 cmdmpv 优先(用户约定) | `WITH_CX_VIDEO`(M0 骨架 & M1 mpv 双内核已双绿:Qt3/Qt6,实播探针过) | **1(主推荐)** |
 | ProcessMpv | QProcess 拉起 `mpv`(Linux `--wid=X11 winId`;Windows `--wid=HWND`;macOS 无必依赖 --wid,浮独立窗) | 全平台(需系统装 mpv;win 提供 portable 获取指引) | 恒编 | 2 |
 | LibMpv | 链接 libmpv OpenGL 渲染控件(qlmplayeradapter: Qt3 X11 用 XRENDER 纯 Qt/egl 已足、Qt6 自绘窗口) | linux/mac/win | 条件宏 `WITH_LIBMPV`(CI 默认关) | 3 |
 | QMediaPlayer | Qt6 only(win/mac 原生后端零额外依赖;linux 需 dev) | Qt6 build | 条件宏 `WITH_QTMEDIA` | 4 |
 | QtAV | wang-bin/QtAV 或 digiKam fork(仅 Qt4/Qt5 可用;Qt6 需 digiKam fork 且无 QML,闭门维护,风险高,见 `qtav-evaluation.md`) | Qt4/Qt5/Qt6-widgets | 条件宏 `WITH_QTAV`(默认关,不入 CI) | 5(备选) |
 | Mdk | wang-bin/mdk-sdk(QMDKWidgetRenderer=QOpenGLWidget/QOpenGLWindow;QML Qt6 走 RHI qmlrhi 路线) | Qt5.4+/Qt6(widgets 与 Quick 双形态皆可) | 条件宏 `WITH_MDK`(默认关;闭源 SDK、需 key、约每月更新约束,见 `qtav-evaluation.md`) | 6(备选) |
 
-- 引擎选择:Config `videoengine` = "auto"|"cxvideo"|"processmpv"|"libmpv"|"qtmplayer"|"qtav"|"mdk";auto 按上述顺序探测(cxvideo 组件可链与内核探活→present;否则 mpv 可执行文件在 PATH→present)。
+- 引擎选择:Config `videoengine` = "auto"|"cxvideo"|"processmpv"|"libmpv"|"qtmplayer"|"qtav"|"mdk";auto 按上述顺序探测(**CxVideo 内部先链 cmdmpv 可执行文件 PATH 探测,再 libmpv dlopen**;可执行文件在 PATH→present;组件可链与内核探活→present)。
 
 ### Qt6 双形态(widgets / QML-Quick)归属说明
 

@@ -35,6 +35,8 @@ HEADERS = src/mainwindow.h src/appearance.h src/config.h src/globaluiutil.h \
           ../qlappcom/eventpoller.h
 
 include(../qlcomp/qlite.pri)
+# 播放引擎:cmdmpv → libmpv 探测顺序(见 docs/cxvideo-detail.md)
+include(../cxvideo/qtav34/cxvideo.pri)
 INCLUDEPATH += ../qlcomp
 INCLUDEPATH += ../qlappcom
 INCLUDEPATH += src

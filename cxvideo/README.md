@@ -35,18 +35,25 @@ qtavqml 与 qtav56 是同一祖先的**两个独立快照,互不包含**:
 qlvotube.pro 内:
 include($$PWD/../cxvideo/qtav34/cxvideo.pri)
 ```
-- 内核探测(M1/M2 启用,见 cxvideo.pri 注释段):pkg-config 探到 libmpv
-  定义 `WITH_CX_ENGINE_MPV`,探到 libavformat/libavcodec 定义
-  `WITH_CX_ENGINE_FFMPEG`;缺包自动关宏降级(恒编但可条件关)。
-- 复用 `qlcomp/compat34.h`(`INCLUDEPATH += ../../qlcomp`,由 pri 自动注入)。
+- 内核实况(M1 后):
+  - `WITH_CX_ENGINE_MPV` 恒开,libmpv 走 **dlopen**(不链 -lmpv;缺包 isAvailable() false 自动降级);
+  - `WITH_CX_ENGINE_FFMPEG` 预留 M2(pkg-config 探到 libavformat/libavcodec 才启用);
+  - **cmdmpv 内核(runtime PATH 探测 `command -v mpv`)** 恒编;
+  - **探测顺序:cmdmpv → libmpv → ffmpeg(M2)**(用户约定 cmdmpv 优先)。
+- 复用 `qlcomp/compat34.h`(`INCLUDEPATH += ../../qlcomp`,由 pri 自动注入);
+  宿主工程已有 compat34.cpp(qlite.pri)时 pri 自动跳过 compatcore34.cpp 重编。
 - 构建:`./buildqt3.sh`(Qt3=/opt/qt338sh)/ `./buildqt6.sh`(Qt6=/opt/qt/6.7.3);
   顺序编译、不并行(约定同 qlvotube);产物 `build-qt3*/q3cxv` 等及
   `selftest`(无 GUI 自测,当前 `0 failures`)。
+- **locale**:凡接 CXVideoPlayer 的程序入口须在 QApp 构造后调用
+  `cxSetLocaleNumericC()`(libmpv 硬性要求 LC_NUMERIC=C,见 detail.md §7.1)。
+- 实播自测:`cxvideo_selftest --play-probe` 用 cmdmpv 进程生命周期回环验证。
 
 ## 里程碑对照(docs/cxvideo-plan.md)
 
-M0 ✅(本骨架:接口可链,Qt3/Qt6 双绿)→ M1 eng_mpv → M2 eng_ffmpeg 软解 →
+M0 ✅(接口可链)→ **M1 ✅(eng_mpv libmpv 内嵌 + eng_mpv_cmd cmdmpv 子进程;Qt3/Qt6 双绿,实播探针过)** → M2 eng_ffmpeg 软解 →
 M3 全功能(字幕/轨道/倍速/EQ)→ M4 硬解 → M5 接入 qlvotube+qskvotube。
+(注:M5 的 qlvotube 侧接线已先期落地:mainwindow 内 CXVideoPlayer + cxSetLocaleNumericC。)
 
 ## 局限备忘
 

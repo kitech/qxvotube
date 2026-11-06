@@ -178,6 +178,20 @@ while(!stop):
 - 属性/命令映射:时长/进度 = `mpv_observe_property(time-pos / duration)`;seek = `seek <t> absolute`;倍速 = `set speed`;轨选 = `set aid/sid`;外挂字幕 = `sub-add <path>`;错误 = `mpv_event_end_file.reason`(甄别 error vs eof)。
 - 事件泵:自备轻线程 `mpv_wait_event(-1)` → 转成 QCustomEvent 回投(cxthread 完成)。
 
+### 7.1 M1 实装记录(2026-11,Qt3/Qt6 双绿)
+
+- **双引擎分轨**(用户约定):libmpv 与 cmdmpv **分开实现**;
+  - `CXEngineMpvCmd`(eng_mpv_cmd.{h,cpp}):mpv 命令行子进程,QProcess 生命周期映射 started/finished;M1 只承诺进程级开/停(play/pause/seek 交 M2 IPC 扩展)。
+  - `CXEngineMpv`(eng_mpv.{h,cpp}):libmpv dlopen 精细控制(wid 内嵌、observe、命令)。
+  - **探测顺序:cmdmpv 优先**(cxengine.cpp);
+  - 工厂:`cxEngineCreateFor(type)`(按枚举)/`cxEngineCreateDefault()`(cmdmpv→libmpv→ffmpeg M2)。
+- **libmpv 缺包降级**:dlopen 探测,不链 -lmpv;`isAvailable()` false 即跳过(qlcomp 兼容面不变)。
+- **locale 硬需求**:libmpv `check_locale()` 要求 `LC_NUMERIC ∈ {C, C.UTF-8}`,否则 `mpv_create()` 返回 NULL(mpv player/main.c;Qt 官方文档亦明示 QApp 构造会 `setlocale(LC_ALL,"")` 抢走);化解 = 在 QCoreApplication/QApplication 构造之后调用 `cxSetLocaleNumericC()`(cxvideo_global.h 声明,mpv-examples qt_opengl 官方示例同法)。selftest/demo/qlvotube 已挂,ensure() 内另有兜底。
+- **Qt3 信号坑**:connect **基类声明**的信号(如 CXEngine::noticedError)在**派生类实例**上必须用 moc 原样规格 `int,const QString&`;`int,QString` 归一化仅在 Qt6 生效——两套 connect 串按 `const QString&` 书写,Qt3/Qt6 通吃。
+- **Qt::QByteArray**:Qt3 是 QMemArray<char>,无 constData(),统一 `.data()`。
+- 进度遥测:`mpv_observe_property(DOUBLE)`(time-pos/duration);事件泵线程 0.2s `mpv_wait_event` → CustomEvent 4002 → UI 线程派发(state 事件只映射 FILE_LOADED/END_FILE/IDLE/PLAYBACK_RESTART)。
+- selftest 长跑:`cxvideo_selftest --play-probe`(cars 生成 1s 静音 WAV → cmdmpv 进程生命周期回环);环境旋钮 `CX_MPV_AO`/`CX_MPV_VO` 控 mpv 输出后端(headless CI 用 null)。
+
 ## 8. Qt3 兼容层(逐条)
 
 | Qt5/6 用法 | Qt3 等价 / 化解 |
