@@ -12,6 +12,7 @@ CXVIDEO_CPP = \
     $$CXVIDEO/src/cxengine.cpp \
     $$CXVIDEO/src/eng_mpv.cpp \
     $$CXVIDEO/src/eng_ffmpeg.cpp \
+    $$CXVIDEO/src/cxffdec.cpp \
     $$CXVIDEO/src/cxvideoplayer.cpp \
     $$CXVIDEO/src/renderer_software.cpp \
     $$CXVIDEO/src/renderer_probe.cpp
@@ -25,6 +26,11 @@ CXVIDEO_HDR = \
     $$CXVIDEO/src/cxvideo_global.h \
     $$CXVIDEO/src/cxthread.h \
     $$CXVIDEO/src/cxframe.h \
+    $$CXVIDEO/src/cxpqueue.h \
+    $$CXVIDEO/src/cxff_wrap.h \
+    $$CXVIDEO/src/cxffdec.h \
+    $$CXVIDEO/src/cxffdemux.h \
+    $$CXVIDEO/src/cxffvthread.h \
     $$CXVIDEO/src/cxrenderer.h \
     $$CXVIDEO/src/renderer_software.h \
     $$CXVIDEO/src/renderer_probe.h \
@@ -47,8 +53,20 @@ unix {
 # mpv 内核走 dlopen(源内 cxmpv_api),不链 -lmpv;缺失包时
 # CXEngineMpv::isAvailable() 恒 false,自动降级为"无可用内核"
 DEFINES += WITH_CX_ENGINE_MPV
-# FF_DEPS = $$system(pkg-config --libs libavformat libavcodec 2>/dev/null)
-# !isEmpty(FF_DEPS) {
-#   LIBS += $$FF_DEPS -lswresample -lswscale
-#   DEFINES += WITH_CX_ENGINE_FFMPEG
-# }
+# FFmpeg 内核(M2):pkg-config 探测 libavformat/libavcodec/libswscale,
+# 命中即编入 eng_ffmpeg/cxffdec 等,定义 WITH_CX_ENGINE_FFMPEG;
+# 探测失败仅留 M1 双引擎(cxmpv dlopen 与 cmdmpv 不受影响)
+FF_DEPS = $$system(pkg-config --libs libavformat libavcodec libswscale libavutil 2>/dev/null)
+!isEmpty(FF_DEPS) {
+    FF_CFLAGS = $$system(pkg-config --cflags libavformat libavcodec libswscale 2>/dev/null)
+    QMAKE_CXXFLAGS += $$FF_CFLAGS
+    # FF 库传递依赖(如 avformat→zmq→sodium;vcpkg 副本坏件 libssp 缺失)
+    # 的 DT_NEEDED 解析:GNU ld 对 -L 是后追加者优先,-L 前置无效;须用
+    # rpath-link,且应取 **FFmpeg 自己的 libdir**(--variable=libdir 推导,
+    # 不写死路径;多架构/自定义 prefix 均随之走)。放 LIBS 内(命令行位于
+    # Qt/宿主 rpath-link 之后,DBus 等先由 Qt 目录命中,不误拉)
+    FF_LIBDIR = $$system(pkg-config --variable=libdir libavformat 2>/dev/null)
+    !isEmpty(FF_LIBDIR): LIBS += -Wl,-rpath-link,$$FF_LIBDIR
+    LIBS += $$FF_DEPS
+    DEFINES += WITH_CX_ENGINE_FFMPEG
+}

@@ -192,6 +192,21 @@ while(!stop):
 - 进度遥测:`mpv_observe_property(DOUBLE)`(time-pos/duration);事件泵线程 0.2s `mpv_wait_event` → CustomEvent 4002 → UI 线程派发(state 事件只映射 FILE_LOADED/END_FILE/IDLE/PLAYBACK_RESTART)。
 - selftest 长跑:`cxvideo_selftest --play-probe`(cars 生成 1s 静音 WAV → cmdmpv 进程生命周期回环);环境旋钮 `CX_MPV_AO`/`CX_MPV_VO` 控 mpv 输出后端(headless CI 用 null)。
 
+### 7.2 M2.0 实装记录(2026-11,Qt3/Qt6 双绿;ffmpeg 软解视频链)
+
+- **编译门**:cxvideo.pri `pkg-config --libs libavformat libavcodec libswscale libavutil` 命中才列源/定义 `WITH_CX_ENGINE_FFMPEG`;环境为 FFmpeg 7.1.102(远超 §10 预设的 4.4/6.x,实现全用新 API:send/receive、ch_layout 无涉、pkt_timebase)。
+- **文件**(src/):
+  - `cxff_wrap.h`:extern "C" 汇入 avformat/avcodec/avutil/swscale(免逐文件 include);
+  - `cxpqueue.h`:`CxPkt{pkt,eos}` + `CxPacketQueue`(mutex/cond,cap 满阻塞 push,take 空返回空载体,wake/clear/reset;pkt 所有权交队列,demux push 后置 0 重取);
+  - `cxffdec.{h,cpp}`:`CxDecoder`——init(find_decoder+open2+pkt_timebase)/decode(send+receive 循环,余帧 stash deque;**契约:返回帧仅到下一次 decode 有效**,内部 `m_out` 自回收)→convert(sws_getCachedContext 按 (w,h,pix) 缓存,直写 QImage bits;`cxNewImage` 兼 Qt3 无 Format_RGB32)→pts=best_effort×pkt_timebase→ms,duration=frame->duration 或 1/r_frame_rate 兜底;
+  - `cxffdemux.h`:`CxDemuxThread`(av_read_frame 循环,按 stream_index 分流 push,EOS 双投两队列,EOF/错误一律按播完处理);
+  - `cxffvthread.h`:`CXFFmpegVideoThread` + `CxFFmpegUiEvent`(CustomEvent raw=**4004**,避开 mpv 4002)+节拍等待(pause 120ms 条件等待;M2.0 无音频主时钟,按 1/fps×rate waitPace;renderPts0 之上弃旧帧,首帧越线发 SeekDone)+EOS→drain→Finished;
+  - `eng_ffmpeg.{h,cpp}`:`CXEngineFfmpeg` 实装 open(avformat_open_input/find_stream_info/选流/建队列起双线程)/play/pause/stop/seek(av_seek_frame BACKWARD+decoder.flush+queue.reset+vthread.setRenderPts0)/position/duration;customEvent 4004 派发 frame→renderer.showFrame+positionChanged、finished→finished、seekdone→seekFinished。
+- **跳坑**:Qt3 `cxengine.h` 只前向声明 CXVideoRenderer → eng_ffmpeg.cpp 需显式 include cxrenderer.h;链接须 `+libavutil`(av_frame_free 符号);`QImage::Format_RGB32` 改 `cxNewImage()`。
+  宿主含 vcpkg 目录(坏 libsodium,NEEDED libssp.so.0 缺失)时:avformat→zmq→sodium 的 DT_NEEDED 解析中招 → GNU ld 对 **-L 是后追加者优先**(-L 前置无效),QMAKE_LFLAGS 又先于宿主自己的 rpath-link(会错拉系统 Qt6DBus);正确解法 = **LIBS 内附 `-Wl,-rpath-link,$$FF_LIBDIR`,FF_LIBDIR 由 `pkg-config --variable=libdir libavformat` 推导**,不写死路径(LIBS 恒在命令行 Qt/宿主 rpath-link 之后,缺名才回退轮到它,不误拉);运行时安全:libzmq 是 avformat 传递依赖,libzmq 无 RUNPATH,glibc 走 ld.so.cache → 命中 FF libdir 同源系统库(ldd 实证)。
+- **工厂**:cxengine.cpp 补 `CxEngineFfmpeg` 分支(宏门控),舱位 cmdmpv→libmpv→ffmpeg 末位。
+- **探针**:`cxvideo_selftest --ff-probe`(ffmpeg CLI 生成 testsrc 2s/160x120/10fps mp4 → ffmpeg 引擎实播,断言 positionChanged 回报数>0);Qt3/Qt6 均绿(frames=20 lastPts=1900 finished=1,)。音频链/音视频同步主时钟与 cmdmpv IPC 仍留 M2.1。
+
 ## 8. Qt3 兼容层(逐条)
 
 | Qt5/6 用法 | Qt3 等价 / 化解 |

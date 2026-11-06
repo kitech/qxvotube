@@ -120,7 +120,7 @@ public:
 
 | 引擎 | 实现 | 平台 | 编译 | 降级顺序 |
 |---|---|---|---|---|
-| **CxVideo** | 本仓库 `cxvideo/qtav34/` 自研组件(见 `cxvideo-plan.md`/`cxvideo-detail.md`/`cxvideo/README.md`):公共 API 一套,**三引擎** `CXEngineMpvCmd`(mpv 命令行子进程)+ CXEngineMpv(libmpv dlopen 内嵌)+ CXEngineFfmpeg(自研 FFmpeg 三线程管线,M2);Qt3 X11/QPainter 渲染、Qt6 QOpenGLWidget **| 全 Qt 版本(Qt3/4/5/6)——**唯一 Qt3 可用的内嵌引擎**;cmdmpv/libmpv 分引擎,探测顺序 cmdmpv 优先(用户约定) | `WITH_CX_VIDEO`(M0 骨架 & M1 mpv 双内核已双绿:Qt3/Qt6,实播探针过) | **1(主推荐)** |
+| **CxVideo** | 本仓库 `cxvideo/qtav34/` 自研组件(见 `cxvideo-plan.md`/`cxvideo-detail.md`/`cxvideo/README.md`):公共 API 一套,**三引擎** `CXEngineMpvCmd`(mpv 命令行子进程)+ CXEngineMpv(libmpv dlopen 内嵌)+ CXEngineFfmpeg(自研 FFmpeg 双线程软解管线;M2.0 视频链已双绿:demux/vthread→sws→QImage 事件回投,音频主时钟留 M2.1);Qt3 X11/QPainter 渲染、Qt6 QOpenGLWidget **| 全 Qt 版本(Qt3/4/5/6)——**唯一 Qt3 可用的内嵌引擎**;cmdmpv/libmpv 分引擎,探测顺序 cmdmpv 优先(用户约定) | `WITH_CX_VIDEO`(M0/M1/M2.0 双绿:Qt3/Qt6;`--play-probe` 与 `--ff-probe` 均过) | **1(主推荐)** |
 | ProcessMpv | QProcess 拉起 `mpv`(Linux `--wid=X11 winId`;Windows `--wid=HWND`;macOS 无必依赖 --wid,浮独立窗) | 全平台(需系统装 mpv;win 提供 portable 获取指引) | 恒编 | 2 |
 | LibMpv | 链接 libmpv OpenGL 渲染控件(qlmplayeradapter: Qt3 X11 用 XRENDER 纯 Qt/egl 已足、Qt6 自绘窗口) | linux/mac/win | 条件宏 `WITH_LIBMPV`(CI 默认关) | 3 |
 | QMediaPlayer | Qt6 only(win/mac 原生后端零额外依赖;linux 需 dev) | Qt6 build | 条件宏 `WITH_QTMEDIA` | 4 |

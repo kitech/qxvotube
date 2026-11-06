@@ -6,6 +6,7 @@ CONFIG += moc
 VERSION = 0.1.0
 
 SOURCES = main.cpp
+HEADERS = ffprobe_counter.h
 
 include(../../cxvideo.pri)
 

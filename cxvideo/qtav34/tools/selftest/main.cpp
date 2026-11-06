@@ -5,6 +5,7 @@
 #include "eng_mpv_cmd.h"
 #include "renderer_probe.h"
 #include "cxframe.h"
+#include "ffprobe_counter.h"
 #include <qtimer.h>
 #ifdef QT3_BUILD
 #include <qapplication.h>
@@ -88,6 +89,53 @@ static int cxRunPlayProbe(void* appRaw)
     return result;
 }
 
+// ── ffmpeg 内核实播探针(--ff-probe,M2.0:视频链)──
+static int cxRunFfProbe(void* appRaw)
+{
+#ifdef QT3_BUILD
+    QApplication* app = (QApplication*)appRaw;
+#else
+    QCoreApplication* app = (QCoreApplication*)appRaw;
+#endif
+    const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    if (system("ffmpeg -f lavfi -i testsrc=duration=2:size=160x120:rate=10 "
+               "-pix_fmt yuv420p /tmp/opencode/cxvideo_selftest.mp4 -y "
+               "2>/dev/null </dev/null") != 0) {
+        printf("ff-probe: SKIP (no ffmpeg binary)\n");
+        return 0;
+    }
+    CXEngine* eng = cxEngineCreateFor(CxEngineFfmpeg);
+    if (eng == 0) {
+        printf("ff-probe: SKIP (WITH_CX_ENGINE_FFMPEG off or probe fail)\n");
+        return 0;
+    }
+    printf("ff-probe: engine=%s\n", eng->name());
+    CxFFProbeCounter cnt;
+    QObject::connect(eng, SIGNAL(started()), app, SLOT(quit()));
+    QObject::connect(eng, SIGNAL(finished()),
+                     &cnt, SLOT(onFinished()));
+    QObject::connect(eng, SIGNAL(positionChanged(long)),
+                     &cnt, SLOT(onFrame(long)));
+    if (!eng->open(QString::fromLatin1(path))) {
+        printf("ff-probe: open FAIL\n");
+        delete eng;
+        return 1;
+    }
+    QTimer::singleShot(10000, app, SLOT(quit()));
+    app->exec();
+    eng->stop();
+    delete eng;
+    // 走到这要么 finished(自然播完,quit 不会自动,但 started 后 exec 由超时兜底;
+    // M2.0 无 quit-on-finish,依赖 10s 兜底)且 cnt 中已有帧/位置回报
+    if (cnt.frames <= 0) {
+        printf("ff-probe: FAIL (no position/frames reported)\n");
+        return 1;
+    }
+    printf("ff-probe: OK (frames=%d lastPts=%ld finished=%d)\n",
+           cnt.frames, cnt.lastPts, cnt.gotFinished);
+    return 0;
+}
+
 int main(int argc, char* argv[])
 {
 #ifdef QT3_BUILD
@@ -106,6 +154,13 @@ int main(int argc, char* argv[])
     }
     if (playProbeMode)
         return cxRunPlayProbe(&app);
+    bool ffProbeMode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--ff-probe") == 0)
+            ffProbeMode = true;
+    }
+    if (ffProbeMode)
+        return cxRunFfProbe(&app);
 
     EXPECT(strcmp(CXVIDEO_VERSION, CXVIDEO_VERSION) == 0);
 
