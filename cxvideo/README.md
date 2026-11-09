@@ -35,9 +35,10 @@ qtavqml 与 qtav56 是同一祖先的**两个独立快照,互不包含**:
 qlvotube.pro 内:
 include($$PWD/../cxvideo/qtav34/cxvideo.pri)
 ```
-- 内核实况(M2.0 后):
+- 内核实况(M2.1 后):
   - `WITH_CX_ENGINE_MPV` 恒开,libmpv 走 **dlopen**(不链 -lmpv;缺包 isAvailable() false 自动降级);
-  - `WITH_CX_ENGINE_FFMPEG` **已启用**(pkg-config 探到 libavformat/libavcodec/libswscale/libavutil 即编入;当前 FFmpeg 7.1.102 实测绿);
+  - `WITH_CX_ENGINE_FFMPEG` **已启用**(pkg-config 探到 libavformat/libavcodec/libswscale/libswresample/libavutil 即编入;当前 FFmpeg 7.1.102 实测绿);
+  - 音频输出 `WITH_CX_FF_AO_*`:pulse/alsa/sdl 依赖命中才编入,silent 恒编;`CX_FF_AO` 环境变量选(auto=alsa→pulse→sdl→silent);
   - **cmdmpv 内核(runtime PATH 探测 `command -v mpv`)** 恒编;
   - **探测顺序:cmdmpv → libmpv → ffmpeg**(用户约定 cmdmpv 优先)。
 - 复用 `qlcomp/compat34.h`(`INCLUDEPATH += ../../qlcomp`,由 pri 自动注入);
@@ -48,11 +49,11 @@ include($$PWD/../cxvideo/qtav34/cxvideo.pri)
 - **locale**:凡接 CXVideoPlayer 的程序入口须在 QApp 构造后调用
   `cxSetLocaleNumericC()`(libmpv 硬性要求 LC_NUMERIC=C,见 detail.md §7.1)。
 - 实播自测:`cxvideo_selftest --play-probe` 用 cmdmpv 进程生命周期回环验证;
-  `cxvideo_selftest --ff-probe` 用 ffmpeg 内核实播 testsrc mp4(video 链)验证。
+  `cxvideo_selftest --ff-probe` 用 ffmpeg 内核实播 testsrc+sine mp4(H.264+AAC;视频链+音频链/主时钟)验证,输出 `ao=<backend>` 与帧数。
 
 ## 里程碑对照(docs/cxvideo-plan.md)
 
-M0 ✅(接口可链)→ **M1 ✅(eng_mpv libmpv 内嵌 + eng_mpv_cmd cmdmpv 子进程;Qt3/Qt6 双绿,实播探针过)** → **M2.0 ✅(eng_ffmpeg 软解视频链:demux/vthread 双线程→sws→QImage 事件回投;音频主时钟留 M2.1)** →
+M0 ✅(接口可链)→ **M1 ✅(eng_mpv libmpv 内嵌 + eng_mpv_cmd cmdmpv 子进程;Qt3/Qt6 双绿,实播探针过)** → **M2.0 ✅(eng_ffmpeg 软解视频链:demux/vthread 双线程→sws→QImage 事件回投)** → **M2.1 ✅(音频链/主时钟:athread+swr→S16、pulse/alsa/sdl/silent 四 AO、CxClock 每帧校准;Qt3 实测绿,H.264+AAC 探针)** →
 M3 全功能(字幕/轨道/倍速/EQ)→ M4 硬解 → M5 接入 qlvotube+qskvotube。
 (注:M5 的 qlvotube 侧接线已先期落地:mainwindow 内 CXVideoPlayer + cxSetLocaleNumericC。)
 

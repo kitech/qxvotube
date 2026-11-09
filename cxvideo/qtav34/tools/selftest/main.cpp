@@ -3,6 +3,7 @@
 #include "cxengine.h"
 #include "eng_mpv.h"
 #include "eng_mpv_cmd.h"
+#include "eng_ffmpeg.h"
 #include "renderer_probe.h"
 #include "cxframe.h"
 #include "ffprobe_counter.h"
@@ -89,7 +90,7 @@ static int cxRunPlayProbe(void* appRaw)
     return result;
 }
 
-// ── ffmpeg 内核实播探针(--ff-probe,M2.0:视频链)──
+// ── ffmpeg 内核实播探针(--ff-probe,M2.1:视频链 + 音频链/主时钟)──
 static int cxRunFfProbe(void* appRaw)
 {
 #ifdef QT3_BUILD
@@ -98,8 +99,11 @@ static int cxRunFfProbe(void* appRaw)
     QCoreApplication* app = (QCoreApplication*)appRaw;
 #endif
     const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    // 双输入:testsrc + sine;mp4 默认编码即 H.264(libx264)+ AAC
     if (system("ffmpeg -f lavfi -i testsrc=duration=2:size=160x120:rate=10 "
-               "-pix_fmt yuv420p /tmp/opencode/cxvideo_selftest.mp4 -y "
+               "-f lavfi -i sine=frequency=440:duration=2 "
+               "-pix_fmt yuv420p -shortest "
+               "/tmp/opencode/cxvideo_selftest.mp4 -y "
                "2>/dev/null </dev/null") != 0) {
         printf("ff-probe: SKIP (no ffmpeg binary)\n");
         return 0;
@@ -121,18 +125,24 @@ static int cxRunFfProbe(void* appRaw)
         delete eng;
         return 1;
     }
+    QObject::connect(eng, SIGNAL(finished()), app, SLOT(quit()));
     QTimer::singleShot(10000, app, SLOT(quit()));
     app->exec();
+    const char* aon = ((CXEngineFfmpeg*)eng)->aoBackend();
+    char aoBuf[32];
+    snprintf(aoBuf, sizeof(aoBuf), "%s", aon != 0 ? aon : "none");
     eng->stop();
     delete eng;
-    // 走到这要么 finished(自然播完,quit 不会自动,但 started 后 exec 由超时兜底;
-    // M2.0 无 quit-on-finish,依赖 10s 兜底)且 cnt 中已有帧/位置回报
     if (cnt.frames <= 0) {
         printf("ff-probe: FAIL (no position/frames reported)\n");
         return 1;
     }
-    printf("ff-probe: OK (frames=%d lastPts=%ld finished=%d)\n",
-           cnt.frames, cnt.lastPts, cnt.gotFinished);
+    if (cnt.frames < 10)
+        printf("ff-probe: WARN (thin clock events: frames=%d)\n", cnt.frames);
+    if (strcmp(aoBuf, "none") == 0)
+        printf("ff-probe: WARN (audio chain absent)\n");
+    printf("ff-probe: OK (ao=%s frames=%d lastPts=%ld finished=%d)\n",
+           aoBuf, cnt.frames, cnt.lastPts, cnt.gotFinished);
     return 0;
 }
 

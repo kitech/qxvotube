@@ -205,7 +205,24 @@ while(!stop):
 - **跳坑**:Qt3 `cxengine.h` 只前向声明 CXVideoRenderer → eng_ffmpeg.cpp 需显式 include cxrenderer.h;链接须 `+libavutil`(av_frame_free 符号);`QImage::Format_RGB32` 改 `cxNewImage()`。
   宿主含 vcpkg 目录(坏 libsodium,NEEDED libssp.so.0 缺失)时:avformat→zmq→sodium 的 DT_NEEDED 解析中招 → GNU ld 对 **-L 是后追加者优先**(-L 前置无效),QMAKE_LFLAGS 又先于宿主自己的 rpath-link(会错拉系统 Qt6DBus);正确解法 = **LIBS 内附 `-Wl,-rpath-link,$$FF_LIBDIR`,FF_LIBDIR 由 `pkg-config --variable=libdir libavformat` 推导**,不写死路径(LIBS 恒在命令行 Qt/宿主 rpath-link 之后,缺名才回退轮到它,不误拉);运行时安全:libzmq 是 avformat 传递依赖,libzmq 无 RUNPATH,glibc 走 ld.so.cache → 命中 FF libdir 同源系统库(ldd 实证)。
 - **工厂**:cxengine.cpp 补 `CxEngineFfmpeg` 分支(宏门控),舱位 cmdmpv→libmpv→ffmpeg 末位。
-- **探针**:`cxvideo_selftest --ff-probe`(ffmpeg CLI 生成 testsrc 2s/160x120/10fps mp4 → ffmpeg 引擎实播,断言 positionChanged 回报数>0);Qt3/Qt6 均绿(frames=20 lastPts=1900 finished=1,)。音频链/音视频同步主时钟与 cmdmpv IPC 仍留 M2.1。
+- **探针**:`cxvideo_selftest --ff-probe`(ffmpeg CLI 生成 testsrc 2s/160x120/10fps mp4 → ffmpeg 引擎实播,断言 positionChanged 回报数>0);Qt3/Qt6 均绿(frames=20 lastPts=1900 finished=1,)。音频链/主时钟见 §7.3。
+
+### 7.3 M2.1 实装记录(2026-11;音频链/主时钟,Qt3 双绿+Qt6 由维护者编译)
+
+- **网搜核对**:FFmpeg 7.1 doxygen(`swr_alloc_set_opts2`+AVChannelLayout、`swr_get_out_samples` 上界、`swr_convert(NULL,0)` 冲洗);freedesktop pulse-simple(阻塞 write、get_latency µs、drain/flush,无 pause 原语);alsa PCM R/W(`set_params` 500ms、writei 短写循环、-EPIPE→`snd_pcm_recover`、drain 后必须 prepare);SDL2 wiki push 模式(callback=NULL、`SDL_QueueAudio` 拷贝、`GetQueuedAudioSize`);AAC priming `skip_samples` 由 libavcodec decode 自动丢弃,残余负 pts 在 athread 钳 0。
+- **新增文件**(src/):
+  - `cxffclock.h`:`CxClock`(QMutex+QWaitCondition;value/updateValue/setSpeed/waitAndCheck(delay/speed)/interrupt/reset;header-only);
+  - `cxffdeca.{h,cpp}`:`CxDecoderAudio`——decode 同 CxDecoder m_out/stash 契约;convert(in,outCh,outRate) 用 swr→交错 S16 写内部 av_malloc arena(按 `swr_get_out_samples` 上界,增长复用),convertFlush 冲洗;flush 重建 swr;按 **传入帧** 的 ch_layout/format/sample_rate 建 swr;
+  - `cffao.{h,cpp}`:`CXAudioOut` 抽象(open/write 阻塞/pause/resume/clear/latencyMs/drain/close + outCh/outRate);silent 恒编(实时节流虚拟延迟,`gettimeofday` 时钟);工厂 `cffaoCreate(want)`:**auto=alsa→pulse→sdl→silent**(Linux ALSA 直通最稳;pulse-simple 阻塞写不可中断,列为次级/显式;SDL 跨平台兜底;CI 无设备落 silent);
+  - `cffao_pulse.cpp`/`cffao_alsa.cpp`/`cffao_sdl.cpp`:宏门控 `WITH_CX_FF_AO_PULSE/ALSA/SDL`;SDL push 水位 ≈120ms 轮询(带等待上限,防 device 暂停卡死);
+  - `cxffathread.{h,cpp}`:`CXFFmpegAudioThread`——take→decode(负 pts 钳 0)→convert→≈40ms 分块 writeScaled(软音量/静音 int16 缩放)→`clock.updateValue`+post `CxFFmpegEvAudioPos`;倍速按块丢弃/复写补偿(m_skipAcc/m_dupAcc);EOS→convertFlush 残余→`ao->drain()`→Finished。
+- **修改**:
+  - `cxffvthread.h`:emitFrame 主时钟分支——每帧重算 `target=pts−ao->latencyMs()`,未到则 ≤100ms 打盹由 clock 唤醒重算;无音频回退 M2.0 盲等;新增 setClock/setAo;事件枚举增 `CxFFmpegEvAudioPos=6`;
+  - `eng_ffmpeg.{h,cpp}`:m_adec/m_athread/m_ao/m_clock/m_seekPend/m_eosPend;open 建音频链(adec init 失败→aIdx=-1 降级;AO open 失败→silent 兜底并发非致命 CxErrAudio);seek 用 `sIdx=vIdx≥0?vIdx:aIdx`(纯音频可 seek),flush 双解码器+双队列 reset+ao clear+clock reset,双线程 setRenderPts0;setRate/setVolume/setMute 接入 athread;`aoBackend()` 访问器;finished 由 m_eosPend 计数(视频+音频皆完),SeekDone 由 m_seekPend 防重;AudioPos 仅在纯音频时驱动 positionChanged;stopThreads 顺序 vthread→athread→demux→queues→dec/adec→ao→clock→fmt,**athread wait 超时(不可中断后端)则泄漏该组对象而非 delete 运行中线程**;
+  - `cxvideo.pri`:FF_DEPS/FF_CFLAGS 增 **libswresample**;AO 后端 pkg-config 探测(命中才编入+宏);新增 7 源/5 头;
+  - `cxff_wrap.h`:补 swresample/avutil opt/channel_layout;
+  - `tools/selftest/main.cpp`:`--ff-probe` 媒体升级 testsrc+sine `-shortest` → 默认 H.264(libx264)+AAC;打印 `ao=` 与 frames;frames<10 或音频链缺席仅 WARN(CI silent 不假红)。
+- **实测**(Qt3):基线 `0 failures`;`--ff-probe` 在 `CX_FF_AO=auto|alsa|sdl|silent` 全 `OK (frames=20 lastPts=1900 finished=1)`;`--play-probe` OK;`qlvotube` Qt3 重链绿(ldd:libswresample/pulse/asound/SDL2 正常,sodium 走系统库,无 Qt6DBus 错配)。pulse 于本机(无 sink 消费)会阻塞写,auto 已规避;显式 `CX_FF_AO=pulse` 仅 WARN 不崩溃(泄漏保护)。
 
 ## 8. Qt3 兼容层(逐条)
 

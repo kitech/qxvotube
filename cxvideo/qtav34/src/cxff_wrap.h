@@ -9,6 +9,9 @@ extern "C" {
 #include <libavutil/frame.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
+#include <libavutil/opt.h>
+#include <libavutil/channel_layout.h>
 }
 
 #endif // CXFF_WRAP_H

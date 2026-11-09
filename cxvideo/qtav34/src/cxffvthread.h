@@ -5,6 +5,8 @@
 #include "cxff_wrap.h"
 #include "cxpqueue.h"
 #include "cxffdec.h"
+#include "cxffclock.h"
+#include "cffao.h"
 #include "cxframe.h"
 #include <qthread.h>
 #include <qmutex.h>
@@ -22,7 +24,8 @@ enum CxFFmpegEv {
     CxFFmpegEvFinished = 2,   // EOS
     CxFFmpegEvSeekDone = 3,   // ms = 到位锚点
     CxFFmpegEvError = 4,      // code
-    CxFFmpegEvDuration = 5    // ms
+    CxFFmpegEvDuration = 5,   // ms
+    CxFFmpegEvAudioPos = 6    // 音频主时钟推进(athread 块级)
 };
 
 class CxFFmpegUiEvent : public CustomEventBase {
@@ -38,18 +41,21 @@ public:
     CXVideoFrame* frame;
 };
 
-// 解码线程(detail.md §5 CXVideoThread;音频缺席 M2.0 以帧时长自走节拍)
+// 解码线程(detail.md §5 CXVideoThread;M2.1:音轨在时以主时钟校准,
+// 音频缺席回退 M2.0 帧时长自走节拍)
 class CXFFmpegVideoThread : public QThread {
 public:
     CXFFmpegVideoThread(CxPacketQueue* vq, CxDecoder* dec, QObject* sink)
         : vQueue(vq), decoder(dec), sink(sink), stopFlag(false), paused(false),
-          renderPts0(-1), rate(1.0)
+          renderPts0(-1), rate(1.0), m_clock(0), m_ao(0)
     { }
 
-    void requestStop() { stopFlag = true; wake(); }
+    void requestStop() { stopFlag = true; if (m_clock) m_clock->interrupt(true); wake(); }
     void setPaused(bool on) { paused = on; wake(); }
     void setRenderPts0(long ms) { renderPts0 = ms; wake(); }
     void setRate(double r) { rate = r > 0.0 ? r : 1.0; }
+    void setClock(CxClock* c) { m_clock = c; }
+    void setAo(CXAudioOut* a) { m_ao = a; }
 
     void wake()
     {
@@ -124,8 +130,23 @@ private:
             post(CxFFmpegEvSeekDone, pts, 0);
         }
 
-        if (!waitPace((long)(dur / rate)))
-            return false;
+        if (m_clock != 0 && m_ao != 0) {
+            // M2.1 主时钟:帧应显示于 pts − ao 延迟(留 AO 缓冲);
+            // 每轮重算,≤100ms 打盹(clock 提前唤醒即败絮新值)
+            while (true) {
+                if (stopFlag)
+                    return false;
+                long remain = (pts - m_ao->latencyMs()) - m_clock->value();
+                if (remain <= 0)
+                    break;
+                long nap = (remain > 100) ? 100 : remain;
+                if (!m_clock->waitAndCheck(nap))
+                    return false;
+            }
+        } else {
+            if (!waitPace((long)(dur / rate)))
+                return false; // 音频缺席回退 M2.0
+        }
         if (stopFlag)
             return false;
 
@@ -158,6 +179,8 @@ private:
     double rate;
     QMutex paceMx;
     QWaitCondition paceCond;
+    CxClock* m_clock;
+    CXAudioOut* m_ao;
 };
 
 #endif // CXFFVTHREAD_H

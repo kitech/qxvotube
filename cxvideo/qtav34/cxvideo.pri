@@ -13,6 +13,12 @@ CXVIDEO_CPP = \
     $$CXVIDEO/src/eng_mpv.cpp \
     $$CXVIDEO/src/eng_ffmpeg.cpp \
     $$CXVIDEO/src/cxffdec.cpp \
+    $$CXVIDEO/src/cxffdeca.cpp \
+    $$CXVIDEO/src/cffao.cpp \
+    $$CXVIDEO/src/cffao_pulse.cpp \
+    $$CXVIDEO/src/cffao_alsa.cpp \
+    $$CXVIDEO/src/cffao_sdl.cpp \
+    $$CXVIDEO/src/cxffathread.cpp \
     $$CXVIDEO/src/cxvideoplayer.cpp \
     $$CXVIDEO/src/renderer_software.cpp \
     $$CXVIDEO/src/renderer_probe.cpp
@@ -29,8 +35,12 @@ CXVIDEO_HDR = \
     $$CXVIDEO/src/cxpqueue.h \
     $$CXVIDEO/src/cxff_wrap.h \
     $$CXVIDEO/src/cxffdec.h \
+    $$CXVIDEO/src/cxffdeca.h \
+    $$CXVIDEO/src/cxffclock.h \
+    $$CXVIDEO/src/cffao.h \
     $$CXVIDEO/src/cxffdemux.h \
     $$CXVIDEO/src/cxffvthread.h \
+    $$CXVIDEO/src/cxffathread.h \
     $$CXVIDEO/src/cxrenderer.h \
     $$CXVIDEO/src/renderer_software.h \
     $$CXVIDEO/src/renderer_probe.h \
@@ -56,9 +66,9 @@ DEFINES += WITH_CX_ENGINE_MPV
 # FFmpeg 内核(M2):pkg-config 探测 libavformat/libavcodec/libswscale,
 # 命中即编入 eng_ffmpeg/cxffdec 等,定义 WITH_CX_ENGINE_FFMPEG;
 # 探测失败仅留 M1 双引擎(cxmpv dlopen 与 cmdmpv 不受影响)
-FF_DEPS = $$system(pkg-config --libs libavformat libavcodec libswscale libavutil 2>/dev/null)
+FF_DEPS = $$system(pkg-config --libs libavformat libavcodec libswscale libswresample libavutil 2>/dev/null)
 !isEmpty(FF_DEPS) {
-    FF_CFLAGS = $$system(pkg-config --cflags libavformat libavcodec libswscale 2>/dev/null)
+    FF_CFLAGS = $$system(pkg-config --cflags libavformat libavcodec libswscale libswresample 2>/dev/null)
     QMAKE_CXXFLAGS += $$FF_CFLAGS
     # FF 库传递依赖(如 avformat→zmq→sodium;vcpkg 副本坏件 libssp 缺失)
     # 的 DT_NEEDED 解析:GNU ld 对 -L 是后追加者优先,-L 前置无效;须用
@@ -69,4 +79,25 @@ FF_DEPS = $$system(pkg-config --libs libavformat libavcodec libswscale libavutil
     !isEmpty(FF_LIBDIR): LIBS += -Wl,-rpath-link,$$FF_LIBDIR
     LIBS += $$FF_DEPS
     DEFINES += WITH_CX_ENGINE_FFMPEG
+
+    # M2.1 音频输出后端:silent 恒编(无设备/CI 兜底);其余 pkg-config
+    # 命中才编入,以 WITH_CX_FF_AO_* 门控
+    FF_AO_PULSE = $$system(pkg-config --libs libpulse-simple 2>/dev/null)
+    !isEmpty(FF_AO_PULSE) {
+        QMAKE_CXXFLAGS += $$system(pkg-config --cflags libpulse-simple 2>/dev/null)
+        LIBS += $$FF_AO_PULSE
+        DEFINES += WITH_CX_FF_AO_PULSE
+    }
+    FF_AO_ALSA = $$system(pkg-config --libs alsa 2>/dev/null)
+    !isEmpty(FF_AO_ALSA) {
+        QMAKE_CXXFLAGS += $$system(pkg-config --cflags alsa 2>/dev/null)
+        LIBS += $$FF_AO_ALSA
+        DEFINES += WITH_CX_FF_AO_ALSA
+    }
+    FF_AO_SDL = $$system(pkg-config --libs sdl2 2>/dev/null)
+    !isEmpty(FF_AO_SDL) {
+        QMAKE_CXXFLAGS += $$system(pkg-config --cflags sdl2 2>/dev/null)
+        LIBS += $$FF_AO_SDL
+        DEFINES += WITH_CX_FF_AO_SDL
+    }
 }
