@@ -21,6 +21,7 @@ elif [ x"$qtnum" == x"6" ]; then
 else
 	QMAKE=${QMAKE:-/opt/qt/5.15.2/clang_64/bin/qmake}
 fi
+mkdir -p "$builddir" && cd "$builddir"
 "$QMAKE" -r $QMAKE_EXTRA ../qlvotube.pro
 make
 
