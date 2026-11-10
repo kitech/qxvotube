@@ -207,7 +207,7 @@ while(!stop):
 - **工厂**:cxengine.cpp 补 `CxEngineFfmpeg` 分支(宏门控),舱位 cmdmpv→libmpv→ffmpeg 末位。
 - **探针**:`cxvideo_selftest --ff-probe`(ffmpeg CLI 生成 testsrc 2s/160x120/10fps mp4 → ffmpeg 引擎实播,断言 positionChanged 回报数>0);Qt3/Qt6 均绿(frames=20 lastPts=1900 finished=1,)。音频链/主时钟见 §7.3。
 
-### 7.3 M2.1 实装记录(2026-11;音频链/主时钟,Qt3 双绿+Qt6 由维护者编译)
+### 7.3 M2.1 实装记录(2026-11;音频链/主时钟,Qt3/Qt6 双绿)
 
 - **网搜核对**:FFmpeg 7.1 doxygen(`swr_alloc_set_opts2`+AVChannelLayout、`swr_get_out_samples` 上界、`swr_convert(NULL,0)` 冲洗);freedesktop pulse-simple(阻塞 write、get_latency µs、drain/flush,无 pause 原语);alsa PCM R/W(`set_params` 500ms、writei 短写循环、-EPIPE→`snd_pcm_recover`、drain 后必须 prepare);SDL2 wiki push 模式(callback=NULL、`SDL_QueueAudio` 拷贝、`GetQueuedAudioSize`);AAC priming `skip_samples` 由 libavcodec decode 自动丢弃,残余负 pts 在 athread 钳 0。
 - **新增文件**(src/):
@@ -222,7 +222,8 @@ while(!stop):
   - `cxvideo.pri`:FF_DEPS/FF_CFLAGS 增 **libswresample**;AO 后端 pkg-config 探测(命中才编入+宏);新增 7 源/5 头;
   - `cxff_wrap.h`:补 swresample/avutil opt/channel_layout;
   - `tools/selftest/main.cpp`:`--ff-probe` 媒体升级 testsrc+sine `-shortest` → 默认 H.264(libx264)+AAC;打印 `ao=` 与 frames;frames<10 或音频链缺席仅 WARN(CI silent 不假红)。
-- **实测**(Qt3):基线 `0 failures`;`--ff-probe` 在 `CX_FF_AO=auto|alsa|sdl|silent` 全 `OK (frames=20 lastPts=1900 finished=1)`;`--play-probe` OK;`qlvotube` Qt3 重链绿(ldd:libswresample/pulse/asound/SDL2 正常,sodium 走系统库,无 Qt6DBus 错配)。pulse 于本机(无 sink 消费)会阻塞写,auto 已规避;显式 `CX_FF_AO=pulse` 仅 WARN 不崩溃(泄漏保护)。
+- **实测**(Qt3/Qt6,双绿):基线两侧 `0 failures`;`--ff-probe` 默认 silent 与显式 `CX_FF_AO=sdl` 均 `OK (ao=… frames=20 lastPts=1900 finished=1)`;`--play-probe` OK;`qlvotube` Qt3/Qt6 重链绿(ldd:libswresample/alsa/SDL2 NEEDED 正常,sodium 走系统库,无 Qt6DBus 错配)。
+- **环境限制(实测记录)**:本机仅有 HDMI 卡(无活跃 sink,pipewire 兜底)——alsa(`default` 路由 pipewire)与 pulse **open 成功但写端得不到消费**,`writei` 阻塞不可中断 → athread 卡写,EOS 的 `finished` 拿不到(Qt3/Qt6 症状一致;此前 Qt3 记录 "alsa finished=1" 系当时 pipewire 尚有消费端的环境时点结果)。故探针在未设 `CX_FF_AO` 时默认 `silent`(EOS 全链路可测);有真音频设备的机器用 `CX_FF_AO=auto` 验 alsa/pulse/sdl。引擎侧 auto 顺序仍为 alsa→pulse→sdl→silent(真机优先直通);无 sink 环境 auto 落 alsa 即会阻塞,此为其已知形态。
 
 ## 8. Qt3 兼容层(逐条)
 

@@ -14,6 +14,8 @@
 #include <qcoreapplication.h>
 #endif
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define EXPECT(expr) \
     do { \
@@ -99,6 +101,12 @@ static int cxRunFfProbe(void* appRaw)
     QCoreApplication* app = (QCoreApplication*)appRaw;
 #endif
     const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    // 无消费 sink 环境(无声卡/CI)下 alsa/pulse 的 writei 阻塞于写端,
+    // Finished 拿不到;未显式指定 CX_FF_AO 时探针默认 silent,
+    // 保证 convertFlush→ao->drain→Finished 的 EOS 握手全链路可测。
+    // 有真实音频设备时可显式 CX_FF_AO=auto 验 alsa/pulse/sdl。
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
     // 双输入:testsrc + sine;mp4 默认编码即 H.264(libx264)+ AAC
     if (system("ffmpeg -f lavfi -i testsrc=duration=2:size=160x120:rate=10 "
                "-f lavfi -i sine=frequency=440:duration=2 "
