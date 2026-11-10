@@ -329,6 +329,16 @@ LIBS += -lmpv -lavformat -lavcodec -lswscale -lswresample -lopenal
 - qlvotube:`playerengine.{h,cpp}` 抽象不动,新增 `engine_cxvideo.{h,cpp}` 适配器:CXVideoPlayer↔PlayerEngine 薄映射(open→open+play、position/duration/showFrame 转发、音轨/字幕热切换、错误码→lang 键);探测顺序第 1(见 backend-abstraction.md),`WITH_CXVIDEO` 宏门控,组件可链时才列入候选。
 - qskvotube:RendererProbe 的 frameReady(QImage) 直接喂入 QSkinny 侧图像绘制(provider 型接口),落地在 M5。
 
+### M5-A2 实装记录(2026-11;qlvotube 音量/倍速/EQ/截图/引擎切换,Qt3/Qt6 双绿)
+
+- **PlayerBar 扩展**(自绘,沿用既有 hit-test 风格):右侧新增 音量条(拖动发 `volumeChanged`)/ 倍速按钮(循环 0.5→1.0→1.25→1.5→2.0,发 `rateChanged`)/ `EQ`(发 `eqRequested`)/ `图`(截图,发 `shotRequested`);`m_volDrag` 与进度拖动互斥。
+- **总时长显示修复**:`paintEvent` 原来读 `m_hasTrack ? m_durationMs : 0`,未经 `setTrack` 的播放源(如 QA 钩子)总显示 0:00;改为直接读 `m_durationMs`(由引擎 `durationChanged` 权威覆盖)。
+- **EQ 对话框**(`eqdialog.{h,cpp}`):4 滑杆(亮度/对比度/饱和度 -100..100、色相 -180..180)+ 重置;`valueChanged→onAnySlider→emit eqChanged`,主窗读 `eq()` 调 `CXVideoPlayer::setEq`。**坑:`resetEq` 声明在普通 public 段导致 Qt3 `connect` 报 "No such slot" → 移到 `public slots:`**。
+- **截图**:`onTakeScreenshot` 落 `~/.cache/qlvotube/shot_<ts>.png`(Qt3 `toTime_t` / Qt6 `toSecsSinceEpoch` 分支),`saveScreenshot` 成功/失败均走状态栏提示。
+- **引擎切换**:工具菜单「切换播放引擎(ffmpeg/mpv)」→ `stop` → `setEngine` → **重挂 `setHostWidget`/`setRenderer`** → 在播则按 `m_curUrl` 重开;引擎名同步到播放页标签。另加 `QLVOTUBE_ENGINE=mpv` 起播钩子(承诺 mpv-gl 路)便于排障。
+- **hue 矩阵修正**(cxvideo renderer_gl):旧实现为错误近似,且经 `QMatrix3x3` 上传与 GLSL 列主序不符;改为**标准 luma 保持色相旋转矩阵** + `glUniformMatrix3fv(..., GL_TRUE, ...)`(行主序直传)。`--gl-probe` 增加 **EQ 生效断言**:播放中截图基线 → `setEq(brightness=60)` → 再截图,比对平均像素差(要求 ≥5),Qt3 CPU LUT(25)/Qt6 shader(26)双过。
+- **实测**(双内核):`buildqt3/6.sh` ret=0;`QLVOTUBE_AUTOPLAY=/tmp/opencode/m5a_long.mp4` 截图确认 总时长 0:20 / 倍速 1.5x / 音量条 / EQ 对话框 / 截图 PNG(24KB);`QLVOTUBE_ENGINE=mpv` 双内核起播 `engine=mpv` 无崩溃;cxvideo 八探针全绿(gl-probe 带 eqDiff、mpv-gl-probe OK)。
+
 ## 附:实现顺序(对照里程碑)
 
 M0 落 `cxvideo_global.h/cxthread/cxengine.h/cxvideoplayer.h` stub(接口可链、Qt3/Qt6 编译绿)→ M1 eng_mpv → M2 eng_ffmpeg 软解 → M3 全功能 → M4 硬解 → M5 接入 qlvotube[主推]+qskvotube → CI 四路绿。

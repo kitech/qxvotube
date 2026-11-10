@@ -22,6 +22,7 @@ class PlayerBar;
 class CXVideoPlayer;
 class CXRendererGl;
 class VideoPane;
+class CXVideoEqDialog;
 class QSplitter;
 
 class MainWindow : public QMainWindow {
@@ -66,6 +67,13 @@ private slots:
     void switchToPlayerView(bool on);    /* M5-A 播放页切换 */
     void onVideoBackRequested();
     void onQaAutoplay();     /* QA 钩子:QLVOTUBE_AUTOPLAY=<url> 自动起播 */
+    /* M5-A2:音量/倍速/EQ/截图/引擎切换 */
+    void onVolumeChanged(int pct);
+    void onRateChanged(double r);
+    void onOpenEqDialog();
+    void onEqChanged();
+    void onTakeScreenshot();
+    void onToggleEngine();
     void onPlayerPaused();
     void onPlayerStopped();
     void onPlayerFinished();
@@ -132,6 +140,8 @@ private:
     StackedWidget* centerStack;   /* 列表页/播放页切换(M5-A;compat34 别名) */
     VideoPane* videoPane;
     CXRendererGl* m_glRenderer;
+    CXVideoEqDialog* m_eqDialog;
+    QString m_curUrl;        /* 当前播放源(引擎切换后重开) */
     std::vector<Playlist> m_library;
     int m_curPlaylistId;
     int m_curTrackIndex;

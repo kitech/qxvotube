@@ -23,6 +23,7 @@ SOURCES = src/main.cpp src/mainwindow.cpp src/appearance.cpp src/config.cpp \
           src/sticker_db.cpp \
           src/sidenav.cpp src/contentview.cpp src/queuepanel.cpp src/playerbar.cpp \
           src/videopane.cpp \
+          src/eqdialog.cpp \
           src/userinfopanel.cpp \
           ../qlappcom/eventpoller.cpp
 
@@ -33,6 +34,7 @@ HEADERS = src/mainwindow.h src/appearance.h src/config.h src/globaluiutil.h \
           src/musicmodel.h src/musicstyle.h \
           src/sidenav.h src/contentview.h src/queuepanel.h src/playerbar.h \
           src/videopane.h \
+          src/eqdialog.h \
           src/userinfopanel.h \
           ../qlappcom/eventpoller.h
 

@@ -419,19 +419,48 @@ static int cxRunGlProbe(void* appRaw)
         delete eng;
         return 1;
     }
+    // M5-A2:EQ 生效校验(基线 → brightness+60 → 再拍,比对回读像素)
+    CxGlEqWorker eqw(&view);
+    QTimer::singleShot(600, &eqw, SLOT(shotBase()));
+    QTimer::singleShot(900, &eqw, SLOT(applyEq()));
+    QTimer::singleShot(1200, &eqw, SLOT(shotAfter()));
     eng->play();
     QTimer::singleShot(10000, app, SLOT(quit()));
     app->exec();
     eng->stop();
     delete eng;
     bool glOk = view.glReady(); // Qt3 恒 true;Qt6 校验 shader 链真就绪
-    if (cnt.frames <= 0 || cnt.gotFinished != 1 || !glOk) {
-        printf("gl-probe: FAIL (frames=%d finished=%d glReady=%d)\n",
-               cnt.frames, cnt.gotFinished, (int)glOk);
+    int eqDiff = -1;
+    if (eqw.baseOk && eqw.afterOk) {
+        QImage a, b;
+        if (a.load("/tmp/opencode/cx_eq_base.png") &&
+            b.load("/tmp/opencode/cx_eq_hue.png")) {
+            int w = a.width() < b.width() ? a.width() : b.width();
+            int h = a.height() < b.height() ? a.height() : b.height();
+            long long sum = 0, n = 0;
+            for (int y = 0; y < h; y += 2) {
+                for (int x = 0; x < w; x += 2) {
+                    QRgb p1 = a.pixel(x, y), p2 = b.pixel(x, y);
+                    int dr = (int)qRed(p1) - (int)qRed(p2);
+                    int dg = (int)qGreen(p1) - (int)qGreen(p2);
+                    int db = (int)qBlue(p1) - (int)qBlue(p2);
+                    if (dr < 0) dr = -dr;
+                    if (dg < 0) dg = -dg;
+                    if (db < 0) db = -db;
+                    sum += dr + dg + db;
+                    n++;
+                }
+            }
+            eqDiff = n > 0 ? (int)(sum / (3 * n)) : 0;
+        }
+    }
+    if (cnt.frames <= 0 || cnt.gotFinished != 1 || !glOk || eqDiff < 5) {
+        printf("gl-probe: FAIL (frames=%d finished=%d glReady=%d eqDiff=%d)\n",
+               cnt.frames, cnt.gotFinished, (int)glOk, eqDiff);
         return 1;
     }
-    printf("gl-probe: OK (frames=%d lastPts=%ld finished=1)\n",
-           cnt.frames, cnt.lastPts);
+    printf("gl-probe: OK (frames=%d lastPts=%ld finished=1 eqDiff=%d)\n",
+           cnt.frames, cnt.lastPts, eqDiff);
     return 0;
 }
 

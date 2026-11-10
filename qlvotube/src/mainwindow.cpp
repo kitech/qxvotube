@@ -23,6 +23,7 @@
 #include "toastwidget.h"
 #include "userinfopanel.h"
 #include "videopane.h"
+#include "eqdialog.h"
 
 #include "compat34.h"
 #include "cxvideoplayer.h"
@@ -39,6 +40,7 @@
 #include <qmessagebox.h>
 #include <qlineedit.h>
 #include <qsplitter.h>
+#include <qdatetime.h>
 
 #include <cstdlib>
 #include <fstream>
@@ -116,6 +118,7 @@ MainWindow::MainWindow(QWidget* parent)
     , centerStack(0)
     , videoPane(0)
     , m_glRenderer(0)
+    , m_eqDialog(0)
     , m_curPlaylistId(0)
     , m_curTrackIndex(-1)
     , demoLeftLabel(0)
@@ -288,6 +291,14 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onNext()));
         QObject::connect(playerBar, SIGNAL(seekRequested(int)),
                          this, SLOT(onSeekRequested(int)));
+        QObject::connect(playerBar, SIGNAL(volumeChanged(int)),
+                         this, SLOT(onVolumeChanged(int)));
+        QObject::connect(playerBar, SIGNAL(rateChanged(double)),
+                         this, SLOT(onRateChanged(double)));
+        QObject::connect(playerBar, SIGNAL(eqRequested()),
+                         this, SLOT(onOpenEqDialog()));
+        QObject::connect(playerBar, SIGNAL(shotRequested()),
+                         this, SLOT(onTakeScreenshot()));
     }
 
     /* 播放引擎接线(掌面延迟:首次选曲时真正 setEngine) */
@@ -450,6 +461,11 @@ void MainWindow::buildMenus()
     addMenuItem(tool, this, SLOT(onDemoApiRequest()), "demo.api_request");
     addMenuSeparator(tool);
     addMenuItem(tool, this, SLOT(openSettings()), "menu.settings");
+    /* M5-A2:EQ / 截图 / 引擎切换(中文 key 作 fallback 文案) */
+    addMenuSeparator(tool);
+    addMenuItem(tool, this, SLOT(onOpenEqDialog()), "音视频均衡器(EQ)...");
+    addMenuItem(tool, this, SLOT(onTakeScreenshot()), "截图(保存到缓存目录)");
+    addMenuItem(tool, this, SLOT(onToggleEngine()), "切换播放引擎(ffmpeg/mpv)");
     MenuWidget34* help = static_cast<MenuWidget34*>(addTopMenu("menu.help"));
     addMenuItem(help, qApp, SLOT(aboutQt()), "menu.aboutqt");
     addMenuItem(help, this, SLOT(onAboutApp()), "menu.about_qlvotube");
@@ -701,14 +717,24 @@ void MainWindow::ensurePlayerReady()
         return;
     if (m_player->engine() != 0)
         return;
-    /* M5-A:嵌入首选 ffmpeg(渲染器可控);编内缺失则回落 auto */
-    if (!m_player->setEngine(CxEngineFfmpeg))
+    /* M5-A:嵌入首选 ffmpeg(渲染器可控);编内缺失则回落 auto
+     * QA/排障:QLVOTUBE_ENGINE=mpv 强制走 libmpv(mpv-gl 路) */
+    const char* want = getenv("QLVOTUBE_ENGINE");
+    bool wantMpv = want != 0 && strcmp(want, "mpv") == 0;
+    if (wantMpv) {
+        if (!m_player->setEngine(CxEngineMpv))
+            m_player->setEngine(CxEngineAuto);
+    } else if (!m_player->setEngine(CxEngineFfmpeg)) {
         m_player->setEngine(CxEngineAuto);
+    }
     m_player->setHostWidget(videoPane->surface());
     m_player->setRenderer(m_glRenderer);
-    if (m_player->engine() != 0)
+    if (m_player->engine() != 0) {
         videoPane->setEngineLabel(
             QString::fromLatin1(m_player->engine()->name()));
+        if (getenv("QLVOTUBE_DEBUG") != 0)
+            fprintf(stderr, "engine=%s\n", m_player->engine()->name());
+    }
 }
 
 void MainWindow::onQaAutoplay()
@@ -724,6 +750,7 @@ void MainWindow::onQaAutoplay()
     t.durationMs = 0;
     t.ncmId = 0;
     t.albumId = 0;
+    if (playerBar) playerBar->setTrack(t);
     tryPlayTrack(t);
 }
 
@@ -736,6 +763,7 @@ void MainWindow::tryPlayTrack(const Track& t)
         return;
     }
     m_player->open(t.url);
+    m_curUrl = t.url;
     m_player->play(); // 外观层 play() 为 void;失败路径经 noticedError 走状态栏
 }
 
@@ -896,6 +924,86 @@ void MainWindow::onPlayerPosition(long ms)
 void MainWindow::onPlayerDuration(long ms)
 {
     if (playerBar) playerBar->setDuration((int)ms);
+}
+
+void MainWindow::onVolumeChanged(int pct)
+{
+    if (m_player != 0) m_player->setVolume(pct);
+}
+
+void MainWindow::onRateChanged(double r)
+{
+    if (m_player != 0) m_player->setRate(r);
+}
+
+void MainWindow::onOpenEqDialog()
+{
+    if (m_eqDialog == 0) {
+        m_eqDialog = new CXVideoEqDialog(this);
+        QObject::connect(m_eqDialog, SIGNAL(eqChanged()),
+                         this, SLOT(onEqChanged()));
+    }
+    m_eqDialog->show();
+    m_eqDialog->raise();
+}
+
+void MainWindow::onEqChanged()
+{
+    if (m_player != 0 && m_eqDialog != 0)
+        m_player->setEq(m_eqDialog->eq());
+}
+
+void MainWindow::onTakeScreenshot()
+{
+    if (m_player == 0 || m_player->engine() == 0) {
+        SharedStatusBar::instance()->showMessage(qFromUtf8("播放引擎未接入"), 2000);
+        return;
+    }
+    QString dir = qGetHomePath() + "/.cache/qlvotube";
+#ifdef QT3_BUILD
+    unsigned long long stamp = (unsigned long long)QDateTime::currentDateTime().toTime_t();
+#else
+    unsigned long long stamp =
+        (unsigned long long)QDateTime::currentDateTime().toSecsSinceEpoch();
+#endif
+    QString path = dir + "/shot_" + QString::number(stamp) + ".png";
+    bool ok = m_player->saveScreenshot(path);
+#ifdef QT3_BUILD
+    const char* pathC = path.latin1();
+#else
+    QByteArray pathBa = path.toLatin1();
+    const char* pathC = pathBa.constData();
+#endif
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+        fprintf(stderr, "shot: %s ok=%d\n", pathC, (int)ok);
+    if (ok)
+        SharedStatusBar::instance()->showMessage(qFromUtf8("截图: ") + path, 4000);
+    else
+        SharedStatusBar::instance()->showMessage(qFromUtf8("截图失败(内核不支持)"), 3000);
+}
+
+/* M5-A2:ffmpeg ↔ mpv 切换(重建引擎 + 重挂宿主/渲染器;在播则重开) */
+void MainWindow::onToggleEngine()
+{
+    if (m_player == 0)
+        return;
+    bool toMpv = (m_player->engine() == 0) ||
+                 QString::fromLatin1(m_player->engine()->name()) != "mpv";
+    m_player->stop();
+    if (!m_player->setEngine(toMpv ? CxEngineMpv : CxEngineFfmpeg)) {
+        SharedStatusBar::instance()->showMessage(qFromUtf8("引擎切换失败"), 3000);
+        return;
+    }
+    m_player->setHostWidget(videoPane->surface());
+    m_player->setRenderer(m_glRenderer);
+    videoPane->setEngineLabel(QString::fromLatin1(m_player->engine()->name()));
+    if (!m_curUrl.isEmpty()) {
+        m_player->open(m_curUrl);
+        m_player->play();
+        switchToPlayerView(true);
+    }
+    SharedStatusBar::instance()->showMessage(
+        qFromUtf8("当前引擎: ") + QString::fromLatin1(m_player->engine()->name()), 3000);
 }
 
 void MainWindow::onPlayerError(int code, const QString& msg)

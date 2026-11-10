@@ -4,6 +4,8 @@
 #include "identicon.h"
 
 #include <qglobal.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <qpainter.h>
 #include <qevent.h>
 #include <qfontmetrics.h>
@@ -45,7 +47,8 @@ void drawTriangle(QPainter& p, const QRect& r, bool left, const QColor& c)
 
 PlayerBar::PlayerBar(QWidget* parent)
     : QWidget(parent), m_hasTrack(false), m_playing(false),
-      m_progressMs(0), m_durationMs(0), m_hover(HitNone), m_dragging(false)
+      m_progressMs(0), m_durationMs(0), m_hover(HitNone), m_dragging(false),
+      m_volDrag(false), m_volume(100), m_rate(1.0)
 {
     setMouseTracking(true);
     setFixedHeight(80);
@@ -73,6 +76,18 @@ void PlayerBar::setProgress(int ms)
 void PlayerBar::setDuration(int ms)
 {
     if (ms > 0) m_durationMs = ms;
+    update();
+}
+
+void PlayerBar::setVolume(int pct)
+{
+    m_volume = qBound(0, pct, 100);
+    update();
+}
+
+void PlayerBar::setRate(double r)
+{
+    m_rate = r > 0.0 ? r : 1.0;
     update();
 }
 
@@ -106,6 +121,22 @@ QRect PlayerBar::progressRect() const
 {
     int cx = width() / 2;
     return QRect(cx - 130, 58, 260, 6);
+}
+
+/* M5-A2 右侧:音量条 + 倍速 + EQ + 截图 */
+QRect PlayerBar::volRect() const   { return QRect(width() - 215, 29, 70, 6); }
+QRect PlayerBar::rateRect() const  { return QRect(width() - 135, 22, 40, 20); }
+QRect PlayerBar::eqRect() const    { return QRect(width() - 90, 22, 34, 20); }
+QRect PlayerBar::shotRect() const  { return QRect(width() - 48, 22, 34, 20); }
+
+void PlayerBar::setVolumeFromX(int x)
+{
+    QRect vr = volRect();
+    if (vr.width() <= 0) return;
+    int rel = qBound(0, x - vr.x(), vr.width());
+    m_volume = (int)((double)rel / vr.width() * 100.0);
+    update();
+    emit volumeChanged(m_volume);
 }
 
 void PlayerBar::setProgressFromX(int x)
@@ -180,12 +211,37 @@ void PlayerBar::paintEvent(QPaintEvent*)
     p.setPen(pal.textMuted);
     p.drawText(QRect(pr.x() - 44, pr.y() - 8, 40, 20), Qt::AlignVCenter | Qt::AlignRight,
                fmtMs(m_progressMs));
+    /* M5-A2:时长由引擎 durationChanged 权威(不再依赖 setTrack 的库值) */
     p.drawText(QRect(pr.right() + 4, pr.y() - 8, 44, 20), Qt::AlignVCenter | Qt::AlignLeft,
-               fmtMs(m_hasTrack ? m_durationMs : 0));
+               fmtMs(m_durationMs));
+
+    /* 音量条 + 倍速/EQ/截图(右侧) */
+    QRect vr = volRect();
+    p.setPen(Qt::NoPen);
+    p.setBrush(pal.border);
+    muiDrawRoundRect(p, vr, 3, 3);
+    int vfill = vr.width() * m_volume / 100;
+    if (vfill > 0) {
+        p.setBrush(m_hover == HitVol ? pal.accent : pal.textMuted);
+        muiDrawRoundRect(p, QRect(vr.x(), vr.y(), vfill, vr.height()), 3, 3);
+    }
+    p.setFont(small);
+    p.setPen(m_hover == HitRate ? pal.accent : pal.textMuted);
+    p.drawText(rateRect(), Qt::AlignCenter,
+               QString::number(m_rate, 'g', 3) + "x");
+    p.setPen(m_hover == HitEq ? pal.accent : pal.textMuted);
+    p.drawText(eqRect(), Qt::AlignCenter, "EQ");
+    p.setPen(m_hover == HitShot ? pal.accent : pal.textMuted);
+    p.drawText(shotRect(), Qt::AlignCenter, qFromUtf8("图"));
 }
 
 void PlayerBar::mousePressEvent(QMouseEvent* e)
 {
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+        fprintf(stderr, "pbar w=%d click=%d,%d vol=%d,%d rate=%d,%d eq=%d,%d shot=%d,%d\n",
+                width(), e->pos().x(), e->pos().y(),
+                volRect().x(), volRect().y(), rateRect().x(), rateRect().y(),
+                eqRect().x(), eqRect().y(), shotRect().x(), shotRect().y());
     if (playRect().contains(e->pos())) {
         emit playPauseRequested();
     } else if (prevRect().contains(e->pos())) {
@@ -195,6 +251,21 @@ void PlayerBar::mousePressEvent(QMouseEvent* e)
     } else if (progressRect().contains(e->pos())) {
         m_dragging = true;
         setProgressFromX(e->pos().x());
+    } else if (volRect().contains(e->pos())) {
+        m_volDrag = true;
+        setVolumeFromX(e->pos().x());
+    } else if (rateRect().contains(e->pos())) {
+        static const double kRates[5] = { 0.5, 1.0, 1.25, 1.5, 2.0 };
+        int idx = 0;
+        for (int i = 0; i < 5; i++)
+            if (kRates[i] == m_rate) idx = i;
+        m_rate = kRates[(idx + 1) % 5];
+        update();
+        emit rateChanged(m_rate);
+    } else if (eqRect().contains(e->pos())) {
+        emit eqRequested();
+    } else if (shotRect().contains(e->pos())) {
+        emit shotRequested();
     }
 }
 
@@ -204,11 +275,19 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
         setProgressFromX(e->pos().x());
         return;
     }
+    if (m_volDrag) {
+        setVolumeFromX(e->pos().x());
+        return;
+    }
     Hit h = HitNone;
     if (playRect().contains(e->pos())) h = HitPlay;
     else if (prevRect().contains(e->pos())) h = HitPrev;
     else if (nextRect().contains(e->pos())) h = HitNext;
     else if (progressRect().contains(e->pos())) h = HitProgress;
+    else if (volRect().contains(e->pos())) h = HitVol;
+    else if (rateRect().contains(e->pos())) h = HitRate;
+    else if (eqRect().contains(e->pos())) h = HitEq;
+    else if (shotRect().contains(e->pos())) h = HitShot;
     if (h != m_hover) {
         m_hover = h;
         update();
@@ -221,6 +300,8 @@ void PlayerBar::mouseReleaseEvent(QMouseEvent*)
         m_dragging = false;
         emit seekRequested(m_progressMs);
     }
+    m_volDrag = false;
+    update();
 }
 
 void PlayerBar::leaveEvent(QEvent* e)

@@ -14,6 +14,10 @@ public:
     bool isPlaying() const { return m_playing; }
     void setProgress(int ms);
     void setDuration(int ms);
+    int volume() const { return m_volume; }
+    double rate() const { return m_rate; }
+    void setVolume(int pct);
+    void setRate(double r);
     void retranslateUi();
 
 signals:
@@ -22,6 +26,11 @@ signals:
     void prevRequested();
     void nextRequested();
     void seekRequested(int ms);
+    /* M5-A2:音量/倍速/EQ/截图 */
+    void volumeChanged(int pct);
+    void rateChanged(double r);
+    void eqRequested();
+    void shotRequested();
 
 protected:
     void paintEvent(QPaintEvent* e);
@@ -31,12 +40,18 @@ protected:
     void leaveEvent(QEvent* e);
 
 private:
-    enum Hit { HitNone, HitPrev, HitPlay, HitNext, HitProgress };
+    enum Hit { HitNone, HitPrev, HitPlay, HitNext, HitProgress,
+               HitVol, HitRate, HitEq, HitShot };
     void setProgressFromX(int x);
+    void setVolumeFromX(int x);
     QRect playRect() const;
     QRect prevRect() const;
     QRect nextRect() const;
     QRect progressRect() const;
+    QRect volRect() const;
+    QRect rateRect() const;
+    QRect eqRect() const;
+    QRect shotRect() const;
 
     Track m_track;
     bool m_hasTrack;
@@ -45,6 +60,9 @@ private:
     int m_durationMs;
     Hit m_hover;
     bool m_dragging;
+    bool m_volDrag;
+    int m_volume;
+    double m_rate;
 };
 
 #endif // PLAYERBAR_H

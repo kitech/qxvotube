@@ -40,14 +40,20 @@ static const char* kGlFragSrc =
     "}\n";
 #endif
 
-// hue → 3x3 旋转(近似 YCbCr 色度平面旋转;Qt6 shader 用,QMatrix3x3 供 float)
+// hue → 3x3 旋转(标准 luma 保持色相旋转;行主序,上传时 transpose=GL_TRUE)
 static void cxHueMatrix(int hue, float* m)
 {
     double th = 3.14159265358979323846 / 180.0 * hue;
-    double ca = cos(th), sa = sin(th);
-    m[0] = (float)(ca + (1.0 - ca) * 0.299);         m[1] = (float)((1.0 - ca) * 0.587 - sa * 0.588);  m[2] = (float)((1.0 - ca) * 0.114 + sa * 0.587);
-    m[3] = (float)((1.0 - ca) * 0.299 + sa * 0.587); m[4] = (float)(ca + (1.0 - ca) * 0.587);          m[5] = (float)((1.0 - ca) * 0.114 - sa * 0.299);
-    m[6] = (float)((1.0 - ca) * 0.299 - sa * 0.587); m[7] = (float)((1.0 - ca) * 0.587 + sa * 0.299);  m[8] = (float)(ca + (1.0 - ca) * 0.114);
+    double c = cos(th), s = sin(th);
+    m[0] = (float)(0.299 + 0.701 * c + 0.168 * s);
+    m[1] = (float)(0.587 - 0.587 * c + 0.330 * s);
+    m[2] = (float)(0.114 - 0.114 * c - 0.497 * s);
+    m[3] = (float)(0.299 - 0.299 * c - 0.328 * s);
+    m[4] = (float)(0.587 + 0.413 * c + 0.035 * s);
+    m[5] = (float)(0.114 - 0.114 * c + 0.292 * s);
+    m[6] = (float)(0.299 - 0.300 * c + 1.250 * s);
+    m[7] = (float)(0.587 - 0.588 * c - 1.050 * s);
+    m[8] = (float)(0.114 + 0.886 * c - 0.203 * s);
 }
 
 CXRendererGl::CXRendererGl(QWidget* parent)
@@ -266,8 +272,8 @@ void CXRendererGl::paintGL()
     m_prog->setUniformValue(m_uSat, (float)cxEqSatPermil(m_eq) / 1000.0f);
     float hfm[9];
     cxHueMatrix(m_eq.hue, hfm);
-    QMatrix3x3 mat(hfm);
-    m_prog->setUniformValue(m_uHue, mat);
+    // QMatrix3x3 是行主序,Qt 上传按列主序读 → transpose=GL_TRUE 保持一致
+    glUniformMatrix3fv(m_uHue, 1, GL_TRUE, hfm);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_tex);
