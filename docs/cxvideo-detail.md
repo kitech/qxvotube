@@ -258,6 +258,19 @@ while(!stop):
 - **pri**:`cffhw/renderer_gl/cxeq` 三件 + `LIBS += -lGL`(两 Qt 均需)+ `greaterThan(QT_MAJOR_VERSION,5): QT += openglwidgets`;eng_ffmpeg.h 补 include cxffdec.h 完整型(inline hwName)。
 - **实测**(Qt3/Qt6,双绿):编 0 failures;基线 0 failures 不回退;七探针(旧五 + hw/gl)Qt3 全 OK/SKIP、Qt6 全 OK/SKIP;`qlvotube` q3votube/q6votube 重链绿(ldd GL 库齐,无 not found)。
 
+### 7.7 M4-B 实装记录(2026-11;mpv render_context 渲染路 + EQ/截图补齐,Qt3/Qt6 双绿)
+
+- **route 选择与回退**(eng_mpv):`open()` 先试 **gl 路**(`p_host` 有 + render 四件套符号齐:`mpv_render_context_create/free/render` + `set_update_callback`),`vo=libmpv`、`force-window=no`、自建 `CXRendererMpvGl` 挂 host;`render_context_create` 失败或 `mpv_initialize` 失败 → `closeInternal()` 重建走 **wid 路**(M1/M2/M3 原路径零改)。`renderPath()` 如实报 `"mpv-gl"`/`"mpv-wid"`/`0`。**注意 render_context_create 是 3 参**(`(ctx**, mpv_handle*, params)`),镜像 typedef 首版漏 handle 编译即炸。
+- **update 驱动**(renderer_mpvgl):mpv 内部线程回调 `cxMpvGlUpdateHook` → `QApplication::postEvent(view, QEvent(User+4710))` → GUI 线程 `event()` 里 `update()`。**坑:Qt3 `QApplication::sendPostedEvents` 派发后自己 `delete` 事件,我们再 `delete ev` 即 double free 崩**(首版即踩,段错误在 sendPostedEvents)。故 `event()` 只 return true 不 delete。
+- **paintGL**:`mpv_render_context_render(OPENGL_FBO + FLIP_Y)` 直渲当前 FBO(0),成功后 `report_swap`;不产自家几何/不碰自家 GL 状态。Qt6 core profile 仍须**空 VAO**(`QOpenGLVertexArrayObject::create()+bind()`,core context 无 VAO 时 attrib 相关默认态非法);Qt3 QGLWidget 无需。
+- **get_proc_address**:Qt3 用 `glXGetProcAddressARB`(QGLContext 无该 API),Qt6 用 `QOpenGLContext::currentContext()->getProcAddress`;**须在 makeCurrent 后 create**(engine 侧显式 makeCurrent/doneCurrent)。
+- **EQ 直通**(eng_mpv::setEq):`brightness/contrast/saturation`(-100..100 与 `CXVideoEq` 同域)、`hue`(±180)直接 `mpv_set_property(INT64)`;**mpv vo 未初始化时属性不可用(-9),此时返回 false 如实**(探针记录 eq=0/1 均可容忍,但 gl 路正常播放后实测 eq=1)。
+- **截图**(eng_mpv::screenshot):`screenshot-to-file` 命令,仅 `mpv-gl` 路;wid 路恒 false。**坑**:`keep-open=no` 下 EOF 后无帧可截,必须**播放中**调用(探针 600ms singleShot;`CxShotWorker` 加 path 参数复用)。mpv 软截图回退(`Falling back to software screenshot`)可正常落 PNG。
+- **发现的 M1 潜伏缺陷(已修)**:**`CxMpvFormat` 枚举整套错位**——旧镜像把 `OsdString/Flag/Int64/Double` 排成 5/6/7/8,官方冻结序是 **OSD=2, Flag=3, Int64=4, Double=5**。后果:`time-pos/duration` 以 Double=8(=NODE_MAP)观测**永不投递** → mpv 内核 `positionChanged` 从未走过;`track-list/count` Int64 同错。M3-A 字幕侥幸用 String=1 正确值才通。修复后 mpv-gl 探针 frames=15 正常。**教训:dlopen 镜像的枚举冻结值必须逐条对官方 client.h**。
+- **探针新增**:`--mpv-gl-probe`(GUI 前提;main 预扫与 `--gl-probe` 同;断言 `renderPath=mpv-gl` + frames>0 + finished=1 + EQ 设置 + 播放中截图 PNG>1KB;符号缺/无 GL → SKIP 或 wid 回退帧流断言)。`CX_MPV_DEBUG=1` 打开 mpv terminal 日志与 EQ/pos 调试印。
+- **pri**:`renderer_mpvgl.{h,cpp}` 入 SOURCES/HEADERS。
+- **实测**(Qt3/Qt6,双绿):编 0 failures;基线 0 failures;八探针(旧七 + mpv-gl)全 OK/SKIP(`mpv-gl-probe: OK (render=mpv-gl frames=15 eq=1 shot=1)`);`qlvotube` q3votube/q6votube 重链绿。
+
 ## 8. Qt3 兼容层(逐条)
 
 | Qt5/6 用法 | Qt3 等价 / 化解 |

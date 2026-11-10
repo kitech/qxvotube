@@ -96,6 +96,15 @@ bool CxMpvApi::ensure()
     mpv_free              = (CxMpvFreeFn)cxMpvSym(lib, "mpv_free", false, &ok);
     mpv_wakeup            = (CxMpvWakeupFn)cxMpvSym(lib, "mpv_wakeup", false, &ok);
     mpv_get_property      = (CxMpvGetPropertyFn)cxMpvSym(lib, "mpv_get_property", false, &ok); // M3-A 可选
+    // M4-B:全可选;render 四件套齐备引擎才开 gl 路,缺则回退 wid
+    mpv_set_property                   = (CxMpvSetPropertyFn)cxMpvSym(lib, "mpv_set_property", false, &ok);
+    mpv_render_context_create          = (CxMpvRenderCreateFn)cxMpvSym(lib, "mpv_render_context_create", false, &ok);
+    mpv_render_context_free            = (CxMpvRenderFreeFn)cxMpvSym(lib, "mpv_render_context_free", false, &ok);
+    mpv_render_context_render          = (CxMpvRenderRenderFn)cxMpvSym(lib, "mpv_render_context_render", false, &ok);
+    mpv_render_context_set_update_callback
+        = (CxMpvRenderSetUpdateCbFn)cxMpvSym(lib, "mpv_render_context_set_update_callback", false, &ok);
+    mpv_render_context_report_swap     = (CxMpvRenderReportSwapFn)cxMpvSym(lib, "mpv_render_context_report_swap", false, &ok);
+    mpv_render_context_update          = (CxMpvRenderUpdateFn)cxMpvSym(lib, "mpv_render_context_update", false, &ok);
 
     if (!ok) {
         // 不 dlclose:避免与后续线程环境互相残杀,just 永久停用

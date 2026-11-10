@@ -24,6 +24,7 @@ CXVIDEO_CPP = \
     $$CXVIDEO/src/cxvideoplayer.cpp \
     $$CXVIDEO/src/renderer_software.cpp \
     $$CXVIDEO/src/renderer_gl.cpp \
+    $$CXVIDEO/src/renderer_mpvgl.cpp \
     $$CXVIDEO/src/renderer_probe.cpp
 
 # compatcore34 归属 qlcomp;qlite.pri 的 compat34.cpp 内部已 include 它,
@@ -51,6 +52,7 @@ CXVIDEO_HDR = \
     $$CXVIDEO/src/cxrenderer.h \
     $$CXVIDEO/src/renderer_software.h \
     $$CXVIDEO/src/renderer_gl.h \
+    $$CXVIDEO/src/renderer_mpvgl.h \
     $$CXVIDEO/src/renderer_probe.h \
     $$CXVIDEO/src/cxengine.h \
     $$CXVIDEO/src/eng_mpv_cmd.h \

@@ -2,6 +2,7 @@
 #define CXENGMPV_H
 
 #include "cxengine.h"
+#include "cxvideo_global.h" // CXVideoEq(M4-B setEq)
 
 // libmpv 内嵌内核(detail.md 第 7 节)
 // - 不硬链:dlopen 运行时探测(M1),缺失自动降级
@@ -11,6 +12,7 @@
 
 class CXMpvPump;
 struct CXMpvUiEvent;
+class CXVideoEq;
 
 class CXEngineMpv : public CXEngine {
     Q_OBJECT
@@ -37,6 +39,13 @@ public:
     bool setSubtitleTrack(int idx);   // -1=关闭
     bool setSubtitleFile(const QString& path);
 
+    // M4-B:mpv 自带 EQ(brightness/contrast/saturation/hue 属性直写)
+    bool setEq(const CXVideoEq& eq);
+    bool screenshot(const QString& path); // 仅 mpv-gl 路;wid 路恒 false
+
+    // M4-B:渲染路名("mpv-gl"/"mpv-wid"/未 open=0;selftest 探针用)
+    const char* renderPath() const { return m_renderPath; }
+
     ~CXEngineMpv();
 
 protected:
@@ -48,11 +57,16 @@ private:
     friend CXEngine* cxEngineCreateFor(CxEngineType type);
 
     CXEngineMpv() : CXEngine(), h_mpv(0), m_pump(0), m_loaded(false),
-                    m_seekTarget(-1) { }
+                    h_rc(0), m_renderPath(0), m_glv(0)
+                    , m_seekTarget(-1) { }
     void closeInternal();
     void dispatchEvent(const CXMpvUiEvent* ev);
+    bool cxOpenCore(const QString& routeUrl, bool glRoute);
 
     void* h_mpv;       // mpv_handle*
+    void* h_rc;        // mpv_render_context*(M4-B;0=wid 路)
+    const char* m_renderPath;
+    void* m_glv;       // CXRendererMpvGl*(仅 gl 路)
     CXMpvPump* m_pump;
     bool m_loaded;
     long m_seekTarget;

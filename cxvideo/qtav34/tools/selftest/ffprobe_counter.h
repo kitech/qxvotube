@@ -40,14 +40,17 @@ public slots:
 class CxShotWorker : public QObject {
     Q_OBJECT
 public:
-    CxShotWorker(CXEngine* e) : QObject(), eng(e), ok(false) { }
+    CxShotWorker(CXEngine* e, const char* path = 0)
+        : QObject(), eng(e), ok(false),
+          shotPath(path != 0 ? QString::fromLatin1(path)
+                            : QString::fromLatin1("/tmp/opencode/cxvideo_shot.png")) { }
     CXEngine* eng;
     bool ok;
+    QString shotPath;
 public slots:
     void take()
     {
-        ok = eng->screenshot(QString::fromLatin1(
-            "/tmp/opencode/cxvideo_shot.png"));
+        ok = eng->screenshot(shotPath);
     }
 };
 

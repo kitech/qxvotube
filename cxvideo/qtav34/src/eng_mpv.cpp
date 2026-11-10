@@ -1,6 +1,7 @@
 #include "compat34.h"
 #include "eng_mpv.h"
 #include "cxmpv_def.h"
+#include "renderer_mpvgl.h" // M4-B GL 路
 #include "cxthread.h"
 #include "cxframe.h"
 #include <qapplication.h>
@@ -94,8 +95,11 @@ private:
             if (pr->format == CxMpvFmtDouble) {
                 double secs = *(double*)pr->data;
                 long ms = (long)(secs * 1000.0 + 0.5);
-                if (strcmp(pr->name, "time-pos") == 0)
+                if (strcmp(pr->name, "time-pos") == 0) {
+                    if (getenv("CX_MPV_DEBUG") != 0)
+                        fprintf(stderr, "pos-ev %ld\n", ms);
                     post(CxMpvUiEvPos, ms, 0);
+                }
                 else if (strcmp(pr->name, "duration") == 0)
                     post(CxMpvUiEvDur, ms, 0);
             } else if (pr->format == CxMpvFmtString &&
@@ -166,6 +170,25 @@ bool CXEngineMpv::open(const QString& url)
     m_loaded = false;
     m_seekTarget = -1;
 
+    // M4-B:gl 路(host + render 符号齐)优先;失败逐级回退 wid 路
+    bool gl = p_host != 0 &&
+              api.mpv_render_context_create != 0 &&
+              api.mpv_render_context_render != 0 &&
+              api.mpv_render_context_free != 0;
+    if (gl) {
+        if (cxOpenCore(url, true))
+            return true;
+        closeInternal(); // 半吊子清干净,重建走 wid
+    }
+    return cxOpenCore(url, false);
+}
+
+// M4-B:open 主体(route=true 用 vo=libmpv + render_context;
+// false 走 wid 原生嵌入,与 M1/M2/M3 行为一致)
+bool CXEngineMpv::cxOpenCore(const QString& url, bool glRoute)
+{
+    CxMpvApi& api = CxMpvApi::instance();
+
     void* mpv = api.mpv_create();
     if (mpv == 0) {
         emit noticedError((int)CxErrEngine, QString("mpv_create failed"));
@@ -177,9 +200,17 @@ bool CXEngineMpv::open(const QString& url)
     api.mpv_set_option_string(mpv, "input-vo-keyboard", "no");
     api.mpv_set_option_string(mpv, "cache", "yes");
     api.mpv_set_option_string(mpv, "keep-open", "no");
+    if (getenv("CX_MPV_DEBUG") != 0) {
+        api.mpv_set_option_string(mpv, "terminal", "yes");
+        api.mpv_set_option_string(mpv, "msg-level", "all=v");
+    }
 
-    if (p_host != 0) {
-        // wid 原生嵌入(Qt3 唯一可行渲染路;无 GL 依赖)
+    if (glRoute) {
+        // vo=libmpv 不吃 wid/force-window;窗口由 CXRendererMpvGl 提
+        api.mpv_set_option_string(mpv, "vo", "libmpv");
+        api.mpv_set_option_string(mpv, "force-window", "no");
+    } else if (p_host != 0) {
+        // wid 原生嵌入(无 GL 依赖回退路)
         char buf[32];
         snprintf(buf, sizeof(buf), "0x%llx", (unsigned long long)p_host->winId());
         api.mpv_set_option_string(mpv, "wid", buf);
@@ -198,13 +229,52 @@ bool CXEngineMpv::open(const QString& url)
         char errtxt[64];
         snprintf(errtxt, sizeof(errtxt), "mpv_initialize ret=%d", r);
         api.mpv_terminate_destroy(mpv);
-        emit noticedError((int)CxErrEngine, QString(errtxt));
-        return false;
+        if (!glRoute) {
+            emit noticedError((int)CxErrEngine, QString(errtxt));
+            return false;
+        }
+        return false; // gl 路:外层静默回退 wid
     }
 
     h_mpv = mpv;
     m_pump = new CXMpvPump(this, mpv);
     m_pump->start();
+
+    // gl 路二阶段:host 挂视图 → GL context 现场 → render_context
+    if (glRoute) {
+        CXRendererMpvGl* v = (CXRendererMpvGl*)cxMpvGlViewCreate(p_host);
+        cxMpvGlViewGeometry(v, p_host->width(), p_host->height());
+        v->show();
+        cxMpvGlStartNotify(v);
+        v->makeCurrent();
+        CxMpvOpenglInitParams ip;
+        cxMpvGlViewInitParams(&ip);
+        CxMpvRenderParam rp[3];
+        rp[0].type = CxMpvRenderParamApiType;
+        rp[0].data = (void*)"opengl";
+        rp[1].type = CxMpvRenderParamOpenGLInitParams;
+        rp[1].data = &ip;
+        rp[2].type = CxMpvRenderParamInvalid;
+        rp[2].data = 0;
+        bool ok = api.mpv_render_context_create(
+                      (CxMpvRenderCtx**)&h_rc, mpv, rp) == 0 && h_rc != 0;
+        v->doneCurrent();
+        if (!ok) {
+            h_rc = 0;
+            cxMpvGlStopNotify();
+            cxMpvGlViewDelete(v);
+            closeInternal();
+            return false; // 外层回退 wid
+        }
+        cxMpvGlViewSet(v, h_rc);
+        if (api.mpv_render_context_set_update_callback != 0)
+            api.mpv_render_context_set_update_callback(
+                (CxMpvRenderCtx*)h_rc, cxMpvGlUpdateHook, v);
+        m_renderPath = "mpv-gl";
+        m_glv = v;
+    } else {
+        m_renderPath = "mpv-wid";
+    }
 
     QByteArray ba = qToUtf8(m_url);
     if (!cxMpvRunCmd2(api, mpv, "loadfile", ba.data())) {
@@ -217,6 +287,21 @@ bool CXEngineMpv::open(const QString& url)
 
 void CXEngineMpv::closeInternal()
 {
+    // M4-B:render 对象须先于 mpv_terminate_destroy 收
+    CxMpvApi& apiPrec = CxMpvApi::instance();
+    if (h_rc != 0 && apiPrec.mpv_render_context_free != 0) {
+        if (apiPrec.mpv_render_context_set_update_callback != 0)
+            apiPrec.mpv_render_context_set_update_callback(
+                (CxMpvRenderCtx*)h_rc, 0, 0); // 解注册渲染线程回调
+        apiPrec.mpv_render_context_free((CxMpvRenderCtx*)h_rc);
+    }
+    h_rc = 0;
+    m_renderPath = 0;
+    if (m_glv != 0) {
+        cxMpvGlStopNotify();
+        cxMpvGlViewDelete(m_glv);
+        m_glv = 0;
+    }
     if (m_pump != 0) {
         m_pump->requestStop();
         CxMpvApi& api = CxMpvApi::instance();
@@ -474,6 +559,46 @@ bool CXEngineMpv::setSubtitleFile(const QString& path)
         return false;
     QByteArray pa = qToUtf8(path);
     const char* args[3] = { "sub-add", pa.data(), 0 }; // 默认 select
+    return CxMpvApi::instance().mpv_command(h_mpv, args) == 0;
+}
+
+// ── M4-B:EQ 属性直写 + 截图 ──
+
+static bool cxMpvSetPropInt(CxMpvApi& api, void* h, const char* prop, int v)
+{
+    if (api.mpv_set_property == 0)
+        return false;
+    long long val = v;
+    int r = api.mpv_set_property(h, prop, (int)CxMpvFmtInt64, &val);
+    if (r < 0 && getenv("CX_MPV_DEBUG") != 0)
+        fprintf(stderr, "setEq: %s=%d ret=%d\n", prop, v, r);
+    return r == 0;
+}
+
+// 直通映射(域一致 §7.7):四项与 mpv -100..100 / hue ±180 同域
+bool CXEngineMpv::setEq(const CXVideoEq& eq)
+{
+    if (h_mpv == 0)
+        return false;
+    CxMpvApi& api = CxMpvApi::instance();
+    if (api.mpv_set_property == 0)
+        return false;
+    bool ok = true;
+    ok &= cxMpvSetPropInt(api, h_mpv, "brightness", eq.brightness);
+    ok &= cxMpvSetPropInt(api, h_mpv, "contrast", eq.contrast);
+    ok &= cxMpvSetPropInt(api, h_mpv, "saturation", eq.saturation);
+    ok &= cxMpvSetPropInt(api, h_mpv, "hue", eq.hue);
+    return ok;
+}
+
+// 仅 mpv-gl 路可(screenshot-to-file;wid 无控);探针规格与 M3-B 对齐
+bool CXEngineMpv::screenshot(const QString& path)
+{
+    if (h_mpv == 0 || m_renderPath == 0 ||
+        strcmp(m_renderPath, "mpv-gl") != 0)
+        return false;
+    QByteArray pa = qToUtf8(path);
+    const char* args[3] = { "screenshot-to-file", pa.data(), 0 };
     return CxMpvApi::instance().mpv_command(h_mpv, args) == 0;
 }
 

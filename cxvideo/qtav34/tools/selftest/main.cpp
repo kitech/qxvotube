@@ -7,10 +7,13 @@
 #include "renderer_probe.h"
 #include "renderer_software.h"
 #include "renderer_gl.h"
+#include "renderer_mpvgl.h"
 #include "cxframe.h"
 #include "ffprobe_counter.h"
 #include <qtimer.h>
 #include <qfile.h>
+#include <unistd.h>
+#include <qfileinfo.h>
 #ifdef QT3_BUILD
 #include <qapplication.h>
 #else
@@ -431,13 +434,94 @@ static int cxRunGlProbe(void* appRaw)
     return 0;
 }
 
-int main(int argc, char* argv[])
+// ── M4-B mpv-gl 探针:eng_mpv render_context 路 ──
+// 有 GL+render 符号 → OK(renderPath=mpv-gl;EQ 不炸;截图落地);
+// 否则如实 SKIP(wid 回退路帧流照旧断言)
+static int cxRunMpvGlProbe(void* appRaw)
 {
-    // M4-A:--gl-probe 需 GUI-enabled app(QGLWidget/QOpenGLWidget);
+    QApplication* app = (QApplication*)appRaw;
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
+    const char* vidPath = "/tmp/opencode/cxvideo_selftest.mp4";
+    if (system("test -f /tmp/opencode/cxvideo_selftest.mp4 "
+               "2>/dev/null </dev/null") != 0) {
+        printf("mpv-gl-probe: SKIP (media missing; run --ff-probe first)\n");
+        return 0;
+    }
+    CXEngine* eng = cxEngineCreateFor(CxEngineMpv);
+    if (eng == 0) {
+        printf("mpv-gl-probe: SKIP (libmpv unavailable)\n");
+        return 0;
+    }
+    printf("mpv-gl-probe: engine=%s\n", eng->name());
+    CXRendererMpvGl view(0);
+    view.resize(384, 288);
+    view.show();
+    eng->setHostWidget(&view);
+    CxFFProbeCounter cnt;
+    QObject::connect(eng, SIGNAL(finished()), &cnt, SLOT(onFinished()));
+    QObject::connect(eng, SIGNAL(finished()), app, SLOT(quit()));
+    QObject::connect(eng, SIGNAL(positionChanged(long)), &cnt, SLOT(onFrame(long)));
+    if (!eng->open(QString::fromLatin1(vidPath))) {
+        printf("mpv-gl-probe: FAIL (open)\n");
+        delete eng;
+        return 1;
+    }
+    // M4-B:EQ 路交验(不炸即过;返回值如实记录)
+    CXVideoEq mpveq;
+    mpveq.brightness = 30; mpveq.contrast = 20;
+    mpveq.saturation = 40; mpveq.hue = -15;
+    bool eqOk = ((CXEngineMpv*)eng)->setEq(mpveq);
+    const char* rp = ((CXEngineMpv*)eng)->renderPath();
+    bool glRoute = rp != 0 && strcmp(rp, "mpv-gl") == 0;
+    QString shotPath = QString::fromLatin1("/tmp/opencode/cxvideo_mpvgl_shot.png");
+    QFile::remove(shotPath);
+    CxShotWorker shot(eng, "/tmp/opencode/cxvideo_mpvgl_shot.png"); // 播放中截图(600ms;keep-open=no 下 EOF 后无帧可截)
+    if (glRoute)
+        QTimer::singleShot(600, &shot, SLOT(take()));
+    eng->play();
+    QTimer::singleShot(10000, app, SLOT(quit()));
+    app->exec();
+    bool shotOk = false;
+    if (glRoute) {
+        for (int i = 0; i < 30 && !shotOk; i++) { // mpv 命令异步落盘,轮询至 3s
+            if (QFileInfo(shotPath).size() > 1000)
+                shotOk = true;
+            else
+                usleep(100000);
+        }
+        shotOk = shotOk && shot.ok;
+    }
+    eng->stop();
+    delete eng;
+    if (rp != 0 && strcmp(rp, "mpv-gl") == 0) {
+        // gl 路:帧流 + 截图断言
+        if (cnt.frames <= 0 || cnt.gotFinished != 1 || !shotOk ||
+            QFileInfo(shotPath).size() <= 1000) {
+            printf("mpv-gl-probe: FAIL (frames=%d finished=%d eq=%d shot=%d)\n",
+                   cnt.frames, cnt.gotFinished, (int)eqOk, (int)shotOk);
+            return 1;
+        }
+        printf("mpv-gl-probe: OK (render=mpv-gl frames=%d eq=%d shot=%d)\n",
+               cnt.frames, (int)eqOk, (int)shotOk);
+        return 0;
+    }
+    if (cnt.frames > 0 && cnt.gotFinished == 1) {
+        printf("mpv-gl-probe: SKIP (wid fallback; frames=%d)\n", cnt.frames);
+        return 0;
+    }
+    printf("mpv-gl-probe: FAIL (frames=%d finished=%d render=%s)\n",
+           cnt.frames, cnt.gotFinished, rp != 0 ? rp : "none");
+    return 1;
+}
+
+int main(int argc, char* argv[])
+{    // M4-A:--gl-probe 需 GUI-enabled app(QGLWidget/QOpenGLWidget);
     // 先于 app 构造预扫 argv
     bool glProbeMode = false;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--gl-probe") == 0)
+        if (strcmp(argv[i], "--gl-probe") == 0 ||
+            strcmp(argv[i], "--mpv-gl-probe") == 0)
             glProbeMode = true;
     }
 #ifdef QT3_BUILD
@@ -489,6 +573,13 @@ int main(int argc, char* argv[])
     }
     if (hwProbeMode)
         return cxRunHwProbe(&app);
+    bool mpvGlProbeMode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--mpv-gl-probe") == 0)
+            mpvGlProbeMode = true;
+    }
+    if (mpvGlProbeMode)
+        return cxRunMpvGlProbe(&app);
     if (glProbeMode)
         return cxRunGlProbe(&app);
 

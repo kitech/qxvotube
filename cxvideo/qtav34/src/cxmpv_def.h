@@ -16,14 +16,15 @@ typedef void CxMpvHandle; // mpv_handle*
 // mpv_format(client.h 冻结值)
 enum CxMpvFormat {
     CxMpvFmtNone = 0,
-    CxMpvFmtString = 1,
-    CxMpvFmtNode = 2,
-    CxMpvFmtNodeArray = 3,
-    CxMpvFmtNodeMap = 4,
-    CxMpvFmtOsdString = 5,
-    CxMpvFmtFlag = 6,
-    CxMpvFmtInt64 = 7,
-    CxMpvFmtDouble = 8
+    CxMpvFmtString = 1,      // 官方冻结序(旧版错位已修:Double 曾误配 8)
+    CxMpvFmtOsdString = 2,
+    CxMpvFmtFlag = 3,
+    CxMpvFmtInt64 = 4,
+    CxMpvFmtDouble = 5,
+    CxMpvFmtNode = 6,
+    CxMpvFmtNodeArray = 7,
+    CxMpvFmtNodeMap = 8,
+    CxMpvFmtByteArray = 9
 };
 
 // mpv_event_id(client.h 冻结值)
@@ -92,6 +93,52 @@ typedef const char* (*CxMpvEventNameFn)(int);
 typedef void (*CxMpvFreeFn)(void*);
 typedef void (*CxMpvWakeupFn)(void*);
 typedef int (*CxMpvGetPropertyFn)(void*, const char*, int, void*); // M3-A 轨道枚举
+typedef int (*CxMpvSetPropertyFn)(void*, const char*, int, void*); // M4-B EQ 属性直写
+
+// M4-B:render.h/render_gl.h 官方冻结值(dlopen 不带头文件)
+typedef void CxMpvRenderCtx; // mpv_render_context*(opaque)
+typedef void* (*CxMpvRenderGetProc)(void* ctx, const char* name);
+
+// mpv_render_param(render.h 镜像)
+typedef struct CxMpvRenderParam {
+    int type;
+    void* data;
+} CxMpvRenderParam;
+
+// mpv_render_param_type(render.h 冻结值)
+enum CxMpvRenderParamType {
+    CxMpvRenderParamInvalid          = 0,
+    CxMpvRenderParamApiType          = 1, // "opengl"
+    CxMpvRenderParamOpenGLInitParams = 2,
+    CxMpvRenderParamOpenGLFbo        = 3,
+    CxMpvRenderParamFlipY            = 4,
+    CxMpvRenderParamDepth            = 5,
+    CxMpvRenderParamIccProfile       = 6,
+    CxMpvRenderParamAlphaMode        = 7
+};
+
+// mpv_opengl_init_params(render_gl.h 冻结布局前两字段)
+typedef struct CxMpvOpenglInitParams {
+    CxMpvRenderGetProc get_proc_address;
+    void*              get_proc_address_ctx;
+} CxMpvOpenglInitParams;
+
+// mpv_opengl_fbo(render_gl.h)
+typedef struct CxMpvOpenglFbo {
+    int fbo;
+    int w;
+    int h;
+    int internal_format; // 0=默认 RGBA8
+} CxMpvOpenglFbo;
+
+typedef int  (*CxMpvRenderCreateFn)(CxMpvRenderCtx** ctx, void* mpv,
+                                     CxMpvRenderParam* params);
+typedef void (*CxMpvRenderFreeFn)(CxMpvRenderCtx* ctx);
+typedef int  (*CxMpvRenderRenderFn)(CxMpvRenderCtx* ctx, CxMpvRenderParam* params);
+typedef void (*CxMpvRenderSetUpdateCbFn)(CxMpvRenderCtx* ctx,
+                                         void (*cb)(void*), void* cb_ctx);
+typedef void (*CxMpvRenderReportSwapFn)(CxMpvRenderCtx* ctx);
+typedef int  (*CxMpvRenderUpdateFn)(CxMpvRenderCtx* ctx); // 旧 API 兼容
 
 class CxMpvApi {
 public:
@@ -115,6 +162,14 @@ public:
     CxMpvFreeFn mpv_free;
     CxMpvWakeupFn mpv_wakeup;
     CxMpvGetPropertyFn mpv_get_property; // M3-A(可选;缺则轨道 API 返 0/false)
+    // M4-B(全可选;render 四件套齐才开 gl 路,缺则回退 wid)
+    CxMpvSetPropertyFn mpv_set_property;
+    CxMpvRenderCreateFn      mpv_render_context_create;
+    CxMpvRenderFreeFn        mpv_render_context_free;
+    CxMpvRenderRenderFn      mpv_render_context_render;
+    CxMpvRenderSetUpdateCbFn mpv_render_context_set_update_callback;
+    CxMpvRenderReportSwapFn  mpv_render_context_report_swap;
+    CxMpvRenderUpdateFn      mpv_render_context_update;
 
 private:
     CxMpvApi() : loaded(false), lib(0), mpv_create(0), mpv_initialize(0),
@@ -122,7 +177,13 @@ private:
                  mpv_command(0), mpv_observe_property(0), mpv_wait_event(0),
                  mpv_set_wakeup_callback(0), mpv_client_api_version(0),
                  mpv_event_name(0), mpv_free(0), mpv_wakeup(0),
-                 mpv_get_property(0) { }
+                 mpv_get_property(0),
+                 mpv_set_property(0),
+                 mpv_render_context_create(0), mpv_render_context_free(0),
+                 mpv_render_context_render(0),
+                 mpv_render_context_set_update_callback(0),
+                 mpv_render_context_report_swap(0),
+                 mpv_render_context_update(0) { }
 };
 
 #endif // CXMPV_DEF_H
