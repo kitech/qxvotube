@@ -20,8 +20,10 @@ CXVIDEO_CPP = \
     $$CXVIDEO/src/cffao_sdl.cpp \
     $$CXVIDEO/src/cxffathread.cpp \
     $$CXVIDEO/src/cffsub.cpp \
+    $$CXVIDEO/src/cffhw.cpp \
     $$CXVIDEO/src/cxvideoplayer.cpp \
     $$CXVIDEO/src/renderer_software.cpp \
+    $$CXVIDEO/src/renderer_gl.cpp \
     $$CXVIDEO/src/renderer_probe.cpp
 
 # compatcore34 归属 qlcomp;qlite.pri 的 compat34.cpp 内部已 include 它,
@@ -44,8 +46,11 @@ CXVIDEO_HDR = \
     $$CXVIDEO/src/cxffathread.h \
     $$CXVIDEO/src/cffsub.h \
     $$CXVIDEO/src/cffsthread.h \
+    $$CXVIDEO/src/cffhw.h \
+    $$CXVIDEO/src/cxeq.h \
     $$CXVIDEO/src/cxrenderer.h \
     $$CXVIDEO/src/renderer_software.h \
+    $$CXVIDEO/src/renderer_gl.h \
     $$CXVIDEO/src/renderer_probe.h \
     $$CXVIDEO/src/cxengine.h \
     $$CXVIDEO/src/eng_mpv_cmd.h \
@@ -81,6 +86,11 @@ FF_DEPS = $$system(pkg-config --libs libavformat libavcodec libswscale libswresa
     FF_LIBDIR = $$system(pkg-config --variable=libdir libavformat 2>/dev/null)
     !isEmpty(FF_LIBDIR): LIBS += -Wl,-rpath-link,$$FF_LIBDIR
     LIBS += $$FF_DEPS
+
+    # M4-A:GL 渲染路(Qt3 QGLWidget 需 -lGL;Qt6 需 openglwidgets 模块)
+    LIBS += -lGL
+    greaterThan(QT_MAJOR_VERSION, 5): QT += openglwidgets
+    DEFINES += WITH_CX_RENDERER_GL
     DEFINES += WITH_CX_ENGINE_FFMPEG
 
     # M2.1 音频输出后端:silent 恒编(无设备/CI 兜底);其余 pkg-config

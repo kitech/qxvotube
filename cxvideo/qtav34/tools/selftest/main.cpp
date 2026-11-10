@@ -6,6 +6,7 @@
 #include "eng_ffmpeg.h"
 #include "renderer_probe.h"
 #include "renderer_software.h"
+#include "renderer_gl.h"
 #include "cxframe.h"
 #include "ffprobe_counter.h"
 #include <qtimer.h>
@@ -13,7 +14,7 @@
 #ifdef QT3_BUILD
 #include <qapplication.h>
 #else
-#include <qcoreapplication.h>
+#include <QApplication> // M4-A:--gl-probe 需 GUI(QOpenGLWidget)
 #endif
 #include <stdio.h>
 #include <stdlib.h>
@@ -329,12 +330,120 @@ static int cxRunRateProbe(void* appRaw)
     return 0;
 }
 
-int main(int argc, char* argv[])
+// ── M4-A 硬解探针(--hw-probe):探活(vaapi→cuda)实播一程;
+// 无 hw → SKIP(软解本体断言照旧);有 hw → OK 打名
+static int cxRunHwProbe(void* appRaw)
 {
 #ifdef QT3_BUILD
-    QApplication app(argc, argv, false);
+    QApplication* app = (QApplication*)appRaw;
 #else
-    QCoreApplication app(argc, argv);
+    QCoreApplication* app = (QCoreApplication*)appRaw;
+#endif
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
+    const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    if (system("test -f /tmp/opencode/cxvideo_selftest.mp4 "
+               "2>/dev/null </dev/null") != 0) {
+        printf("hw-probe: SKIP (media missing; run --ff-probe first)\n");
+        return 0;
+    }
+    CXEngine* eng = cxEngineCreateFor(CxEngineFfmpeg);
+    if (eng == 0) {
+        printf("hw-probe: SKIP (WITH_CX_ENGINE_FFMPEG off)\n");
+        return 0;
+    }
+    printf("hw-probe: engine=%s\n", eng->name());
+    CxFFProbeCounter cnt;
+    QObject::connect(eng, SIGNAL(finished()), &cnt, SLOT(onFinished()));
+    QObject::connect(eng, SIGNAL(finished()), app, SLOT(quit()));
+    QObject::connect(eng, SIGNAL(positionChanged(long)),
+                     &cnt, SLOT(onFrame(long)));
+    if (!eng->open(QString::fromLatin1(path))) {
+        printf("hw-probe: FAIL (open)\n");
+        delete eng;
+        return 1;
+    }
+    eng->play();
+    QTimer::singleShot(10000, app, SLOT(quit()));
+    app->exec();
+    const char* hw = ((CXEngineFfmpeg*)eng)->hwName();
+    eng->stop();
+    delete eng;
+    if (cnt.frames <= 0 || cnt.gotFinished != 1) {
+        printf("hw-probe: FAIL (frames=%d finished=%d)\n",
+               cnt.frames, cnt.gotFinished);
+        return 1;
+    }
+    if (hw == 0) {
+        printf("hw-probe: SKIP (hw-unavail; soft-decode flow OK, frames=%d)\n",
+               cnt.frames);
+        return 0;
+    }
+    printf("hw-probe: OK (hw=%s frames=%d finished=1)\n", hw, cnt.frames);
+    return 0;
+}
+
+// ── M4-A GL 渲染探针(--gl-probe):QGLWidget/QOpenGLWidget 实渲一程;
+// GUI 前提(main 里 GUI-enabled 构造,无 DISPLAY 由 QApplication 自报)
+static int cxRunGlProbe(void* appRaw)
+{
+    QApplication* app = (QApplication*)appRaw;
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
+    const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    if (system("test -f /tmp/opencode/cxvideo_selftest.mp4 "
+               "2>/dev/null </dev/null") != 0) {
+        printf("gl-probe: SKIP (media missing; run --ff-probe first)\n");
+        return 0;
+    }
+    CXEngine* eng = cxEngineCreateFor(CxEngineFfmpeg);
+    if (eng == 0) {
+        printf("gl-probe: SKIP (WITH_CX_ENGINE_FFMPEG off)\n");
+        return 0;
+    }
+    printf("gl-probe: engine=%s\n", eng->name());
+    CXRendererGl view(0);
+    view.resize(320, 240);
+    view.show();
+    eng->setRenderer(&view);
+    CxFFProbeCounter cnt;
+    QObject::connect(eng, SIGNAL(finished()), &cnt, SLOT(onFinished()));
+    QObject::connect(eng, SIGNAL(finished()), app, SLOT(quit()));
+    QObject::connect(eng, SIGNAL(positionChanged(long)),
+                     &cnt, SLOT(onFrame(long)));
+    if (!eng->open(QString::fromLatin1(path))) {
+        printf("gl-probe: FAIL (open)\n");
+        delete eng;
+        return 1;
+    }
+    eng->play();
+    QTimer::singleShot(10000, app, SLOT(quit()));
+    app->exec();
+    eng->stop();
+    delete eng;
+    if (cnt.frames <= 0 || cnt.gotFinished != 1) {
+        printf("gl-probe: FAIL (frames=%d finished=%d)\n",
+               cnt.frames, cnt.gotFinished);
+        return 1;
+    }
+    printf("gl-probe: OK (frames=%d lastPts=%ld finished=1)\n",
+           cnt.frames, cnt.lastPts);
+    return 0;
+}
+
+int main(int argc, char* argv[])
+{
+    // M4-A:--gl-probe 需 GUI-enabled app(QGLWidget/QOpenGLWidget);
+    // 先于 app 构造预扫 argv
+    bool glProbeMode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--gl-probe") == 0)
+            glProbeMode = true;
+    }
+#ifdef QT3_BUILD
+    QApplication app(argc, argv, glProbeMode);
+#else
+    QApplication app(argc, argv); // Qt6 GUI(QOpenGLWidget 需 QApplication)
 #endif
     int failures = 0;
 
@@ -373,6 +482,15 @@ int main(int argc, char* argv[])
         return cxRunShotProbe(&app);
     if (rateProbeMode)
         return cxRunRateProbe(&app);
+    bool hwProbeMode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--hw-probe") == 0)
+            hwProbeMode = true;
+    }
+    if (hwProbeMode)
+        return cxRunHwProbe(&app);
+    if (glProbeMode)
+        return cxRunGlProbe(&app);
 
     EXPECT(strcmp(CXVIDEO_VERSION, CXVIDEO_VERSION) == 0);
 

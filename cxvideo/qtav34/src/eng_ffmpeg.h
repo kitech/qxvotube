@@ -4,6 +4,7 @@
 #include "cxengine.h"
 #include "cffsub.h"
 #include "cxrenderer.h" // M3-B inline setEq/screenshot 需完整型
+#include "cxffdec.h"    // M4-A inline hwName() 需完整型
 #include <qstringlist.h>
 
 // 自研 FFmpeg 内核(M2;detail.md 第 5 节)
@@ -60,6 +61,10 @@ public:
     bool screenshot(const QString& path)
     {
         return p_renderer != 0 && p_renderer->saveScreenshot(path);
+    }
+    const char* hwName() const
+    {
+        return m_dec != 0 ? m_dec->hwName() : 0;
     }
 
     ~CXEngineFfmpeg();

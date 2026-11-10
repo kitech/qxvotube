@@ -55,13 +55,15 @@ include($$PWD/../cxvideo/qtav34/cxvideo.pri)
   `cxvideo_selftest --rate-probe`(M3-B)验证 setRate(2.0) 倍速全片(splice crossfade 路径)。
 - 轨道/字幕 API(M3-A):`audioTrackCount()/subtitleTrackCount()/setAudioTrack(-1=关)/setSubtitleTrack(-1=关)/setSubtitleFile(外挂 SRT)` + 信号 `subtitleChanged`;ffmpeg 内核换轨=引擎重启式(缀位/速率/音量保留);mpv 内核 `set aid/sid/sub-add`;**cmdmpv 不支持(无 IPC)**。
 - EQ/截图(M3-B):`setEq(const CXVideoEq&)`(brightness/contrast LUT + saturation luma 混合;hue 未做,mpv/cmdmpv 不承诺)+ `saveScreenshot(path)`(软渲=LUT 后 PNG;headless probe 渲染器=原始帧)。
+- 硬解/GL(M4-A):ffmpeg 内核 `vaapi→cuda` 探活自动挂(`hwName()` 报真名,挖起软路如实熄火),hw 帧落系统内存进现有管线;GL 渲染器 `CXRendererGl`(Qt3 QGLWidget 固定管线 + CPU LUT;Qt6 core profile shader 含 hue)。探针:`--hw-probe`(无 hw SKIP 软解断言照旧)、`--gl-probe`(GUI 实渲)。
 
 ## 里程碑对照(docs/cxvideo-plan.md)
 
 M0 ✅(接口可链)→ **M1 ✅(eng_mpv libmpv 内嵌 + eng_mpv_cmd cmdmpv 子进程;Qt3/Qt6 双绿,实播探针过)** → **M2.0 ✅(eng_ffmpeg 软解视频链:demux/vthread 双线程→sws→QImage 事件回投)** → **M2.1 ✅(音频链/主时钟:athread+swr→S16、pulse/alsa/sdl/silent 四 AO、CxClock 每帧校准;Qt3/Qt6 双绿,H.264+AAC 探针)** →
 **M3-A ✅(轨道+双内核字幕:audio/subtitle track 选择、外挂 SRT、subtitleChanged 事件;ffmpeg 内嵌 mov_text + mpv track-list/aid·sid/sub-add;Qt3/Qt6 双绿,--sub-probe 过)** →
 **M3-B ✅(EQ 软路 LUT + 倍速 splice crossfade + 截图 + demo 文件入口;Qt3/Qt6 双绿,--shot-probe/--rate-probe 过)** →
-M4 硬解 → M5 接入 qlvotube+qskvotube。
+**M4-A ✅(ffmpeg 硬解探活 vaapi→cuda、不命中落软解 + GL 渲染器(QGLWidget/QOpenGLWidget,hue 补齐)+ --hw-probe/--gl-probe;Qt3/Qt6 双绿)** →
+M4-B(mpv render_context 重构,缓)→ M5 接入 qlvotube+qskvotube。
 (注:M5 的 qlvotube 侧接线已先期落地:mainwindow 内 CXVideoPlayer + cxSetLocaleNumericC。)
 
 ## 局限备忘

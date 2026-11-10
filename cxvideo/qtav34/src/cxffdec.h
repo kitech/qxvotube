@@ -7,6 +7,8 @@
 #include <qimage.h>
 #include <deque>
 
+// M4-A:硬解探活由 initHw 落位;hw 帧当场下载为系统内存帧
+
 // 视频解码 + sws→RGB32 QImage(detail.md §5;"sws 上下文一次缓存")
 // 所有权契约:decode() 返回的 AVFrame 在下一次 decode()/flush()/close() 前有效
 class CxDecoder {
@@ -33,7 +35,13 @@ public:
     int width() const { return m_ctx ? m_ctx->width : 0; }
     int height() const { return m_ctx ? m_ctx->height : 0; }
 
+    // M4-A:硬解名("vaapi"/"cuda";未挂 = 0)
+    const char* hwName() const { return m_hwName; }
+
 private:
+    // M4-A:hw 探活 + get_format 挂接(失败静默落软解,false 非致命)
+    bool initHw();
+
     AVCodecContext* m_ctx;
     AVStream* m_stream;
     AVFrame* m_frame;      // receive 复用帧
@@ -43,6 +51,10 @@ private:
     bool m_flushed;
     std::deque<AVFrame*> m_stash;
     QString m_codecName;
+    int m_hwType;
+    const char* m_hwName;
+    AVBufferRef* m_hwDev;   // 持有的 device ctx(init→close)
+    AVFrame* m_hwOut;       // hw 帧下载落地的系统内存帧(复用)
 };
 
 #endif // CXFFDEC_H

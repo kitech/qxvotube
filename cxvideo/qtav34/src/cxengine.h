@@ -44,6 +44,8 @@ public:
     virtual bool setEq(const CXVideoEq& /*eq*/) { return false; }
     // M3-B:截图(默认 false;cmdmpv/libmpv 不承诺)
     virtual bool screenshot(const QString& /*path*/) { return false; }
+    // M4-A:硬解名("vaapi"/"cuda";0=软解;cmdmpv 恒 0)
+    virtual const char* hwName() const { return 0; }
 
     // M1 起挂渲染器(renderer 由引擎侧驱动 showFrame)
     virtual void setRenderer(CXVideoRenderer* r) { p_renderer = r; }

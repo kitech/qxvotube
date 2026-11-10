@@ -245,6 +245,19 @@ while(!stop):
 - **demo**(cxvideo_demo):带文件参数即 `player.open+play`(`finished→app::quit`),M0 的 64x64 蓝帧自证仅无参时注入;无参行为不变。
 - **实测**(Qt3/Qt6,双绿):基线 `0 failures` 不回退;五探针 `--ff-probe/--sub-probe/--shot-probe/--rate-probe/--play-probe` 全 OK;`qlvotube` q3votube/q6votube 重链绿。
 
+### 7.6 M4-A 实装记录(2026-11;ffmpeg 硬解探活 + GL 渲染器/--hw-probe/--gl-probe,Qt3/Qt6 双绿)
+
+- **hw 探活序**(cffhw):`cffHwProbe` 按 **vaapi → cuda** 序逐个 `av_hwdevice_ctx_create` 试建(建即释),命中返回类型;`ffHw` 均不命中时全程软解,现有路径零改动。`CxDecoder::open` 内 `initHw()`:命中则挂 `hw_device_ctx`(av_buffer_ref 第二引用 + 探活 ref 立即 unref——**直接赋值=1 ref 双 owner→close 期 double free,已在 glibc 崩实修**)+ `get_format` 回调。
+- **get_format 回调**(cxffdec):全局 `cxCurHwPix` 槽记录要挑的 hw pixfmt(VAAPI/CUDA);命中 hw 名单内则选之,**未命中/进入失败时取首个非 HWACCEL 软格式**——decoder 内部挖起(h264 "Failed setup for format cuda")不毒管线。
+- **hw 帧下载**:receive 出帧格式带 HWACCEL flag 即 `av_hwframe_transfer_data` 落系统内存(NV12)进现有 sws 管线(**零拷贝 surface 二期**);下载失败当场弃本帧。播放中途落软路(get_format 未命中后 decoder 回软)则**熄火 hw 名**:`m_hwName→0`、收 our 引用,`hwName()` 如实报 0(本机 vaapi 连接失败/cuda 无 SDK 即此形态,probe 判 SKIP 而非 OK)。
+- **GL 渲染器**(renderer_gl,\*\*无 Q_OBJECT\*\*——moc 不解析条件基类段):
+  - Qt3/Qt4:QGLWidget 固定管线,RGB32 纹理 quad(`swapRGB` 转 RGBA 上传,不赌 GL_BGRA 扩展);EQ 走 **CPU LUT**(cxEq.h `cxEqApplyRgb` 预处理后上传;固定管线不赌 glColorMatrix);截图用最近 CPU 帧保存。
+  - Qt5.4+/Qt6:QOpenGLWidget + **core profile 必须走 VAO/VBO**——首版 `setAttributeArray` 用裸指针数组(驱动把 guest 内存当 attrib 源)在 core 下 launch libgallium 段错误;**修法 = QOpenGLVertexArrayObject + QOpenGLBuffer 交错 VBO(aPos|aUV,setAttributeBuffer),letterbox 改 shader `uScale` uniform**,探针即绿。fragment shader uniforms:brightness/contrast/saturation + **hue mat3**(YCbCr 色度平面旋转近似,QMatrix3x3 float 构造);截图 `grabFramebuffer` 自带回读。
+- **共用 EQ 工具**(cxeq.h):LUT 构建/中性判断/saturation permil/RGB32 应用四件抽出,renderer_software(M3-B 原实现搬移,行为零变)与 renderer_gl(Qt3 侧)双吃。
+- **探针新增**:`--hw-probe`(有 hw→OK 打名,无 hw→SKIP(0 exit,软解流 finished=1 断言照旧)——INIT 均如实反映形态)、`--gl-probe`(GUI-enabled app 实渲一程;main 先于 app 构造预扫 argv——Qt6 恒 QApplication、Qt3 `QApplication(argc,argv,glProbe)`)。**gl-probe 前置 --ff-probe 产媒体**。
+- **pri**:`cffhw/renderer_gl/cxeq` 三件 + `LIBS += -lGL`(两 Qt 均需)+ `greaterThan(QT_MAJOR_VERSION,5): QT += openglwidgets`;eng_ffmpeg.h 补 include cxffdec.h 完整型(inline hwName)。
+- **实测**(Qt3/Qt6,双绿):编 0 failures;基线 0 failures 不回退;七探针(旧五 + hw/gl)Qt3 全 OK/SKIP、Qt6 全 OK/SKIP;`qlvotube` q3votube/q6votube 重链绿(ldd GL 库齐,无 not found)。
+
 ## 8. Qt3 兼容层(逐条)
 
 | Qt5/6 用法 | Qt3 等价 / 化解 |
