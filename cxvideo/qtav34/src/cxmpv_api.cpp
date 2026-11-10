@@ -95,6 +95,7 @@ bool CxMpvApi::ensure()
     mpv_event_name        = (CxMpvEventNameFn)cxMpvSym(lib, "mpv_event_name", false, &ok);
     mpv_free              = (CxMpvFreeFn)cxMpvSym(lib, "mpv_free", false, &ok);
     mpv_wakeup            = (CxMpvWakeupFn)cxMpvSym(lib, "mpv_wakeup", false, &ok);
+    mpv_get_property      = (CxMpvGetPropertyFn)cxMpvSym(lib, "mpv_get_property", false, &ok); // M3-A 可选
 
     if (!ok) {
         // 不 dlclose:避免与后续线程环境互相残杀,just 永久停用

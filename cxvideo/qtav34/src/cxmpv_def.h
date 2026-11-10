@@ -91,6 +91,7 @@ typedef unsigned long long (*CxMpvClientApiVersionFn)(void);
 typedef const char* (*CxMpvEventNameFn)(int);
 typedef void (*CxMpvFreeFn)(void*);
 typedef void (*CxMpvWakeupFn)(void*);
+typedef int (*CxMpvGetPropertyFn)(void*, const char*, int, void*); // M3-A 轨道枚举
 
 class CxMpvApi {
 public:
@@ -113,13 +114,15 @@ public:
     CxMpvEventNameFn mpv_event_name;
     CxMpvFreeFn mpv_free;
     CxMpvWakeupFn mpv_wakeup;
+    CxMpvGetPropertyFn mpv_get_property; // M3-A(可选;缺则轨道 API 返 0/false)
 
 private:
     CxMpvApi() : loaded(false), lib(0), mpv_create(0), mpv_initialize(0),
                  mpv_terminate_destroy(0), mpv_set_option_string(0),
                  mpv_command(0), mpv_observe_property(0), mpv_wait_event(0),
                  mpv_set_wakeup_callback(0), mpv_client_api_version(0),
-                 mpv_event_name(0), mpv_free(0), mpv_wakeup(0) { }
+                 mpv_event_name(0), mpv_free(0), mpv_wakeup(0),
+                 mpv_get_property(0) { }
 };
 
 #endif // CXMPV_DEF_H

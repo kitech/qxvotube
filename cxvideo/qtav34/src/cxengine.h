@@ -8,6 +8,8 @@
 class CXVideoRenderer;
 class QWidget;
 
+struct CXVideoEq;
+
 // 引擎抽象(detail.md 第 3 节;UI 线程 API,线程→UI 经事件回投)
 class CXEngine : public QObject {
     Q_OBJECT
@@ -31,6 +33,16 @@ public:
     virtual long position() const { return 0; }
     virtual long duration() const { return 0; }
 
+    // M3-A:轨道选择 + 外挂字幕(不支持的能力各自返回 false/0;cmdmpv 即此形)
+    virtual int audioTrackCount() const { return 0; }
+    virtual int subtitleTrackCount() const { return 0; }
+    virtual bool setAudioTrack(int /*idx*/) { return false; }      // -1=关闭
+    virtual bool setSubtitleTrack(int /*idx*/) { return false; }   // -1=关闭
+    virtual bool setSubtitleFile(const QString& /*path*/) { return false; }
+
+    // M3-B:EQ 先锁名(默认 false)
+    virtual bool setEq(const CXVideoEq& /*eq*/) { return false; }
+
     // M1 起挂渲染器(renderer 由引擎侧驱动 showFrame)
     virtual void setRenderer(CXVideoRenderer* r) { p_renderer = r; }
     CXVideoRenderer* renderer() const { return p_renderer; }
@@ -50,6 +62,7 @@ signals:
     void positionChanged(long ms);
     void durationChanged(long ms);
     void seekFinished(long ms);
+    void subtitleChanged(const QString& text); // 空串 = 当前无;connect 规格用 const QString&
 
 protected:
     CXEngine() : QObject(), p_renderer(0), p_host(0) { }

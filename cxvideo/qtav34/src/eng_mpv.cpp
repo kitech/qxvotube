@@ -9,6 +9,7 @@
 #include <qthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 // ── 事件泵 ──
 
@@ -23,17 +24,20 @@ enum CxMpvUiEv {
     CxMpvUiEvStopped = 4,
     CxMpvUiEvFinished = 5,
     CxMpvUiEvError = 6,     // code
-    CxMpvUiEvSeekDone = 7   // ms
+    CxMpvUiEvSeekDone = 7,  // ms
+    CxMpvUiEvSubtitle = 8   // text(UTF-8 堆串,消费方接管释放)
 };
 
 class CXMpvUiEvent : public CustomEventBase {
 public:
-    CXMpvUiEvent(int ev, long v, int c)
-        : CustomEventBase(toEventType34(kCxMpvEventRaw)), uiev(ev), ms(v), code(c) { }
+    CXMpvUiEvent(int ev, long v, int c, char* t = 0)
+        : CustomEventBase(toEventType34(kCxMpvEventRaw)), uiev(ev), ms(v), code(c), txt(t) { }
+    ~CXMpvUiEvent() { if (txt != 0) free(txt); } // strdup 来源,free 释放
 
     int uiev;
     long ms;
     int code;
+    char* txt; // sub-text(M3-A;UTF-8 strdup;其它事件为空)
 };
 
 class CXMpvPump : public QThread {
@@ -94,6 +98,11 @@ private:
                     post(CxMpvUiEvPos, ms, 0);
                 else if (strcmp(pr->name, "duration") == 0)
                     post(CxMpvUiEvDur, ms, 0);
+            } else if (pr->format == CxMpvFmtString &&
+                       strcmp(pr->name, "sub-text") == 0) {
+                // M3-A 字幕文本(可能为空串 = 清屏)
+                char* t = strdup((const char*)pr->data);
+                post(CxMpvUiEvSubtitle, 0, 0, t);
             }
             break;
         }
@@ -102,9 +111,9 @@ private:
         }
     }
 
-    void post(int uiev, long ms, int code)
+    void post(int uiev, long ms, int code, char* txt = 0)
     {
-        qApp->postEvent(eng, new CXMpvUiEvent(uiev, ms, code));
+        qApp->postEvent(eng, new CXMpvUiEvent(uiev, ms, code, txt));
     }
 
     CXEngineMpv* eng;
@@ -179,9 +188,10 @@ bool CXEngineMpv::open(const QString& url)
         api.mpv_set_option_string(mpv, "force-window", "yes");
     }
 
-    // 遥测进度/时长(detail.md §7)
+    // 遥测进度/时长(detail.md §7)+ M3-A 字幕文本
     api.mpv_observe_property(mpv, 1, "time-pos", (int)CxMpvFmtDouble);
     api.mpv_observe_property(mpv, 1, "duration", (int)CxMpvFmtDouble);
+    api.mpv_observe_property(mpv, 1, "sub-text", (int)CxMpvFmtString);
 
     int r = api.mpv_initialize(mpv);
     if (r < 0) {
@@ -344,9 +354,127 @@ void CXEngineMpv::dispatchEvent(const CXMpvUiEvent* ev)
         if (ev->ms >= 0)
             emit seekFinished(ev->ms);
         break;
+    case CxMpvUiEvSubtitle: { // M3-A:文本到即发(空串=清屏)
+        QString t;
+        if (ev->txt != 0)
+            t = qFromUtf8(ev->txt);
+        emit subtitleChanged(t);
+        break;
+    }
     default:
         break;
     }
+}
+
+// ── M3-A:轨道(mpv track-list;i 为枚举序 → mpv 内 id)──
+
+static int cxMpvTrackCountByType(CxMpvApi& api, void* h, const char* type)
+{
+    if (api.mpv_get_property == 0)
+        return 0;
+    long long n = 0;
+    if (api.mpv_get_property(h, "track-list/count", (int)CxMpvFmtInt64, &n) < 0)
+        return 0;
+    int count = 0;
+    for (long long i = 0; i < n; i++) {
+        char* t = 0;
+        char buf[64];
+        snprintf(buf, sizeof(buf), "track-list/%lld/type", i);
+        if (api.mpv_get_property(h, buf, (int)CxMpvFmtString, &t) < 0 || t == 0)
+            continue;
+        bool hit = (strcmp(t, type) == 0);
+        if (api.mpv_free != 0)
+            api.mpv_free(t);
+        if (hit)
+            count++;
+    }
+    return count;
+}
+
+// 第 idx(0 起)个 type 型轨的 mpv id;无则 -1
+static int cxMpvTrackIdByOrdinal(CxMpvApi& api, void* h,
+                                 const char* type, int idx)
+{
+    if (api.mpv_get_property == 0)
+        return -1;
+    long long n = 0;
+    if (api.mpv_get_property(h, "track-list/count", (int)CxMpvFmtInt64, &n) < 0)
+        return -1;
+    int seen = 0;
+    for (long long i = 0; i < n; i++) {
+        char* t = 0;
+        char buf[64];
+        snprintf(buf, sizeof(buf), "track-list/%lld/type", i);
+        if (api.mpv_get_property(h, buf, (int)CxMpvFmtString, &t) < 0 || t == 0)
+            continue;
+        bool hit = (strcmp(t, type) == 0);
+        if (api.mpv_free != 0)
+            api.mpv_free(t);
+        if (!hit)
+            continue;
+        if (seen == idx) {
+            long long id = -1;
+            snprintf(buf, sizeof(buf), "track-list/%lld/id", i);
+            if (api.mpv_get_property(h, buf, (int)CxMpvFmtInt64, &id) < 0)
+                return -1;
+            return (int)id;
+        }
+        seen++;
+    }
+    return -1;
+}
+
+int CXEngineMpv::audioTrackCount() const
+{
+    if (h_mpv == 0)
+        return 0;
+    return cxMpvTrackCountByType(CxMpvApi::instance(), h_mpv, "audio");
+}
+
+int CXEngineMpv::subtitleTrackCount() const
+{
+    if (h_mpv == 0)
+        return 0;
+    return cxMpvTrackCountByType(CxMpvApi::instance(), h_mpv, "sub");
+}
+
+bool CXEngineMpv::setAudioTrack(int idx)
+{
+    if (h_mpv == 0)
+        return false;
+    CxMpvApi& api = CxMpvApi::instance();
+    if (idx < 0)
+        return cxMpvRunCmd3(api, h_mpv, "set", "aid", "no");
+    int id = cxMpvTrackIdByOrdinal(api, h_mpv, "audio", idx);
+    if (id < 0)
+        return false;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d", id);
+    return cxMpvRunCmd3(api, h_mpv, "set", "aid", buf);
+}
+
+bool CXEngineMpv::setSubtitleTrack(int idx)
+{
+    if (h_mpv == 0)
+        return false;
+    CxMpvApi& api = CxMpvApi::instance();
+    if (idx < 0)
+        return cxMpvRunCmd3(api, h_mpv, "set", "sid", "no");
+    int id = cxMpvTrackIdByOrdinal(api, h_mpv, "sub", idx);
+    if (id < 0)
+        return false;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d", id);
+    return cxMpvRunCmd3(api, h_mpv, "set", "sid", buf);
+}
+
+bool CXEngineMpv::setSubtitleFile(const QString& path)
+{
+    if (h_mpv == 0 || path.isEmpty())
+        return false;
+    QByteArray pa = qToUtf8(path);
+    const char* args[3] = { "sub-add", pa.data(), 0 }; // 默认 select
+    return CxMpvApi::instance().mpv_command(h_mpv, args) == 0;
 }
 
 // ── selftest 专用无头探测 ──

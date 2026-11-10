@@ -128,6 +128,50 @@ long CXVideoPlayer::duration() const
     return 0;
 }
 
+// ── M3-A:轨道 + 外挂字幕(passthrough)──
+
+int CXVideoPlayer::audioTrackCount() const
+{
+    if (m_engine != 0)
+        return m_engine->audioTrackCount();
+    return 0;
+}
+
+int CXVideoPlayer::subtitleTrackCount() const
+{
+    if (m_engine != 0)
+        return m_engine->subtitleTrackCount();
+    return 0;
+}
+
+bool CXVideoPlayer::setAudioTrack(int idx)
+{
+    if (m_engine != 0)
+        return m_engine->setAudioTrack(idx);
+    return false;
+}
+
+bool CXVideoPlayer::setSubtitleTrack(int idx)
+{
+    if (m_engine != 0)
+        return m_engine->setSubtitleTrack(idx);
+    return false;
+}
+
+bool CXVideoPlayer::setSubtitleFile(const QString& path)
+{
+    if (m_engine != 0)
+        return m_engine->setSubtitleFile(path);
+    return false;
+}
+
+bool CXVideoPlayer::setEq(const CXVideoEq& eq)
+{
+    if (m_engine != 0)
+        return m_engine->setEq(eq);
+    return false;
+}
+
 void CXVideoPlayer::setState(CXVideoState s)
 {
     m_state = s;
@@ -146,6 +190,7 @@ void CXVideoPlayer::wireEngine()
     connect(m_engine, SIGNAL(positionChanged(long)), this, SIGNAL(positionChanged(long)));
     connect(m_engine, SIGNAL(durationChanged(long)), this, SIGNAL(durationChanged(long)));
     connect(m_engine, SIGNAL(seekFinished(long)), this, SIGNAL(seekFinished(long)));
+    connect(m_engine, SIGNAL(subtitleChanged(const QString&)), this, SIGNAL(subtitleChanged(const QString&)));
     connect(m_engine, SIGNAL(started()), this, SLOT(engineStarted()));
     connect(m_engine, SIGNAL(paused()), this, SLOT(enginePaused()));
     connect(m_engine, SIGNAL(stopped()), this, SLOT(engineStopped()));

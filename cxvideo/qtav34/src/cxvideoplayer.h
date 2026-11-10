@@ -8,6 +8,7 @@
 class CXEngine;
 class CXVideoRenderer;
 class QWidget;
+struct CXVideoEq;
 
 // 公共编排层(QtAV 风格照搬,detail.md 第 2/3 节)
 class CXVideoPlayer : public QObject {
@@ -33,6 +34,15 @@ public:
     void setVolume(int pct);   // 0~100
     void setMute(bool on);
 
+    // M3-A:轨道 + 外挂字幕(passthrough;能力按内核各有支持/不支持)
+    int audioTrackCount() const;
+    int subtitleTrackCount() const;
+    bool setAudioTrack(int idx);
+    bool setSubtitleTrack(int idx);
+    bool setSubtitleFile(const QString& path);
+    // M3-B:EQ(passthrough,先锁名)
+    bool setEq(const CXVideoEq& eq);
+
     long position() const;
     long duration() const;
     double rate() const { return m_rate; }
@@ -50,6 +60,7 @@ signals:
     void durationChanged(long ms);
     void seekFinished(long ms);
     void noticedError(int code, const QString& msg);
+    void subtitleChanged(const QString& text); // 空串 = 当前无
 
 private slots:
     void engineStarted();

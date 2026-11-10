@@ -225,6 +225,17 @@ while(!stop):
 - **实测**(Qt3/Qt6,双绿):基线两侧 `0 failures`;`--ff-probe` 默认 silent 与显式 `CX_FF_AO=sdl` 均 `OK (ao=… frames=20 lastPts=1900 finished=1)`;`--play-probe` OK;`qlvotube` Qt3/Qt6 重链绿(ldd:libswresample/alsa/SDL2 NEEDED 正常,sodium 走系统库,无 Qt6DBus 错配)。
 - **环境限制(实测记录)**:本机仅有 HDMI 卡(无活跃 sink,pipewire 兜底)——alsa(`default` 路由 pipewire)与 pulse **open 成功但写端得不到消费**,`writei` 阻塞不可中断 → athread 卡写,EOS 的 `finished` 拿不到(Qt3/Qt6 症状一致;此前 Qt3 记录 "alsa finished=1" 系当时 pipewire 尚有消费端的环境时点结果)。故探针在未设 `CX_FF_AO` 时默认 `silent`(EOS 全链路可测);有真音频设备的机器用 `CX_FF_AO=auto` 验 alsa/pulse/sdl。引擎侧 auto 顺序仍为 alsa→pulse→sdl→silent(真机优先直通);无 sink 环境 auto 落 alsa 即会阻塞,此为其已知形态。
 
+### 7.4 M3-A(M3.1)实装记录(2026-11;轨道+双内核字幕,Qt3/Qt6 双绿)
+
+- **API 契约锁定**(cxengine.h / cxvideoplayer passthrough):`audioTrackCount()/subtitleTrackCount() const`、`setAudioTrack(int)/setSubtitleTrack(int)`(-1=关)、`setSubtitleFile(const QString&)`(SRT);信号 `subtitleChanged(const QString&)`(空串=清屏;Qt3 connect 用 `const QString&` 字面规格);M3-B 占位 `setEq(const CXVideoEq&)`(CXVideoEq 落 cxvideo_global.h,-100..100)。
+- **ffmpeg 端(非事件流设计)**:第三解包队列 sq(容量 128)+ `CxFFSubDecoder`(avcodec decode_subtitle2;FFmpeg 7.1 仍可用仅 deprecated,#pragma 压制警告)+ header-only `CXFFmpegSubThread`;cue 落 `CxFFSubTimeline`(手滚数组+QMutex);UI 线程 dispatchEvent 于 Frame/AudioPos 处 `cxScanSub(ms)` 查轴、变化即发——**无新事件类型**。内嵌时间轴 `m_subTl` open 清零;外挂 `m_subTlExt` 独立保留(重启不清);外挂优先于内嵌。
+- **实测踩坑(关键)**:mov_text 解码出的 AVSubtitle `end_display_time=0`(时长只在 packet duration)——按 `end<=start→pkt duration(m_tb 换算,兜 3s)` 兜底,否则 cue 起止相同永不出字;另 mov_text 译出为 ASS Dialogue 形(如 `0,0,Default,,0,0,0,,正文`,字段数 8,标准 ASS 9),固定按 9 个逗号跳不过——改为 **按字段内容跳**(空/纯数字·时戳/Default 样式视为前缀字段,首个正文段起取),再走 `cffSubStripTags`(ASS 花括号/HTML 标签/`\N`→`\n`)。
+- **ffmpeg 换轨 = 引擎重启式**:`reopenAt(posMs, wasPlaying)`——stopThreads(保留 m_url/m_subFile/m_subTlExt/m_rateCur 等)→open(prompt 重选)→重放 rate/vol/mute→seek(pos)→非播放则 Pause;轨道序以 **枚举序**(prompt n=0 起第 n 个;-1=默认首个;-2=关);幂等(与当前同轨)返回 false 不重启。`m_eosPend` 三路计数(视频+音频+字幕线程都完才 finished;Finished 时清屏发 subtitleChanged(""))。
+- **内嵌只收文本型**:mov_text/subrip/ass/ssa/webvtt/TEXT(`cffSubCodecTextual`);bitmap 型(pgs/dvb/dvdsub)跳过。
+- **mpv 端**:track-list 用 `mpv_get_property`(`track-list/count|i/type|i/id` 逐项枚举,**不引 mpv_node 镜像**;符号可选,缺则 0/false);选轨 `set aid/sid <id|no>`;外挂 `sub-add <path>`(默认 select);字幕文本 =泵 observe `sub-text`(STRING)→ strdup → `CxMpvUiEvSubtitle=8` 泼 `subtitleChanged`。**cmdmpv 无 IPC 不承诺**(基类默认 0/false 已兜,eng_mpv_cmd 不改)。
+- **selftest**:`--ff-probe` 媒体升级为 testsrc+sine+**外挂 SRT(-c:s mov_text 内嵌)** 同一份 mp4;新增 **`--sub-probe`**(断言 subtitleChanged 非空 ≥1);踩坑:三输入 `-map 0:v -map 1:a -map 2:s`(各输入分开计数,`0:a` 对 srt 输入文件无效)。`ffprobe_counter.h` 增 onSubtitle/subN/lastSub。
+- **实测**(Qt3/Qt6,双绿):基线两侧 `0 failures`;`--ff-probe OK (ao=silent frames=16 lastPts=1800 finished=1)`;**`--sub-probe OK (events=2 streams=1 first=CXVIDEO-PROBE2)`**;`--play-probe` OK;`qlvotube` Qt3(q3votube)/Qt6(q6votube)重链绿、ldd 无缺。
+
 ## 8. Qt3 兼容层(逐条)
 
 | Qt5/6 用法 | Qt3 等价 / 化解 |

@@ -6,11 +6,14 @@
 #include <qthread.h>
 
 // 解包线程(detail.md §5:av_read_frame 循环;EOS 双投;停位唤醒)
+// M3-A:第三队列(字幕流,文本型)——sq/sIdx 传 0/-1 即旧行为
 class CxDemuxThread : public QThread {
 public:
     CxDemuxThread(AVFormatContext* fmt, CxPacketQueue* vq, int vIdx,
-                  CxPacketQueue* aq, int aIdx)
-        : fmtCtx(fmt), vQueue(vq), aQueue(aq), vStream(vIdx), aStream(aIdx),
+                  CxPacketQueue* aq, int aIdx, CxPacketQueue* sq = 0,
+                  int sIdx = -1)
+        : fmtCtx(fmt), vQueue(vq), aQueue(aq), sQueue(sq),
+          vStream(vIdx), aStream(aIdx), sStream(sIdx),
           stopFlag(false)
     { }
 
@@ -34,6 +37,8 @@ protected:
                 pushPkt(vQueue, pkt, vStream);
             else if (pkt->stream_index == aStream && aQueue != 0)
                 pushPkt(aQueue, pkt, aStream);
+            else if (pkt->stream_index == sStream && sQueue != 0)
+                pushPkt(sQueue, pkt, sStream);
             else
                 av_packet_free(&pkt); // 非目标流,直接弃
             if (pkt == 0) {
@@ -67,13 +72,17 @@ private:
             vQueue->push(eos);
         if (aQueue != 0)
             aQueue->push(eos);
+        if (sQueue != 0)
+            sQueue->push(eos);
     }
 
     AVFormatContext* fmtCtx;
     CxPacketQueue* vQueue;
     CxPacketQueue* aQueue;
+    CxPacketQueue* sQueue;
     int vStream;
     int aStream;
+    int sStream;
     volatile bool stopFlag;
 };
 

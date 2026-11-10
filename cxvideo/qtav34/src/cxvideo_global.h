@@ -42,4 +42,13 @@ enum CxErrorCode {
 // 在 QCoreApplication/QApplication 构造之后、第一次触碰播放器之前调用一次
 void cxSetLocaleNumericC();
 
+// 视频 EQ(QtAV 同域;M3-A 占位结构,M3-B 实装;-100..100)
+struct CXVideoEq {
+    int brightness;
+    int contrast;
+    int saturation;
+    int hue;
+    CXVideoEq() : brightness(0), contrast(0), saturation(0), hue(0) { }
+};
+
 #endif // CXVIDEO_GLOBAL_H

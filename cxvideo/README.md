@@ -50,11 +50,14 @@ include($$PWD/../cxvideo/qtav34/cxvideo.pri)
   `cxSetLocaleNumericC()`(libmpv 硬性要求 LC_NUMERIC=C,见 detail.md §7.1)。
 - 实播自测:`cxvideo_selftest --play-probe` 用 cmdmpv 进程生命周期回环验证;
   `cxvideo_selftest --ff-probe` 用 ffmpeg 内核实播 testsrc+sine mp4(H.264+AAC;视频链+音频链/主时钟)验证,输出 `ao=<backend>` 与帧数;未设 `CX_FF_AO` 时探针默认 **silent**(无 sink/CI 环境下 alsa/pulse 写端阻塞会拿不到 finished;真音频设备可用 `CX_FF_AO=auto` 验 alsa/pulse/sdl)。
+  `cxvideo_selftest --sub-probe`(M3-A)验证 mov_text 内嵌字幕的 `subtitleChanged` 事件流(媒体即 --ff-probe 同一份,含内嵌字幕流)。
+- 轨道/字幕 API(M3-A):`audioTrackCount()/subtitleTrackCount()/setAudioTrack(-1=关)/setSubtitleTrack(-1=关)/setSubtitleFile(外挂 SRT)` + 信号 `subtitleChanged`;ffmpeg 内核换轨=引擎重启式(缀位/速率/音量保留);mpv 内核 `set aid/sid/sub-add`;**cmdmpv 不支持(无 IPC)**。
 
 ## 里程碑对照(docs/cxvideo-plan.md)
 
 M0 ✅(接口可链)→ **M1 ✅(eng_mpv libmpv 内嵌 + eng_mpv_cmd cmdmpv 子进程;Qt3/Qt6 双绿,实播探针过)** → **M2.0 ✅(eng_ffmpeg 软解视频链:demux/vthread 双线程→sws→QImage 事件回投)** → **M2.1 ✅(音频链/主时钟:athread+swr→S16、pulse/alsa/sdl/silent 四 AO、CxClock 每帧校准;Qt3/Qt6 双绿,H.264+AAC 探针)** →
-M3 全功能(字幕/轨道/倍速/EQ)→ M4 硬解 → M5 接入 qlvotube+qskvotube。
+**M3-A ✅(轨道+双内核字幕:audio/subtitle track 选择、外挂 SRT、subtitleChanged 事件;ffmpeg 内嵌 mov_text + mpv track-list/aid·sid/sub-add;Qt3/Qt6 双绿,--sub-probe 过)** →
+M3-B(EQ/倍速精修/截图)→ M4 硬解 → M5 接入 qlvotube+qskvotube。
 (注:M5 的 qlvotube 侧接线已先期落地:mainwindow 内 CXVideoPlayer + cxSetLocaleNumericC。)
 
 ## 局限备忘

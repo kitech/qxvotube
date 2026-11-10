@@ -107,10 +107,20 @@ static int cxRunFfProbe(void* appRaw)
     // 有真实音频设备时可显式 CX_FF_AO=auto 验 alsa/pulse/sdl。
     if (getenv("CX_FF_AO") == 0)
         setenv("CX_FF_AO", "silent", 1);
-    // 双输入:testsrc + sine;mp4 默认编码即 H.264(libx264)+ AAC
+    // 双输入:testsrc + sine + 外挂 srt;mp4 默认编码即 H.264(libx264)+ AAC;
+    // srt → -c:s mov_text 内嵌字幕流(M3-A 同用一份媒体)
+    const char* srt = "/tmp/opencode/cxvideo_selftest.srt";
+    FILE* sf = fopen(srt, "w");
+    if (sf != 0) {
+        fputs("1\n00:00:00,800 --> 00:00:01,800\nCXVIDEO-PROBE\n\n"
+              "2\n00:00:01,800 --> 00:00:01,900\nCXVIDEO-PROBE2\n", sf);
+        fclose(sf);
+    }
     if (system("ffmpeg -f lavfi -i testsrc=duration=2:size=160x120:rate=10 "
                "-f lavfi -i sine=frequency=440:duration=2 "
-               "-pix_fmt yuv420p -shortest "
+               "-i /tmp/opencode/cxvideo_selftest.srt "
+               "-map 0:v -map 1:a -map 2:s "
+               "-pix_fmt yuv420p -c:s mov_text -shortest "
                "/tmp/opencode/cxvideo_selftest.mp4 -y "
                "2>/dev/null </dev/null") != 0) {
         printf("ff-probe: SKIP (no ffmpeg binary)\n");
@@ -154,6 +164,63 @@ static int cxRunFfProbe(void* appRaw)
     return 0;
 }
 
+// ── M3-A 字幕探针(--sub-probe):ffmpeg 内核播放含 mov_text 内嵌字幕
+// 媒体,断言 subtitleChanged 收到非空文本(经 position 事件扫描/变化即发)
+static int cxRunSubProbe(void* appRaw)
+{
+#ifdef QT3_BUILD
+    QApplication* app = (QApplication*)appRaw;
+#else
+    QCoreApplication* app = (QCoreApplication*)appRaw;
+#endif
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
+    const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    if (system("test -f /tmp/opencode/cxvideo_selftest.mp4 "
+               "2>/dev/null </dev/null") != 0) {
+        printf("sub-probe: SKIP (media missing; run --ff-probe first)\n");
+        return 0;
+    }
+    CXEngine* eng = cxEngineCreateFor(CxEngineFfmpeg);
+    if (eng == 0) {
+        printf("sub-probe: SKIP (WITH_CX_ENGINE_FFMPEG off)\n");
+        return 0;
+    }
+    printf("sub-probe: engine=%s\n", eng->name());
+    CxFFProbeCounter cnt;
+    QObject::connect(eng, SIGNAL(started()), app, SLOT(quit()));
+    QObject::connect(eng, SIGNAL(finished()),
+                     &cnt, SLOT(onFinished()));
+    QObject::connect(eng, SIGNAL(positionChanged(long)),
+                     &cnt, SLOT(onFrame(long)));
+    QObject::connect(eng, SIGNAL(subtitleChanged(const QString&)),
+                     &cnt, SLOT(onSubtitle(const QString&)));
+    if (!eng->open(QString::fromLatin1(path))) {
+        printf("sub-probe: open FAIL\n");
+        delete eng;
+        return 1;
+    }
+    QObject::connect(eng, SIGNAL(finished()), app, SLOT(quit()));
+    QTimer::singleShot(10000, app, SLOT(quit()));
+    app->exec();
+    int subs = ((CXEngineFfmpeg*)eng)->subtitleTrackCount();
+    eng->stop();
+    delete eng;
+    if (cnt.subN <= 0) {
+        printf("sub-probe: FAIL (no subtitle event; streams=%d)\n", subs);
+        return 1;
+    }
+    printf("sub-probe: OK (events=%d streams=%d first=%s)\n",
+           cnt.subN, subs,
+#ifdef QT3_BUILD
+           (const char*)cnt.lastSub.local8Bit()
+#else
+           cnt.lastSub.toLocal8Bit().constData()
+#endif
+           );
+    return 0;
+}
+
 int main(int argc, char* argv[])
 {
 #ifdef QT3_BUILD
@@ -179,6 +246,13 @@ int main(int argc, char* argv[])
     }
     if (ffProbeMode)
         return cxRunFfProbe(&app);
+    bool subProbeMode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--sub-probe") == 0)
+            subProbeMode = true;
+    }
+    if (subProbeMode)
+        return cxRunSubProbe(&app);
 
     EXPECT(strcmp(CXVIDEO_VERSION, CXVIDEO_VERSION) == 0);
 

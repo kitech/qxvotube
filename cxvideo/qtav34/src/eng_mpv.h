@@ -30,6 +30,13 @@ public:
     long position() const;
     long duration() const;
 
+    // M3-A:轨道 + 外挂字幕(track-list 枚举/set aid·sid/sub-add)
+    int audioTrackCount() const;
+    int subtitleTrackCount() const;
+    bool setAudioTrack(int idx);      // -1=关闭(暗播)
+    bool setSubtitleTrack(int idx);   // -1=关闭
+    bool setSubtitleFile(const QString& path);
+
     ~CXEngineMpv();
 
 protected:

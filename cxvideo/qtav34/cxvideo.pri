@@ -19,6 +19,7 @@ CXVIDEO_CPP = \
     $$CXVIDEO/src/cffao_alsa.cpp \
     $$CXVIDEO/src/cffao_sdl.cpp \
     $$CXVIDEO/src/cxffathread.cpp \
+    $$CXVIDEO/src/cffsub.cpp \
     $$CXVIDEO/src/cxvideoplayer.cpp \
     $$CXVIDEO/src/renderer_software.cpp \
     $$CXVIDEO/src/renderer_probe.cpp
@@ -41,6 +42,8 @@ CXVIDEO_HDR = \
     $$CXVIDEO/src/cxffdemux.h \
     $$CXVIDEO/src/cxffvthread.h \
     $$CXVIDEO/src/cxffathread.h \
+    $$CXVIDEO/src/cffsub.h \
+    $$CXVIDEO/src/cffsthread.h \
     $$CXVIDEO/src/cxrenderer.h \
     $$CXVIDEO/src/renderer_software.h \
     $$CXVIDEO/src/renderer_probe.h \
