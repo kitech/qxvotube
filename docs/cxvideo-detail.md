@@ -236,6 +236,15 @@ while(!stop):
 - **selftest**:`--ff-probe` 媒体升级为 testsrc+sine+**外挂 SRT(-c:s mov_text 内嵌)** 同一份 mp4;新增 **`--sub-probe`**(断言 subtitleChanged 非空 ≥1);踩坑:三输入 `-map 0:v -map 1:a -map 2:s`(各输入分开计数,`0:a` 对 srt 输入文件无效)。`ffprobe_counter.h` 增 onSubtitle/subN/lastSub。
 - **实测**(Qt3/Qt6,双绿):基线两侧 `0 failures`;`--ff-probe OK (ao=silent frames=16 lastPts=1800 finished=1)`;**`--sub-probe OK (events=2 streams=1 first=CXVIDEO-PROBE2)`**;`--play-probe` OK;`qlvotube` Qt3(q3votube)/Qt6(q6votube)重链绿、ldd 无缺。
 
+### 7.5 M3-B 实装记录(2026-11;EQ 软路 LUT/倍速 splice crossfade/截图/demo,Qt3/Qt6 双绿)
+
+- **EQ 软路 LUT**(renderer_software):`CXVideoPlayer::setEq → CXEngineFfmpeg::setEq → p_renderer->setVideoEq`;brightness(±64/255 偏移)+ contrast(绕 128 乘强,3‰/点)合成**单张 256 项 LUT**(RGB 三通道共表),saturation 按 luma(299/587/114)加权混合(permil,0..2000);`m_eqOn` 中性旁路零开销;生效在 paint 期 shallow 拷贝上(m_img 原始帧不动),EQ 变更 `update()` 立即重绘。**hue 不做软路(M4 GL);mpv/cmdmpv 不承诺**。renderer_probe 侧 EQ 仅 no-op 声明(setVideoEq 默认虚 + probe 未覆写)。
+- **倍速 splice crossfade**(cxffathread):skip 块边界 128 帧(≈2.9ms @44.1k)线性斜坡——`skipNext` 用 `m_skipAcc + (rate-1)*chunkSamples >= chunkSamples` 前瞻(与后续判弃同式),命中则本块尾渐出;`prevSkip` 记上一块被弃,命中则本块头渐入;dup 路径为同源复写(无拼接不连续)不作处理。音量/静音仍走 writeScaled(crossfade 先于缩放,互不干扰)。
+- **截图**:接口 `CXVideoRenderer::saveScreenshot(path)` 默认 false;软渲保存**当前帧 LUT 后** PNG(`QImage::save`,Qt3 亦此 API);`CXRendererProbe` headless 覆写保存最近原始帧(无 QWidget 可用于无 GUI app 的探针);_passthrough_ `CXVideoPlayer::saveScreenshot → CXEngine::screenshot → renderer`。
+- **探针新增**:`--shot-probe`(setEq b30/c20/s40 → 播放中 singleShot 600ms 截图 → QFile size>1000 断言;Qt3/Qt6 双 OK,size≈7.7KB)、`--rate-probe`(setRate(2.0) 全片,断言 frames>0 且 finished=1)。`CxShotWorker`(QTimer singleShot 截图转子)落 ffprobe_counter.h(须头文件供 moc)。
+- **demo**(cxvideo_demo):带文件参数即 `player.open+play`(`finished→app::quit`),M0 的 64x64 蓝帧自证仅无参时注入;无参行为不变。
+- **实测**(Qt3/Qt6,双绿):基线 `0 failures` 不回退;五探针 `--ff-probe/--sub-probe/--shot-probe/--rate-probe/--play-probe` 全 OK;`qlvotube` q3votube/q6votube 重链绿。
+
 ## 8. Qt3 兼容层(逐条)
 
 | Qt5/6 用法 | Qt3 等价 / 化解 |

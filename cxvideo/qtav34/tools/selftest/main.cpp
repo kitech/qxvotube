@@ -5,9 +5,11 @@
 #include "eng_mpv_cmd.h"
 #include "eng_ffmpeg.h"
 #include "renderer_probe.h"
+#include "renderer_software.h"
 #include "cxframe.h"
 #include "ffprobe_counter.h"
 #include <qtimer.h>
+#include <qfile.h>
 #ifdef QT3_BUILD
 #include <qapplication.h>
 #else
@@ -221,6 +223,112 @@ static int cxRunSubProbe(void* appRaw)
     return 0;
 }
 
+// ── M3-B 截图探针(--shot-probe):setEq 非零 + 播放中软渲 saveScreenshot,
+// 断言 PNG 落地非空(截图为 LUT 后画面即所见即所得;CxShotWorker 见 ffprobe_counter.h)
+static int cxRunShotProbe(void* appRaw)
+{
+#ifdef QT3_BUILD
+    QApplication* app = (QApplication*)appRaw;
+#else
+    QCoreApplication* app = (QCoreApplication*)appRaw;
+#endif
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
+    const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    if (system("test -f /tmp/opencode/cxvideo_selftest.mp4 "
+               "2>/dev/null </dev/null") != 0) {
+        printf("shot-probe: SKIP (media missing; run --ff-probe first)\n");
+        return 0;
+    }
+    CXEngine* eng = cxEngineCreateFor(CxEngineFfmpeg);
+    if (eng == 0) {
+        printf("shot-probe: SKIP (WITH_CX_ENGINE_FFMPEG off)\n");
+        return 0;
+    }
+    printf("shot-probe: engine=%s\n", eng->name());
+    CXRendererProbe view(0); // headless 截图(无 GUI app 不能起 QWidget)
+    eng->setRenderer(&view);
+    CXVideoEq eq;
+    eq.brightness = 30;
+    eq.contrast = 20;
+    eq.saturation = 40;
+    bool eqOk = ((CXEngineFfmpeg*)eng)->setEq(eq);
+    eng->open(QString::fromLatin1(path));
+    eng->play();
+    CxFFProbeCounter cnt;
+    QObject::connect(eng, SIGNAL(finished()), &cnt, SLOT(onFinished()));
+    QObject::connect(eng, SIGNAL(finished()), app, SLOT(quit()));
+    CxShotWorker w(eng);
+    QTimer::singleShot(600, &w, SLOT(take())); // 播放中途截图
+    QTimer::singleShot(10000, app, SLOT(quit()));
+    app->exec();
+    eng->stop();
+    delete eng;
+    QFile f("/tmp/opencode/cxvideo_shot.png");
+    if (!eqOk) {
+        printf("shot-probe: FAIL (setEq)\n");
+        return 1;
+    }
+    if (!f.exists() || f.size() <= 1000) {
+        printf("shot-probe: FAIL (png missing/empty, ok=%d)\n", (int)w.ok);
+        return 1;
+    }
+    printf("shot-probe: OK (eq=b30/c20/s40 size=%d)\n", (int)f.size());
+    return 0;
+}
+
+// ── M3-B 倍速探针(--rate-probe):setRate(2.0) 全片播完,断言进度与 finished
+static int cxRunRateProbe(void* appRaw)
+{
+#ifdef QT3_BUILD
+    QApplication* app = (QApplication*)appRaw;
+#else
+    QCoreApplication* app = (QCoreApplication*)appRaw;
+#endif
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
+    const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    if (system("test -f /tmp/opencode/cxvideo_selftest.mp4 "
+               "2>/dev/null </dev/null") != 0) {
+        printf("rate-probe: SKIP (media missing; run --ff-probe first)\n");
+        return 0;
+    }
+    CXEngine* eng = cxEngineCreateFor(CxEngineFfmpeg);
+    if (eng == 0) {
+        printf("rate-probe: SKIP (WITH_CX_ENGINE_FFMPEG off)\n");
+        return 0;
+    }
+    printf("rate-probe: engine=%s\n", eng->name());
+    CxFFProbeCounter cnt;
+    QObject::connect(eng, SIGNAL(finished()), &cnt, SLOT(onFinished()));
+    QObject::connect(eng, SIGNAL(positionChanged(long)),
+                     &cnt, SLOT(onFrame(long)));
+    if (!eng->open(QString::fromLatin1(path))) {
+        printf("rate-probe: open FAIL\n");
+        delete eng;
+        return 1;
+    }
+    bool rOk = eng->setRate(2.0);
+    eng->play();
+    QObject::connect(eng, SIGNAL(finished()), app, SLOT(quit()));
+    QTimer::singleShot(10000, app, SLOT(quit()));
+    app->exec();
+    eng->stop();
+    delete eng;
+    if (!rOk) {
+        printf("rate-probe: FAIL (setRate)\n");
+        return 1;
+    }
+    if (cnt.frames <= 0 || cnt.gotFinished != 1) {
+        printf("rate-probe: FAIL (frames=%d finished=%d)\n",
+               cnt.frames, cnt.gotFinished);
+        return 1;
+    }
+    printf("rate-probe: OK (frames=%d lastPts=%ld @2x)\n",
+           cnt.frames, cnt.lastPts);
+    return 0;
+}
+
 int main(int argc, char* argv[])
 {
 #ifdef QT3_BUILD
@@ -253,6 +361,18 @@ int main(int argc, char* argv[])
     }
     if (subProbeMode)
         return cxRunSubProbe(&app);
+    bool shotProbeMode = false;
+    bool rateProbeMode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--shot-probe") == 0)
+            shotProbeMode = true;
+        if (strcmp(argv[i], "--rate-probe") == 0)
+            rateProbeMode = true;
+    }
+    if (shotProbeMode)
+        return cxRunShotProbe(&app);
+    if (rateProbeMode)
+        return cxRunRateProbe(&app);
 
     EXPECT(strcmp(CXVIDEO_VERSION, CXVIDEO_VERSION) == 0);
 

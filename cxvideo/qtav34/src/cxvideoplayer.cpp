@@ -172,6 +172,13 @@ bool CXVideoPlayer::setEq(const CXVideoEq& eq)
     return false;
 }
 
+bool CXVideoPlayer::saveScreenshot(const QString& path)
+{
+    if (m_engine != 0)
+        return m_engine->screenshot(path);
+    return false;
+}
+
 void CXVideoPlayer::setState(CXVideoState s)
 {
     m_state = s;

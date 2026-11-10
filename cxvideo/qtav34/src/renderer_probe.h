@@ -2,6 +2,7 @@
 #define RENDERER_PROBE_H
 
 #include "cxrenderer.h"
+#include "cxvideo_global.h"
 #include <qobject.h>
 
 class QTimer;
@@ -15,6 +16,9 @@ public:
 
     void showFrame(const CXVideoFrame* f);
     void setViewport(const QRect& contentRect);
+
+    // M3-B:截图(headless;保存最近帧,软路 EQ 未加即原始帧)
+    bool saveScreenshot(const QString& path);
 
     // 30ms 节流是否开启(默认开;单帧测试可关)
     void setPolling(bool on);

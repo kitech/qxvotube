@@ -42,6 +42,7 @@ public:
     bool setSubtitleFile(const QString& path);
     // M3-B:EQ(passthrough,先锁名)
     bool setEq(const CXVideoEq& eq);
+    bool saveScreenshot(const QString& path); // 渲染器当前帧(LUT 后)
 
     long position() const;
     long duration() const;

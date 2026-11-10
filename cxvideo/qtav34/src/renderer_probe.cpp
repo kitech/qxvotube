@@ -45,6 +45,13 @@ void CXRendererProbe::setViewport(const QRect& contentRect)
     Q_UNUSED(contentRect);
 }
 
+bool CXRendererProbe::saveScreenshot(const QString& path)
+{
+    if (!m_hasLast || m_last.img.isNull())
+        return false;
+    return m_last.img.save(path, "PNG"); // headless:原始帧(无 QPainter 栈)
+}
+
 void CXRendererProbe::pollTick()
 {
     // 占位:M1 接引擎后用于线程→UI 帧搬运的节流出口

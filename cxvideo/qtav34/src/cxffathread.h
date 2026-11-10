@@ -64,6 +64,8 @@ private:
     bool writePcmChunks(const uint8_t* src, int bytes, long baseMs,
                         int aCh, int aRate);
     bool writeScaled(const uint8_t* src, int n);
+    bool cxFadeAndWrite(const uint8_t* src, int n, int bpf,
+                        bool head, bool tail); // M3-B splice crossfade
     void ensureBuf(int bytes);
     void post(int ev, long ms);
     void tailFlush();

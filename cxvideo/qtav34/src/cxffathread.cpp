@@ -1,5 +1,9 @@
 #include "cxffathread.h"
 #include <qapplication.h>
+#include <string.h>
+
+// M3-B splice crossfade 长度(样本帧):128 ≈2.9ms @44.1k
+static const int CxAF_NS = 128;
 
 void CXFFmpegAudioThread::run()
 {
@@ -79,6 +83,7 @@ bool CXFFmpegAudioThread::writePcmChunks(const uint8_t* src, int bytes,
         chunkSamples = (int)samples;
     int chunkBytes = chunkSamples * bpf;
     int off = 0;
+    bool prevSkip = false; // 上一块被弃 → 本块头渐入
     while (off + chunkBytes <= bytes) {
         // 倍速补偿坐在 chunk 边界:
         //  rate < 1   → 复写 (1-rate)*samples 块粒度 dupAcc 累计
@@ -86,7 +91,11 @@ bool CXFFmpegAudioThread::writePcmChunks(const uint8_t* src, int bytes,
         // 每块仅 push 一次时钟(与实际新责 RTP 时长无关,密度一致)
         bool doWrite = true;
         bool doDup = false;
+        bool skipNext = false;
         if (rate > 1.0) {
+            // 先探:下一块将被弃 → 本块尾渐出(消除拼接点击;与原判等价)
+            if (m_skipAcc + (rate - 1.0) * chunkSamples >= (double)chunkSamples)
+                skipNext = true;
             m_skipAcc += (rate - 1.0) * chunkSamples;
             if (m_skipAcc >= chunkSamples) {
                 m_skipAcc -= chunkSamples;
@@ -99,11 +108,19 @@ bool CXFFmpegAudioThread::writePcmChunks(const uint8_t* src, int bytes,
                 doDup = true;
             }
         }
-        if (doWrite && !writeScaled(src + off, chunkBytes))
-            return false;
+        if (doWrite) {
+            if (prevSkip || skipNext) {
+                // M3-B crossfade:头/尾 128 帧线性斜坡,拼接去咔哒
+                if (!cxFadeAndWrite(src + off, chunkBytes, bpf,
+                                    prevSkip, skipNext))
+                    return false;
+            } else if (!writeScaled(src + off, chunkBytes))
+                return false;
+        }
         if (doDup && !writeScaled(src + off, chunkBytes))
             return false;
         off += chunkBytes;
+        prevSkip = !doWrite;
         long endMs = baseMs +
             (long)((double)(off / bpf) * 1000.0 / aRate);
         m_clock->updateValue(endMs);
@@ -116,6 +133,35 @@ bool CXFFmpegAudioThread::writePcmChunks(const uint8_t* src, int bytes,
         off += rem;
     }
     m_lastMs = baseMs + (long)((double)(off / bpf) * 1000.0 / aRate);
+    return !stopFlag;
+}
+
+// M3-B splice crossfade:头/尾各 128 帧线性斜坡(≈2.9ms @44.1k;s16 全声道
+// 一起缓变);调用方仅在被弃块拼接边界走此路径,主体 writeScaled 音量路照旧
+bool CXFFmpegAudioThread::cxFadeAndWrite(const uint8_t* src, int n, int bpf,
+                                         bool head, bool tail)
+{
+    ensureBuf(n);
+    memcpy(m_blkBuf, src, n);
+    int16_t* d = (int16_t*)m_blkBuf;
+    int ch = bpf / 2;         // 通道数(s16)
+    int ns = n / bpf;         // 样本帧数
+    if (head && ns > CxAF_NS) {
+        for (int i = 0; i < CxAF_NS; i++)
+            for (int c = 0; c < ch; c++) {
+                long idx = (long)i * ch + c;
+                d[idx] = (int16_t)((long)d[idx] * i / CxAF_NS);
+            }
+    }
+    if (tail && ns > CxAF_NS) {
+        for (int i = 0; i < CxAF_NS; i++)
+            for (int c = 0; c < ch; c++) {
+                long idx = (long)(ns - CxAF_NS + i) * ch + c;
+                d[idx] = (int16_t)((long)d[idx] * (CxAF_NS - i) / CxAF_NS);
+            }
+    }
+    if (!out->write(m_blkBuf, n))
+        return false;
     return !stopFlag;
 }
 

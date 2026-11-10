@@ -3,6 +3,7 @@
 
 #include "cxengine.h"
 #include "cffsub.h"
+#include "cxrenderer.h" // M3-B inline setEq/screenshot 需完整型
 #include <qstringlist.h>
 
 // 自研 FFmpeg 内核(M2;detail.md 第 5 节)
@@ -47,6 +48,19 @@ public:
     bool setAudioTrack(int idx);      // -1=关音轨(纯视频盲等)
     bool setSubtitleTrack(int idx);   // -1=关内嵌字幕
     bool setSubtitleFile(const QString& path);
+
+    // M3-B:EQ 转渲染器软路;截图取渲染器当前帧(inline,p_renderer 基类项)
+    bool setEq(const CXVideoEq& eq)
+    {
+        if (p_renderer == 0)
+            return false;
+        p_renderer->setVideoEq(eq);
+        return true;
+    }
+    bool screenshot(const QString& path)
+    {
+        return p_renderer != 0 && p_renderer->saveScreenshot(path);
+    }
 
     ~CXEngineFfmpeg();
 
