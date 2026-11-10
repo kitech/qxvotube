@@ -20,6 +20,8 @@ class ContentView;
 class QueuePanel;
 class PlayerBar;
 class CXVideoPlayer;
+class CXRendererGl;
+class VideoPane;
 class QSplitter;
 
 class MainWindow : public QMainWindow {
@@ -61,13 +63,16 @@ private slots:
 
     /* 播放引擎接线(cxvideo/qtav34;backend-abstraction.md Phase 1) */
     void onPlayerStarted();
+    void switchToPlayerView(bool on);    /* M5-A 播放页切换 */
+    void onVideoBackRequested();
+    void onQaAutoplay();     /* QA 钩子:QLVOTUBE_AUTOPLAY=<url> 自动起播 */
     void onPlayerPaused();
     void onPlayerStopped();
     void onPlayerFinished();
     void onPlayerPosition(long ms);
     void onPlayerDuration(long ms);
     void onPlayerError(int code, const QString& msg);
-    void onSeekRequested(long ms);
+    void onSeekRequested(int ms); // 与 PlayerBar::seekRequested(int) 同型
 
 private:
     struct MenuItemRef {
@@ -124,6 +129,9 @@ private:
     QueuePanel* queuePanel;
     PlayerBar* playerBar;
     QSplitter* bodySplitter;
+    StackedWidget* centerStack;   /* 列表页/播放页切换(M5-A;compat34 别名) */
+    VideoPane* videoPane;
+    CXRendererGl* m_glRenderer;
     std::vector<Playlist> m_library;
     int m_curPlaylistId;
     int m_curTrackIndex;

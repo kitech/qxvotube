@@ -424,9 +424,10 @@ static int cxRunGlProbe(void* appRaw)
     app->exec();
     eng->stop();
     delete eng;
-    if (cnt.frames <= 0 || cnt.gotFinished != 1) {
-        printf("gl-probe: FAIL (frames=%d finished=%d)\n",
-               cnt.frames, cnt.gotFinished);
+    bool glOk = view.glReady(); // Qt3 恒 true;Qt6 校验 shader 链真就绪
+    if (cnt.frames <= 0 || cnt.gotFinished != 1 || !glOk) {
+        printf("gl-probe: FAIL (frames=%d finished=%d glReady=%d)\n",
+               cnt.frames, cnt.gotFinished, (int)glOk);
         return 1;
     }
     printf("gl-probe: OK (frames=%d lastPts=%ld finished=1)\n",

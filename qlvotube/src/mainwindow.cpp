@@ -22,10 +22,12 @@
 #include "playerbar.h"
 #include "toastwidget.h"
 #include "userinfopanel.h"
+#include "videopane.h"
 
 #include "compat34.h"
 #include "cxvideoplayer.h"
 #include "cxengine.h"
+#include "renderer_gl.h"     /* M5-A:ffmpeg 路 GL 渲染器 */
 #include "appearance.h"
 #include <qlabel.h>
 #include <qpushbutton.h>
@@ -111,6 +113,9 @@ MainWindow::MainWindow(QWidget* parent)
     , playerBar(0)
     , m_player(0)
     , bodySplitter(0)
+    , centerStack(0)
+    , videoPane(0)
+    , m_glRenderer(0)
     , m_curPlaylistId(0)
     , m_curTrackIndex(-1)
     , demoLeftLabel(0)
@@ -147,6 +152,10 @@ MainWindow::MainWindow(QWidget* parent)
     buildMenus();
     buildAppearanceMenus();
     buildTray();
+
+    /* QA 钩子(M5-A 嵌入自测):QLVOTUBE_AUTOPLAY=<url> 起播 */
+    if (getenv("QLVOTUBE_AUTOPLAY") != 0)
+        QTimer::singleShot(800, this, SLOT(onQaAutoplay()));
     QObject::connect(&Translator::instance(), SIGNAL(languageChanged()),
                      this, SLOT(retranslateUi()));
 
@@ -232,10 +241,14 @@ void MainWindow::buildCentralWidget()
     bodySplitter = new QSplitter(Qt::Horizontal, central);
     bodySplitter->setOpaqueResize(true);
     sideNav = new SideNav(bodySplitter);
-    contentView = new ContentView(bodySplitter);
+    centerStack = new StackedWidget(bodySplitter);
+    contentView = new ContentView(centerStack);
+    videoPane = new VideoPane(centerStack);
+    centerStack->addWidget(contentView);
+    centerStack->addWidget(videoPane);
     queuePanel = new QueuePanel(bodySplitter);
     bodySplitter->addWidget(sideNav);
-    bodySplitter->addWidget(contentView);
+    bodySplitter->addWidget(centerStack);
     bodySplitter->addWidget(queuePanel);
 #ifdef QT3_BUILD
     QValueList<int> sizes;
@@ -274,12 +287,16 @@ void MainWindow::buildCentralWidget()
         QObject::connect(playerBar, SIGNAL(nextRequested()),
                          this, SLOT(onNext()));
         QObject::connect(playerBar, SIGNAL(seekRequested(int)),
-                         this, SLOT(onSeekRequested(long)));
+                         this, SLOT(onSeekRequested(int)));
     }
 
     /* 播放引擎接线(掌面延迟:首次选曲时真正 setEngine) */
     m_player = new CXVideoPlayer(this);
-    m_player->setHostWidget(0); // M1: cmdmpv 内核自开窗口;UI 内嵌窗格 M2 排布
+    /* M5-A:嵌入播放页；ffmpeg 路渲染器(GL)由 M4-A 提供 */
+    m_glRenderer = new CXRendererGl(videoPane->surface());
+    videoPane->setRendererWidget(m_glRenderer);
+    QObject::connect(videoPane, SIGNAL(backRequested()),
+                     this, SLOT(onVideoBackRequested()));
 
     /* 引擎回执接线(进程型 cmdmpv 为 M1 主线;started/finished 已映射) */
     QObject::connect(m_player, SIGNAL(started()), this, SLOT(onPlayerStarted()));
@@ -682,8 +699,32 @@ void MainWindow::ensurePlayerReady()
 {
     if (m_player == 0)
         return;
-    if (m_player->engine() == 0)
-        m_player->setEngine(CxEngineAuto); // cmdmpv→libmpv 探测链(auto)
+    if (m_player->engine() != 0)
+        return;
+    /* M5-A:嵌入首选 ffmpeg(渲染器可控);编内缺失则回落 auto */
+    if (!m_player->setEngine(CxEngineFfmpeg))
+        m_player->setEngine(CxEngineAuto);
+    m_player->setHostWidget(videoPane->surface());
+    m_player->setRenderer(m_glRenderer);
+    if (m_player->engine() != 0)
+        videoPane->setEngineLabel(
+            QString::fromLatin1(m_player->engine()->name()));
+}
+
+void MainWindow::onQaAutoplay()
+{
+    const char* u = getenv("QLVOTUBE_AUTOPLAY");
+    if (u == 0 || u[0] == 0)
+        return;
+    Track t;
+    t.id = -1;
+    t.title = QString::fromLatin1(u);
+    t.url = QString::fromLatin1(u);
+    t.playable = true;
+    t.durationMs = 0;
+    t.ncmId = 0;
+    t.albumId = 0;
+    tryPlayTrack(t);
 }
 
 void MainWindow::tryPlayTrack(const Track& t)
@@ -812,6 +853,7 @@ void MainWindow::onPlayPause()
 void MainWindow::onPlayerStarted()
 {
     if (playerBar) playerBar->setPlaying(true);
+    switchToPlayerView(true);
 }
 
 void MainWindow::onPlayerPaused()
@@ -822,6 +864,21 @@ void MainWindow::onPlayerPaused()
 void MainWindow::onPlayerStopped()
 {
     if (playerBar) playerBar->setPlaying(false);
+    switchToPlayerView(false);
+}
+
+/* M5-A:播放页/列表页切换 */
+void MainWindow::switchToPlayerView(bool on)
+{
+    if (centerStack == 0)
+        return;
+    qStackSetCurrent(centerStack, on ? (QWidget*)videoPane
+                                     : (QWidget*)contentView);
+}
+
+void MainWindow::onVideoBackRequested()
+{
+    switchToPlayerView(false);
 }
 
 void MainWindow::onPlayerFinished()
@@ -848,7 +905,7 @@ void MainWindow::onPlayerError(int code, const QString& msg)
     SharedStatusBar::instance()->showMessageTyped(msg, StatusError, 4000);
 }
 
-void MainWindow::onSeekRequested(long ms)
+void MainWindow::onSeekRequested(int ms)
 {
     /* cmdmpv 进程型 M1 暂不支持外控(M2 接 IPC);libmpv 内核可精细 seek */
     if (m_player != 0 && m_player->engine() != 0)

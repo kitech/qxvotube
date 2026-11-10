@@ -37,6 +37,15 @@ public:
     void setVideoEq(const CXVideoEq& eq);
     bool saveScreenshot(const QString& path);
 
+    // Qt6:shader 链就绪位(Qt3 固定管线恒 true;探针可据此判真渲染)
+    bool glReady() const {
+#ifdef QT3_BUILD
+        return true;
+#else
+        return m_progReady;
+#endif
+    }
+
 protected:
     // 两 Qt 同名;Qt3=QGLWidget 虚,Qt6=QOpenGLWidget 虚(moc 不吃类内条件段)
     void initializeGL();
@@ -59,6 +68,7 @@ private:
     QOpenGLBuffer* m_vbuf;  // core profile 必须走 VAO/VBO
     QOpenGLVertexArrayObject* m_vao;
     int m_uTex, m_uBri, m_uCt, m_uSat, m_uHue, m_uScale;
+    bool m_progReady;
 #endif
 };
 

@@ -316,6 +316,16 @@ LIBS += -lmpv -lavformat -lavcodec -lswscale -lswresample -lopenal
 
 ## 11. 对接 qlvotube/qskvotube 的落地
 
+### M5-A 实装记录(2026-11;qlvotube 播放页嵌入,Qt3/Qt6 双绿)
+
+- **中栏 QStackedWidget**(compat34 别名 `StackedWidget`/`qStackSetCurrent`):`contentView`(列表)/ `videoPane`(播放页);`started→播放页`、`stopped→回列表`、播放页「<」按钮回列表;`finished` 不切页(连播不闪)。
+- **`VideoPane`**(qlvotube/src/videopane.*):黑底 + 顶条(返回/引擎名)+ `surface()` 宿主;渲染器子件随 `resizeEvent` 同步几何(**关键:不跟则停在初建尺寸,画面缩一角**)。
+- **引擎接线**(`ensurePlayerReady`):`CxEngineFfmpeg` 优先(无则 `CxEngineAuto`);随后 `setHostWidget(videoPane->surface())` + `setRenderer(m_glRenderer)` —— **顺序必须在 setEngine 之后**(setEngine 重建引擎会清掉 host/renderer)。
+- **渲染器**:`CXRendererGl` 由主窗 new 并挂到 surface(Qt3 QGLWidget 固定管线 CPU LUT;Qt6 core profile shader)。
+- **顺带修**:① `PlayerBar::seekRequested(int)` ↔ `onSeekRequested(long)` 签名不兼容(Qt 运行期报 incompatible,seek 实际失效)→ 槽改 `int`;② **Qt6 shader 实际从未画过**:默认兼容上下文把 GLSL 当 1.10 编译(in/out 报错),而 `--gl-probe` 只看事件帧数看不见 → 修法 = `CXRendererGl` 构造显式 `QSurfaceFormat` core 3.3 + shader 加 `#version 150` + `glReady()` 就绪位,探针增断言。③ Qt3 `QWidgetList` 并发外部改动导致的编译断裂与本包无关(已由外部修复)。
+- **QA 钩子**:`QLVOTUBE_AUTOPLAY=<url>` 起播(派 `onQaAutoplay` 槽);用于端到端截图验收。
+- **实测**(双内核):`buildqt3/6.sh` ret=0;`QLVOTUBE_AUTOPLAY=/tmp/opencode/m5a_long.mp4` 起播截图 = 播放页 + 引擎名 `ffmpeg` + 测试图正常 letterbox(≈428x321 @ surface 428x430);`cxvideo` 侧基线 0 failures、`--gl-probe`/`--mpv-gl-probe` 双绿。
+
 - qlvotube:`playerengine.{h,cpp}` 抽象不动,新增 `engine_cxvideo.{h,cpp}` 适配器:CXVideoPlayer↔PlayerEngine 薄映射(open→open+play、position/duration/showFrame 转发、音轨/字幕热切换、错误码→lang 键);探测顺序第 1(见 backend-abstraction.md),`WITH_CXVIDEO` 宏门控,组件可链时才列入候选。
 - qskvotube:RendererProbe 的 frameReady(QImage) 直接喂入 QSkinny 侧图像绘制(provider 型接口),落地在 M5。
 

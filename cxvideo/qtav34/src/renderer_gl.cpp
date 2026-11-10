@@ -8,8 +8,10 @@
 static inline float cxMinF(float a, float b) { return a < b ? a : b; }
 
 #ifndef QT3_BUILD
+#include <QSurfaceFormat>
 // Qt6 core profile:GLSL 150(in/out/texture;Qt 自动拼 #version)
 static const char* kGlVertSrc =
+    "#version 150\n"
     "uniform vec2 uScale;\n"
     "in vec2 aPos;\n"
     "in vec2 aUV;\n"
@@ -20,6 +22,7 @@ static const char* kGlVertSrc =
     "}\n";
 
 static const char* kGlFragSrc =
+    "#version 150\n"
     "uniform sampler2D uTex;\n"
     "uniform float uBri;\n"  // -64..64(0.25 级)
     "uniform float uCt;\n"   // 0.7..2.3
@@ -56,6 +59,15 @@ CXRendererGl::CXRendererGl(QWidget* parent)
       , m_tex(0), m_eqOn(false)
 {
     setMinimumSize(320, 180);
+#ifndef QT3_BUILD
+    // Qt6:显式 core profile(#version 150 shader 的硬前提;默认兼容上下文
+    // 会把 shader 当 GLSL 1.10 编译,in/out 直接报错)
+    QSurfaceFormat fmt = format();
+    fmt.setVersion(3, 3);
+    fmt.setProfile(QSurfaceFormat::CoreProfile);
+    setFormat(fmt);
+    m_progReady = false;
+#endif
     cxEqBuildLut(m_eq, m_lut);
 #ifndef QT3_BUILD
     m_prog = 0;
@@ -201,7 +213,7 @@ void CXRendererGl::initializeGL()
     m_prog->addShaderFromSourceCode(QOpenGLShader::Fragment, kGlFragSrc);
     m_prog->bindAttributeLocation("aPos", 0);
     m_prog->bindAttributeLocation("aUV", 1);
-    m_prog->link();
+    m_progReady = m_prog->link(); // 失败 → paintGL 早退(不再黑人眼)
     m_uTex = m_prog->uniformLocation("uTex");
     m_uBri = m_prog->uniformLocation("uBri");
     m_uCt = m_prog->uniformLocation("uCt");
