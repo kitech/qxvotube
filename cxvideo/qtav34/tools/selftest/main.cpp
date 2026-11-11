@@ -8,6 +8,13 @@
 #include "renderer_software.h"
 #include "renderer_gl.h"
 #include "renderer_mpvgl.h"
+#ifndef QT3_BUILD
+#include "renderer_quick.h"
+#include "renderer_qmpv.h"
+#include <QQuickWindow>
+#include <QSGRendererInterface>
+#include <functional>
+#endif
 #include "cxframe.h"
 #include "ffprobe_counter.h"
 #include <qtimer.h>
@@ -466,6 +473,110 @@ static int cxRunGlProbe(void* appRaw)
 
 // ── M4-B mpv-wid 回退路探针:强制 CX_MPV_ROUTE=wid ──
 // 断言:renderPath=mpv-wid + 帧流正常;EQ/截图在 wid 路应如实返回 false(不崩)
+// ── M5-B Quick 探针:ffmpeg 纹理路真渲断言 + mpv-qfbo 挂载断言 ──
+static int cxRunQuickProbe(void* appRaw)
+{
+#ifdef QT3_BUILD
+    (void)appRaw;
+    printf("quick-probe: SKIP (Qt3 非 Quick 域)\n");
+    return 0;
+#else
+    QApplication* app = (QApplication*)appRaw;
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
+    // mpv-qfbo 显式要求 GL 窗口(不满足即 FAIL,不降级)
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    if (QQuickWindow::graphicsApi() != QSGRendererInterface::OpenGL) {
+        printf("quick-probe: FAIL (window graphicsApi != OpenGL)\n");
+        return 1;
+    }
+
+    // ── 断言 1:ffmpeg rhi-texture 真渲(纯红帧 → grabWindow 中心点红)──
+    QQuickWindow win;
+    win.setGeometry(0, 0, 320, 240);
+    CXQuickVideoItem* vitem = new CXQuickVideoItem(win.contentItem());
+    vitem->setSize(QSizeF(320, 240));
+    CXVideoFrame f;
+    f.width = 160;
+    f.height = 120;
+    f.img = QImage(160, 120, QImage::Format_RGB32);
+    f.img.fill(QColor(255, 0, 0));
+    vitem->showFrame(&f);
+    win.show();
+    app->processEvents();
+    app->processEvents();
+    QImage shot = win.grabWindow();
+    bool ffOk = !shot.isNull();
+    if (ffOk) {
+        QRgb c = shot.pixel(160, 120);
+        ffOk = qRed(c) > 200 && qGreen(c) < 60 && qBlue(c) < 60;
+    }
+    delete vitem;
+
+    // ── 断言 2:mpv-qfbo 挂载(quick 路打开 + 首帧懒挂)──
+    bool mpvOk = false;
+    CXEngine* meng = cxEngineCreateFor(CxEngineMpv);
+    if (meng == 0) {
+        printf("quick-probe: mpv SKIP (libmpv unavailable)\n");
+        mpvOk = true;
+    } else if (system("test -f /tmp/opencode/cxvideo_selftest.mp4 "
+                      "2>/dev/null </dev/null") != 0) {
+        printf("quick-probe: mpv SKIP (media missing; run --ff-probe first)\n");
+        mpvOk = true;
+    } else {
+        CXEngineMpv* em = (CXEngineMpv*)meng;
+        em->setQuickRender(true);
+        CXQuickMpvFboItem* mitem = new CXQuickMpvFboItem(win.contentItem());
+        mitem->setX(0);
+        mitem->setY(0);
+        mitem->setWidth(320);
+        mitem->setHeight(120);
+        mitem->setZ(1); // 覆盖在 ff 断言用例层之上,场景图真渲
+        mitem->bindEngine(em);
+        CxFFProbeCounter cnt;
+        QObject::connect(em, SIGNAL(finished()), &cnt, SLOT(onFinished()));
+        QObject::connect(em, SIGNAL(positionChanged(long)),
+                         &cnt, SLOT(onFrame(long)));
+        QObject::connect(em, SIGNAL(finished()), app, SLOT(quit()));
+        QTimer::singleShot(10000, app, SLOT(quit()));
+        bool opened = meng->open(QString::fromLatin1(
+            "/tmp/opencode/cxvideo_selftest.mp4"));
+        meng->play();
+        // 二段起播:open 只建 handle(vo=libmpv),loadfile 延至 render_context
+        // 挂成(render.h:须在起播前建好)。轮询 attach 位→quickGo 发 loadfile。
+        std::function<void()> quickGoPoll = [&]() {
+            if (mitem->attached())
+                em->quickGo();
+            else
+                QTimer::singleShot(50, app, quickGoPoll);
+        };
+        QTimer::singleShot(50, app, quickGoPoll);
+        app->exec(); // 等 render 线程首帧懒挂 + 帧流
+        mpvOk = opened &&
+                em->renderPath() != 0 &&
+                strcmp(em->renderPath(), "mpv-gl") == 0 &&
+                em->renderObj() != 0 &&
+                mitem->attached() &&
+                cnt.frames > 0;
+        if (!mpvOk)
+            printf("quick-probe: mpv detail open=%d path=%s rc=%p att=%d fr=%d\n",
+                   (int)opened,
+                   em->renderPath() != 0 ? em->renderPath() : "none",
+                   em->renderObj(), (int)mitem->attached(), cnt.frames);
+        meng->stop();
+        delete meng;
+        delete mitem;
+    }
+
+    if (!ffOk || !mpvOk) {
+        printf("quick-probe: FAIL (ff=%d mpv=%d)\n", (int)ffOk, (int)mpvOk);
+        return 1;
+    }
+    printf("quick-probe: OK (rhi-texture pixel; mpv-qfbo attached render=mpv-gl)\n");
+    return 0;
+#endif
+}
+
 static int cxRunMpvWidProbe(void* appRaw)
 {
     QApplication* app = (QApplication*)appRaw;
@@ -666,6 +777,13 @@ int main(int argc, char* argv[])
     }
     if (mpvWidProbeMode)
         return cxRunMpvWidProbe(&app);
+    bool quickProbeMode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--quick-probe") == 0)
+            quickProbeMode = true;
+    }
+    if (quickProbeMode)
+        return cxRunQuickProbe(&app);
     bool mpvGlProbeMode = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--mpv-gl-probe") == 0)

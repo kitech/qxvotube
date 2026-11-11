@@ -27,6 +27,14 @@ CXVIDEO_CPP = \
     $$CXVIDEO/src/renderer_mpvgl.cpp \
     $$CXVIDEO/src/renderer_probe.cpp
 
+# M5-B:Quick 渲染器(仅 Qt6;Qt3 不编;宿主须接受 QT += quick)
+greaterThan(QT_MAJOR_VERSION, 5) {
+    QT += quick
+    CXVIDEO_CPP += \
+        $$CXVIDEO/src/renderer_quick.cpp \
+        $$CXVIDEO/src/renderer_qmpv.cpp
+}
+
 # compatcore34 归属 qlcomp;qlite.pri 的 compat34.cpp 内部已 include 它,
 # 宿主工程若已含 compat34(qlite)则不重复编,独立工程(cxvideo 自测)才补编:
 BASEHOST_HAS_CORE = $$find(SOURCES, compat34)

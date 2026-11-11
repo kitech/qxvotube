@@ -271,6 +271,20 @@ while(!stop):
 - **pri**:`renderer_mpvgl.{h,cpp}` 入 SOURCES/HEADERS。
 - **实测**(Qt3/Qt6,双绿):编 0 failures;基线 0 failures;八探针(旧七 + mpv-gl)全 OK/SKIP(`mpv-gl-probe: OK (render=mpv-gl frames=15 eq=1 shot=1)`);`qlvotube` q3votube/q6votube 重链绿。
 
+### 7.8 M5-B 实装记录(2026-11;mpv QQuickFramebufferObject 渲染路 + Quick ffmpeg rhi-texture 路)
+
+- **双渲染器**(Qt6/Quick 专用,`#ifndef QT3_BUILD` 全 guard):
+  1. `renderer_quick.{h,cpp}` → `CXQuickVideoItem`:`QQuickItem`+`QSGSimpleTextureNode` 纯 RHI(无 GL 依赖,软件/任意 RHI 后端均可);ffmpeg 帧经 `showFrame(CXVideoFrame)` 收 `QImage`(eng_ffmpeg sws 已转 RGB32),EQ 走 CPU LUT(`cxEqBuildLut/cxEqApplyRgb`,与软渲/GL 同源),`updatePaintNode` 里 `window()->createTextureFromImage` + letterbox;截图存 `m_lastImg`。
+  2. `renderer_qmpv.{h,cpp}` → `CXQuickMpvFboItem`:`QQuickFramebufferObject`;要求**窗口 GL API**(宿主须 `QQuickWindow::setGraphicsApi(OpenGL)` 前置,不满足显式报错,不降级)。渲染走 mpv `mpv_render_context_render(OPENGL_FBO + FLIP_Y=0)`,FBO 用 QFBO 私有 handle(`framebufferObject()->handle()`,非默认 0);**FLIP_Y 必须 0**——QFBO 纹理回读已含方向,设 1 会上下镜像(彩虹条 0.79↔0.16 对调,实测核对 ground truth 帧确认)。
+- **起播时序(本次最大坑,已修)**:官方 render.h 明确 `mpv_render_context_create()` **须在起播/VO 创建之前**完成,且须 GL context current。首版"QFBO 首帧 render() 懒挂"设计:open→loadfile 已跑,mpv VO 初始化无 render_context → 视频链死亡(音频照跑,pos 流动、画面黑、update 回调只触发一次)。修复:**Quick 路 open 二段化**——`open()`(m_quickRender 且 host=0)只建 mpv handle + 设 `vo=libmpv`,**不发 loadfile**(记入 `m_quickUrl`);宿主用 `QQuickWindow::scheduleRenderJob(BeforeSynchronizingStage)` 在场景图线程(G context current)调 `attachQuickRender()` 建 render_context,挂成后回 GUI 线程调 `quickGo()` 发 loadfile+play。挂接失败显式报错不回退。
+- **帧泵**:mpv 线程 `cxMpvQuickUpdateHook`(与 renderer_mpvgl 同 User+4710 事件值,两域不共存一窗)→ `QApplication::postEvent(item)` → item `event()` 里 `update()` → QFBO sync/render。**一次 postEvent 不 delete**(Qt sendPostedEvents 自管,renderer_mpvgl 同教训)。
+- **eng_mpv 增量**:`setQuickRender(bool)`(须 open 前)/`attachQuickRender()`(幂等,h_rc 已挂直接 true;create 失败 emit noticedError)/`quickGo()`(二段 loadfile;非 Quick 路空操作)/`renderObj()`(探针断言用);quick 路仅固化 `m_renderPath="mpv-gl"` 供 EQ/截图守卫。
+- **EQ/截图**:EQ 走 mpv 属性直写(与 M4-B 同),`setVideoEq` 为空实现;截图 `saveScreenshot` 转发引擎 `screenshot-to-file`(mpv-gl 路可用)。
+- **cxvideo.pri/cxvideo.cmake**:Qt6 条件段加 `renderer_quick/renderer_qmpv` 源;CMake 消费列表(`cxvideo.cmake`)同齐(注意 `renderer_mpvgl`/`eng_mpv_cmd` 也是 cxengine.cpp 无条件引用的必编件)。
+- **探针**:`--quick-probe`(GUI 前提,Qt3 SKIP):断言 1=ffmpeg 纹理路真渲像素(纯红帧 grabWindow 中心点红);断言 2=mpv-qfbo `renderPath=mpv-gl` + `renderObj!=0` + attached + frames>0。**探针同样须走二段起播**(轮询 attached → `quickGo()`)。实测三连跑 OK。
+- **宿主侧(qskvotube)环境教训**:QSkinny(master,x64-nosys 预编译)须 Qt 6.7.3 + 运行期 `LD_LIBRARY_PATH=/opt/qt/6.7.3/gcc_64/lib` 前置(其自身 DT_NEEDED 解析到 /usr/lib 发行版 Qt6.12;Qt6.8.1 配对曾窗口永不 map;6.7.3 后正常)+ `QT_PLUGIN_PATH=…/lib/qskinny/plugins`(skin 插件不在默认路径,缺了 `QskSkinManager` 断言)。QSkinny 布局坑:`QskWindow` 用 `setPreferredSize`(Show 时按 content 定尺寸;平台级 `setFixedSize` 会绕过内容约束);`QskPushButton` 默认 preferred 宽 120,按钮一多直接把布局盒子撑出窗;视频 item 进 `QskLinearBox` 用 `setStretchFactor(item,1)` 占满,勿用 `addStretch` 手工垫(会顶出窗外)。
+- **遗留(二期)**:QSkinny 文字/按钮在该预编译栈下不渲染(纯 Qt Quick 文字正常,skinlet 文字节点疑 ABI 配对问题;滑条 handle 等矢量件正常)——控制条文字缺失为已知环境限制,不影响引擎/渲染验收。
+
 ## 8. Qt3 兼容层(逐条)
 
 | Qt5/6 用法 | Qt3 等价 / 化解 |
@@ -350,6 +364,20 @@ LIBS += -lmpv -lavformat -lavcodec -lswscale -lswresample -lopenal
   2. **关闭竞态**:`stopThreads()` 对视频线程 `wait(2000)` 失败仍 `delete` → Qt 报 "QThread: Destroyed while thread is still running" 并 `abort`(调试器下必现);改为**停不下来就泄漏不 delete**(与音频线程同策略)。另修字幕切换后 reopen seek 会丢掉当前 cue 包的问题(`.srt` 单大 cue 最坏情况要等下一条 cue 才再出现;多 cue 媒体实测切换后 1~2s 内恢复)。
 - **QA 钩子**:`QLVOTUBE_AUTOSUB=1`(自动选轨0)、`QLVOTUBE_AUTOQUIT_MS=<ms>`(定时干净退出,供 gdb 抓退出期崩溃)。
 - **实测**:`m5a_sub5.mp4`(5 条 cue)双内核 `subtitle-text` 序列 `LINE TWO→THREE→FOUR→FIVE`,画面底部显示 "LINE TWO"(截图);退出码 0(修复前 gdb 下 abort);cxvideo 九探针全绿(新增 mpv-wid-probe)。
+
+### M5-B 实装记录(2026-11;qskvotube(QSkinny/Qt6.7.3)接入 cxvideo 双内核 Quick 渲染)
+
+- **目标**:qskvotube 用 QSkinny 原生控件做播放前端,视频区接 cxvideo 双内核的两个 Quick 渲染器(`CXQuickVideoItem` ffmpeg rhi-texture / `CXQuickMpvFboItem` mpv QFBO),**引擎显式选**(`QLVOTUBE_ENGINE=mpv|ffmpeg`,缺省 ffmpeg),**不自动降级**(mpv 不满足 GL 前置即报错退出)。详细技术决策见 §7.8。
+- **引擎选择/前置**:main 最前(mpv 时)`QQuickWindow::setGraphicsApi(OpenGL)`;`graphicsApi()!=OpenGL` → UI 报错 + 2.5s 退出。引擎 factory 失败同样显式错误标签(不回退 cmdmpv/wid)。
+- **控制条**:QSkinny 原生件(QskPushButton/QskSlider/QskTextLabel),lambda 接线(无自定义 Q_OBJECT 类);`CXVideoPlayer` 无 stateChanged,用 started/paused/stopped 三信号换 playBtn 文案;`QskSlider` 无 pressed,进度条拖动用 valueChanged + 位差 >1.2s 判手势。QA 钩子沿用 `QLVOTUBE_AUTOPLAY/AUTOQUIT_MS/DEBUG`。
+- **构建栈**(定案):Qt 6.7.3(/opt/qt/6.7.3)+ /opt/qt/qskinny(master,x64-nosys)+ 运行期 `LD_LIBRARY_PATH=/opt/qt/6.7.3/gcc_64/lib` 前置 + `QT_PLUGIN_PATH=…/plugins`(skin 插件);buildqt6.sh 已固化。CMakeLists:Qt6 Widgets/Quick/OpenGL、cxvideo.cmake 接入、6.7.3 rpath、AO 门控(`WITH_CX_FF_AO_*` pkg-config 探测镜像 cxvideo.pri,含 include dirs)。
+- **布局要点**(踩坑实录):`QskWindow` 用 `setPreferredSize`(setFixedSize 绕过内容约束);视频 item 用 `box->setStretchFactor(item,1)` 占满(addStretch 垫片会顶出窗外);`QskPushButton` 默认 preferred 宽 120,控制条按钮须 `setPreferredSize(40,34)` 压窄否则盒子撑出窗。
+- **实测**(本机;桌面有并行会话噪声,以像素/探针为准):
+  - ffmpeg 路:640x420 窗 map、material3 皮肤生效、视频区彩条持续渲染、pos 事件流(12+)、控制条滑条可见可动。
+  - mpv 路:QFBO 渲染彩条(方向经 ground truth 帧核对正确,FlipY=0)、pos 持续推进(不卡帧)、二段起播链路(attach job → quickGo)通。
+  - cxvideo `--quick-probe` 三连跑 OK;`buildqt6.sh` ret=0。
+  - 已知环境限制:QSkinny 预编译栈下按钮/文字不渲染(见 §7.8 遗留),控制条文字缺失不影响引擎/渲染验收;字面验证留二期(自建 QSkinny 或升级配对)。
+- **QA**:gdb+AUTOQUIT_MS 可复核退出;窗口定位 `wmctrl -l | grep qskvotube`(WM_CLASS=q6vtube)。
 
 ## 附:实现顺序(对照里程碑)
 

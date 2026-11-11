@@ -2,11 +2,17 @@ TEMPLATE = app
 TARGET = cxvideo_selftest
 QT = core gui widgets
 
+greaterThan(QT_MAJOR_VERSION, 5) {
+    QT += quick
+}
+
 CONFIG += moc
 VERSION = 0.1.0
 
 SOURCES = main.cpp
 HEADERS = ffprobe_counter.h
+
+# M5-B:Quick 渲染器经 cxvideo.pri 的 Qt6 条件段带入(QT += quick)
 
 include(../../cxvideo.pri)
 

@@ -9,7 +9,12 @@ set -e
 set -x
 cd "$(dirname "$0")"
 
-QTSRC=${QTSRC:-/opt/qt/6.8.1/gcc_64/lib/cmake}
+# QSkinny skin 插件路径(预编译装;setSkin 需要)
+export QT_PLUGIN_PATH="${QT_PLUGIN_PATH:+$QT_PLUGIN_PATH:}/mnt/sda5/osopt/qt/qskinny-x64-nosys/lib/qskinny/plugins"
+# libqskinny(master) 的 Qt 依赖须解析到 6.7.3(与 qskmusic 同法)
+export LD_LIBRARY_PATH="/opt/qt/6.7.3/gcc_64/lib:/mnt/sda5/osopt/qt/qskinny-x64-nosys/lib/qskinny${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+QTSRC=${QTSRC:-/opt/qt/6.7.3/gcc_64/lib/cmake}
 QSKINNY_CMAKE=${QSKINNY_CMAKE:-/opt/qt/qskinny/lib/cmake}
 
 mkdir -p build && cd build

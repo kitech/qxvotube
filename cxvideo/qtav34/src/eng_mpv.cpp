@@ -1,7 +1,12 @@
 #include "compat34.h"
 #include "eng_mpv.h"
 #include "cxmpv_def.h"
-#include "renderer_mpvgl.h" // M4-B GL 路
+#include "renderer_mpvgl.h"
+#ifndef QT3_BUILD
+// M5-B:Quick 路钩子(renderer_qmpv.cpp 导出;eng_mpv 只见原型,不 include
+// QQuickFramebufferObject 头——demo/selftest qmake 工程不必 QT += quick)
+void cxMpvQuickUpdateHook(void* ctx);
+#endif // M4-B GL 路
 #include "cxthread.h"
 #include "cxframe.h"
 #include <qapplication.h>
@@ -172,8 +177,10 @@ bool CXEngineMpv::open(const QString& url)
 
     // M4-B:gl 路(host + render 符号齐)优先;失败逐级回退 wid 路
     // CX_MPV_ROUTE=wid 可强制回退路(selftest --mpv-wid-probe 用)
+    // M5-B:Quick 路(m_quickRender,host=0)同样走 render_context;
+    // 懒挂失败显式报错,不回退 wid(Quick 域无 QWidget 可挂)
     const char* forced = getenv("CX_MPV_ROUTE");
-    bool gl = p_host != 0 &&
+    bool gl = (p_host != 0 || m_quickRender) &&
               api.mpv_render_context_create != 0 &&
               api.mpv_render_context_render != 0 &&
               api.mpv_render_context_free != 0 &&
@@ -244,7 +251,11 @@ bool CXEngineMpv::cxOpenCore(const QString& url, bool glRoute)
     m_pump->start();
 
     // gl 路二阶段:host 挂视图 → GL context 现场 → render_context
-    if (glRoute) {
+    // M5-B:Quick 路 host=0,render_context 由 attachQuickRender() 懒建
+    // (QQuickFramebufferObject 首帧,场景图线程 context current)
+    if (glRoute && m_quickRender && p_host == 0) {
+        m_renderPath = "mpv-gl"; // 仅固化路名供 EQ/截图守卫;h_rc 懒挂补
+    } else if (glRoute) {
         CXRendererMpvGl* v = (CXRendererMpvGl*)cxMpvGlViewCreate(p_host);
         cxMpvGlViewGeometry(v, p_host->width(), p_host->height());
         v->show();
@@ -279,9 +290,32 @@ bool CXEngineMpv::cxOpenCore(const QString& url, bool glRoute)
         m_renderPath = "mpv-wid";
     }
 
+    if (glRoute && m_quickRender && p_host == 0 && h_rc == 0) {
+        // Quick 路二段起播:loadfile 延到 attachQuickRender()/quickGo()
+        // (render.h:render_context 须在起播前建好;懒挂时序不满足)
+        m_quickUrl = m_url;
+        return true;
+    }
     QByteArray ba = qToUtf8(m_url);
     if (!cxMpvRunCmd2(api, mpv, "loadfile", ba.data())) {
         emit noticedError((int)CxErrOpenFail, m_url);
+        closeInternal();
+        return false;
+    }
+    return true;
+}
+
+// M5-B:Quick 路二段起播入口(render_context 挂成后由宿主调)
+bool CXEngineMpv::quickGo()
+{
+    CxMpvApi& api = CxMpvApi::instance();
+    if (h_mpv == 0 || m_quickUrl.isEmpty())
+        return false;
+    const QString u = m_quickUrl;
+    m_quickUrl.clear();
+    QByteArray ba = qToUtf8(u);
+    if (!cxMpvRunCmd2(api, h_mpv, "loadfile", ba.data())) {
+        emit noticedError((int)CxErrOpenFail, u);
         closeInternal();
         return false;
     }
@@ -636,3 +670,36 @@ bool cxEngineMpvSmokeHeadless()
 {
     return cxEngineMpvProbeLib() == 2;
 }
+
+#ifndef QT3_BUILD
+// ── M5-B:Quick 路懒挂(QQuickFramebufferObject 首帧调用;
+// 调用者保证 GL context current;失败显式报错不回退 wid)──
+bool CXEngineMpv::attachQuickRender()
+{
+    CxMpvApi& api = CxMpvApi::instance();
+    if (h_mpv == 0)
+        return false;
+    if (h_rc != 0)
+        return true; // 幂等:已挂
+    CxMpvOpenglInitParams ip;
+    cxMpvGlViewInitParams(&ip); // proc thunk 取 QOpenGLContext::currentContext()
+    CxMpvRenderParam rp[3];
+    rp[0].type = CxMpvRenderParamApiType;
+    rp[0].data = (void*)"opengl";
+    rp[1].type = CxMpvRenderParamOpenGLInitParams;
+    rp[1].data = &ip;
+    rp[2].type = CxMpvRenderParamInvalid;
+    rp[2].data = 0;
+    if (api.mpv_render_context_create((CxMpvRenderCtx**)&h_rc, h_mpv, rp) != 0 ||
+        h_rc == 0) {
+        h_rc = 0;
+        emit noticedError((int)CxErrEngine, QString("quick render create failed"));
+        return false;
+    }
+    if (api.mpv_render_context_set_update_callback != 0)
+        api.mpv_render_context_set_update_callback(
+            (CxMpvRenderCtx*)h_rc, cxMpvQuickUpdateHook, 0);
+    return true;
+}
+
+#endif // !QT3_BUILD

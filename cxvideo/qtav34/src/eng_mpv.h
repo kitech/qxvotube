@@ -46,6 +46,15 @@ public:
     // M4-B:渲染路名("mpv-gl"/"mpv-wid"/未 open=0;selftest 探针用)
     const char* renderPath() const { return m_renderPath; }
 
+    // M5-B:Quick 域(QQuickFramebufferObject;host 为 0 也走 render 路)
+    void setQuickRender(bool on) { m_quickRender = on; }
+    bool attachQuickRender();     // 首帧 render() 懒挂(须 GL context current)
+    void* renderObj() const { return h_rc; }
+    // Quick 路二段起播:open 只建 handle(vo=libmpv),loadfile 延到
+    // render_context 挂成后(render.h:context 须在起播前建好),由
+    // quickGo() 发出;非 Quick 路为空操作返回 false
+    bool quickGo();
+
     ~CXEngineMpv();
 
 protected:
@@ -58,7 +67,7 @@ private:
 
     CXEngineMpv() : CXEngine(), h_mpv(0), m_pump(0), m_loaded(false),
                     h_rc(0), m_renderPath(0), m_glv(0)
-                    , m_seekTarget(-1) { }
+                    , m_quickRender(false), m_seekTarget(-1) { }
     void closeInternal();
     void dispatchEvent(const CXMpvUiEvent* ev);
     bool cxOpenCore(const QString& routeUrl, bool glRoute);
@@ -67,6 +76,8 @@ private:
     void* h_rc;        // mpv_render_context*(M4-B;0=wid 路)
     const char* m_renderPath;
     void* m_glv;       // CXRendererMpvGl*(仅 gl 路)
+    bool m_quickRender; // M5-B:Quick 路开关(host=0 时走 render 懒挂)
+    QString m_quickUrl; // Quick 路二段起播:待 loadfile 的 url
     CXMpvPump* m_pump;
     bool m_loaded;
     long m_seekTarget;
