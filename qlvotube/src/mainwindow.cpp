@@ -41,6 +41,7 @@
 #include <qlineedit.h>
 #include <qsplitter.h>
 #include <qdatetime.h>
+#include <qfiledialog.h>
 
 #include <cstdlib>
 #include <fstream>
@@ -119,6 +120,7 @@ MainWindow::MainWindow(QWidget* parent)
     , videoPane(0)
     , m_glRenderer(0)
     , m_eqDialog(0)
+    , m_subIdx(-1)
     , m_curPlaylistId(0)
     , m_curTrackIndex(-1)
     , demoLeftLabel(0)
@@ -159,6 +161,9 @@ MainWindow::MainWindow(QWidget* parent)
     /* QA 钩子(M5-A 嵌入自测):QLVOTUBE_AUTOPLAY=<url> 起播 */
     if (getenv("QLVOTUBE_AUTOPLAY") != 0)
         QTimer::singleShot(800, this, SLOT(onQaAutoplay()));
+    if (getenv("QLVOTUBE_AUTOQUIT_MS") != 0)
+        QTimer::singleShot(atoi(getenv("QLVOTUBE_AUTOQUIT_MS")),
+                           qApp, SLOT(quit()));
     QObject::connect(&Translator::instance(), SIGNAL(languageChanged()),
                      this, SLOT(retranslateUi()));
 
@@ -299,6 +304,8 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onOpenEqDialog()));
         QObject::connect(playerBar, SIGNAL(shotRequested()),
                          this, SLOT(onTakeScreenshot()));
+        QObject::connect(playerBar, SIGNAL(subtitleRequested()),
+                         this, SLOT(onCycleSubtitle()));
     }
 
     /* 播放引擎接线(掌面延迟:首次选曲时真正 setEngine) */
@@ -316,6 +323,8 @@ void MainWindow::buildCentralWidget()
     QObject::connect(m_player, SIGNAL(finished()), this, SLOT(onPlayerFinished()));
     QObject::connect(m_player, SIGNAL(positionChanged(long)), this, SLOT(onPlayerPosition(long)));
     QObject::connect(m_player, SIGNAL(durationChanged(long)), this, SLOT(onPlayerDuration(long)));
+    QObject::connect(m_player, SIGNAL(subtitleChanged(const QString&)),
+                     this, SLOT(onSubtitleText(const QString&)));
     QObject::connect(m_player, SIGNAL(noticedError(int,const QString&)),
                      this, SLOT(onPlayerError(int,const QString&)));
 
@@ -466,6 +475,7 @@ void MainWindow::buildMenus()
     addMenuItem(tool, this, SLOT(onOpenEqDialog()), "音视频均衡器(EQ)...");
     addMenuItem(tool, this, SLOT(onTakeScreenshot()), "截图(保存到缓存目录)");
     addMenuItem(tool, this, SLOT(onToggleEngine()), "切换播放引擎(ffmpeg/mpv)");
+    addMenuItem(tool, this, SLOT(onLoadSubtitleFile()), "加载外挂字幕...");
     MenuWidget34* help = static_cast<MenuWidget34*>(addTopMenu("menu.help"));
     addMenuItem(help, qApp, SLOT(aboutQt()), "menu.aboutqt");
     addMenuItem(help, this, SLOT(onAboutApp()), "menu.about_qlvotube");
@@ -762,9 +772,12 @@ void MainWindow::tryPlayTrack(const Track& t)
             _("player.no_media") + qFromUtf8(" ") + t.title, 4000);
         return;
     }
+    m_subIdx = -1; // M5-A3:换源字幕序号归位
     m_player->open(t.url);
     m_curUrl = t.url;
     m_player->play(); // 外观层 play() 为 void;失败路径经 noticedError 走状态栏
+    if (getenv("QLVOTUBE_AUTOSUB") != 0)
+        QTimer::singleShot(800, this, SLOT(onQaAutoSub()));
 }
 
 void MainWindow::onTrackActivated(int playlistId, int trackIndex)
@@ -918,6 +931,8 @@ void MainWindow::onPlayerFinished()
 
 void MainWindow::onPlayerPosition(long ms)
 {
+    if (getenv("QLVOTUBE_DEBUG") != 0 && (ms % 1000) < 100)
+        fprintf(stderr, "pos=%ld\n", ms);
     if (playerBar) playerBar->setProgress((int)ms);
 }
 
@@ -1004,6 +1019,79 @@ void MainWindow::onToggleEngine()
     }
     SharedStatusBar::instance()->showMessage(
         qFromUtf8("当前引擎: ") + QString::fromLatin1(m_player->engine()->name()), 3000);
+}
+
+/* M5-A3:字幕轨循环(关 → 1 → 2 … → 关);内核不支持则如实提示 */
+void MainWindow::onCycleSubtitle()
+{
+    if (m_player == 0 || m_player->engine() == 0) {
+        SharedStatusBar::instance()->showMessage(qFromUtf8("播放引擎未接入"), 2000);
+        return;
+    }
+    int n = m_player->subtitleTrackCount();
+    if (n <= 0) {
+        SharedStatusBar::instance()->showMessage(qFromUtf8("当前媒体无字幕轨"), 2500);
+        return;
+    }
+    m_subIdx++;
+    if (m_subIdx >= n)
+        m_subIdx = -1;
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+        fprintf(stderr, "sub-cycle: n=%d idx=%d\n", n, m_subIdx);
+    m_player->setSubtitleTrack(m_subIdx);
+    SharedStatusBar::instance()->showMessage(
+        m_subIdx < 0 ? qFromUtf8("字幕: 关")
+                     : qFromUtf8("字幕: 轨 ") + QString::number(m_subIdx + 1),
+        2000);
+}
+
+void MainWindow::onLoadSubtitleFile()
+{
+    if (m_player == 0 || m_player->engine() == 0) {
+        SharedStatusBar::instance()->showMessage(qFromUtf8("播放引擎未接入"), 2000);
+        return;
+    }
+#ifdef QT3_BUILD
+    // Qt3 静态签名为 (startWith, filter, parent, name, caption,...)
+    QString f = QFileDialog::getOpenFileName(QString::null,
+                                             qFromUtf8("字幕 (*.srt *.ass)"),
+                                             this, 0,
+                                             qFromUtf8("加载外挂字幕"));
+#else
+    QString f = QFileDialog::getOpenFileName(this, qFromUtf8("加载外挂字幕"),
+                                             QString(), qFromUtf8("字幕 (*.srt *.ass)"));
+#endif
+    if (f.isEmpty())
+        return;
+    if (m_player->setSubtitleFile(f))
+        SharedStatusBar::instance()->showMessage(qFromUtf8("字幕已加载: ") + f, 3000);
+    else
+        SharedStatusBar::instance()->showMessage(qFromUtf8("字幕加载失败(内核不支持)"), 3000);
+}
+
+void MainWindow::onQaAutoSub()
+{
+    int n = m_player != 0 ? m_player->subtitleTrackCount() : 0;
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+        fprintf(stderr, "autosub: n=%d\n", n);
+    if (n > 0) {
+        m_subIdx = 0;
+        m_player->setSubtitleTrack(0);
+    }
+}
+
+void MainWindow::onSubtitleText(const QString& text)
+{
+#ifdef QT3_BUILD
+    const char* textC = text.latin1();
+#else
+    QByteArray textBa = text.toUtf8();
+    const char* textC = textBa.constData();
+#endif
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+        fprintf(stderr, "subtitle-text: [%s]\n", textC);
+    if (videoPane != 0)
+        videoPane->setSubtitleText(text);
 }
 
 void MainWindow::onPlayerError(int code, const QString& msg)

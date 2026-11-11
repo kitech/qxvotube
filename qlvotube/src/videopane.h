@@ -18,6 +18,7 @@ public:
     QWidget* surface() const { return m_surface; } // 交给 setHostWidget
     void setRendererWidget(QWidget* w);            // ffmpeg 路:GL 渲染器
     void setEngineLabel(const QString& name);
+    void setSubtitleText(const QString& text); // 空串=隐藏(M5-A3)
 
 signals:
     void backRequested();
@@ -31,6 +32,7 @@ private:
     QBoxLayout* m_lay;
     QPushButton* m_backBtn;
     QLabel* m_engineLabel;
+    QLabel* m_subLabel;
 };
 
 #endif // VIDEOPANE_H

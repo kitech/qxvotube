@@ -124,10 +124,11 @@ QRect PlayerBar::progressRect() const
 }
 
 /* M5-A2 右侧:音量条 + 倍速 + EQ + 截图 */
-QRect PlayerBar::volRect() const   { return QRect(width() - 215, 29, 70, 6); }
-QRect PlayerBar::rateRect() const  { return QRect(width() - 135, 22, 40, 20); }
+QRect PlayerBar::volRect() const   { return QRect(width() - 250, 29, 70, 6); }
+QRect PlayerBar::rateRect() const  { return QRect(width() - 172, 22, 40, 20); }
+QRect PlayerBar::ccRect() const    { return QRect(width() - 126, 22, 30, 20); }
 QRect PlayerBar::eqRect() const    { return QRect(width() - 90, 22, 34, 20); }
-QRect PlayerBar::shotRect() const  { return QRect(width() - 48, 22, 34, 20); }
+QRect PlayerBar::shotRect() const  { return QRect(width() - 52, 22, 34, 20); }
 
 void PlayerBar::setVolumeFromX(int x)
 {
@@ -229,6 +230,8 @@ void PlayerBar::paintEvent(QPaintEvent*)
     p.setPen(m_hover == HitRate ? pal.accent : pal.textMuted);
     p.drawText(rateRect(), Qt::AlignCenter,
                QString::number(m_rate, 'g', 3) + "x");
+    p.setPen(m_hover == HitSub ? pal.accent : pal.textMuted);
+    p.drawText(ccRect(), Qt::AlignCenter, "CC");
     p.setPen(m_hover == HitEq ? pal.accent : pal.textMuted);
     p.drawText(eqRect(), Qt::AlignCenter, "EQ");
     p.setPen(m_hover == HitShot ? pal.accent : pal.textMuted);
@@ -262,6 +265,8 @@ void PlayerBar::mousePressEvent(QMouseEvent* e)
         m_rate = kRates[(idx + 1) % 5];
         update();
         emit rateChanged(m_rate);
+    } else if (ccRect().contains(e->pos())) {
+        emit subtitleRequested();
     } else if (eqRect().contains(e->pos())) {
         emit eqRequested();
     } else if (shotRect().contains(e->pos())) {
@@ -286,6 +291,7 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
     else if (progressRect().contains(e->pos())) h = HitProgress;
     else if (volRect().contains(e->pos())) h = HitVol;
     else if (rateRect().contains(e->pos())) h = HitRate;
+    else if (ccRect().contains(e->pos())) h = HitSub;
     else if (eqRect().contains(e->pos())) h = HitEq;
     else if (shotRect().contains(e->pos())) h = HitShot;
     if (h != m_hover) {

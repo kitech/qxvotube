@@ -339,6 +339,18 @@ LIBS += -lmpv -lavformat -lavcodec -lswscale -lswresample -lopenal
 - **hue 矩阵修正**(cxvideo renderer_gl):旧实现为错误近似,且经 `QMatrix3x3` 上传与 GLSL 列主序不符;改为**标准 luma 保持色相旋转矩阵** + `glUniformMatrix3fv(..., GL_TRUE, ...)`(行主序直传)。`--gl-probe` 增加 **EQ 生效断言**:播放中截图基线 → `setEq(brightness=60)` → 再截图,比对平均像素差(要求 ≥5),Qt3 CPU LUT(25)/Qt6 shader(26)双过。
 - **实测**(双内核):`buildqt3/6.sh` ret=0;`QLVOTUBE_AUTOPLAY=/tmp/opencode/m5a_long.mp4` 截图确认 总时长 0:20 / 倍速 1.5x / 音量条 / EQ 对话框 / 截图 PNG(24KB);`QLVOTUBE_ENGINE=mpv` 双内核起播 `engine=mpv` 无崩溃;cxvideo 八探针全绿(gl-probe 带 eqDiff、mpv-gl-probe OK)。
 
+### M5-A3 实装记录(2026-11;字幕轨 UI/叠加 + mpv-wid 回退探针,Qt3/Qt6 双绿)
+
+- **PlayerBar `CC` 按钮**:循环「关 → 轨1 → … → 关」,发 `subtitleRequested`;右簇布局重排(音量/倍速/CC/EQ/截图)。
+- **字幕文本叠加**(VideoPane `m_subLabel`):`CXVideoPlayer::subtitleChanged → MainWindow::onSubtitleText → setSubtitleText`,空串隐藏;黑底白字居中于 surface 底部(Qt3 用 QPalette/QColorGroup,Qt6 用 stylesheet 半透明底)。
+- **外挂字幕**:工具菜单「加载外挂字幕...」→ `QFileDialog`(Qt3 静态签名 `(initially, filter, parent, name, caption,...)` 与 Qt4+ 不同,已分支)→ `setSubtitleFile`。
+- **`--mpv-wid-probe`**(cxvideo):`CX_MPV_ROUTE=wid` 强制 mpv 回退路,断言 `renderPath=mpv-wid` + 帧流正常 + `screenshot()` 如实返回 false;双内核 OK(frames=15 eq=1 shot=0)。
+- **引擎修复两则**(排查字幕切换时发现):
+  1. **幂等选轨**:`setSubtitleTrack(0)` 在引擎已自动选中首轨(`m_subPrompt==-1`)时原会整管线重建(浪费+丢 cue);改为仅固化选态不做 reopen。
+  2. **关闭竞态**:`stopThreads()` 对视频线程 `wait(2000)` 失败仍 `delete` → Qt 报 "QThread: Destroyed while thread is still running" 并 `abort`(调试器下必现);改为**停不下来就泄漏不 delete**(与音频线程同策略)。另修字幕切换后 reopen seek 会丢掉当前 cue 包的问题(`.srt` 单大 cue 最坏情况要等下一条 cue 才再出现;多 cue 媒体实测切换后 1~2s 内恢复)。
+- **QA 钩子**:`QLVOTUBE_AUTOSUB=1`(自动选轨0)、`QLVOTUBE_AUTOQUIT_MS=<ms>`(定时干净退出,供 gdb 抓退出期崩溃)。
+- **实测**:`m5a_sub5.mp4`(5 条 cue)双内核 `subtitle-text` 序列 `LINE TWO→THREE→FOUR→FIVE`,画面底部显示 "LINE TWO"(截图);退出码 0(修复前 gdb 下 abort);cxvideo 九探针全绿(新增 mpv-wid-probe)。
+
 ## 附:实现顺序(对照里程碑)
 
 M0 落 `cxvideo_global.h/cxthread/cxengine.h/cxvideoplayer.h` stub(接口可链、Qt3/Qt6 编译绿)→ M1 eng_mpv → M2 eng_ffmpeg 软解 → M3 全功能 → M4 硬解 → M5 接入 qlvotube[主推]+qskvotube → CI 四路绿。

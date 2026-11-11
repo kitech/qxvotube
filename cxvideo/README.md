@@ -67,6 +67,7 @@ M0 ✅(接口可链)→ **M1 ✅(eng_mpv libmpv 内嵌 + eng_mpv_cmd cmdmpv 子�
 **M4-B ✅(mpv render_context 渲染路 + EQ/截图补齐 + mpv_format 枚举修复;Qt3/Qt6 双绿,--mpv-gl-probe 过)** →
 **M5-A ✅(qlvotube 播放页嵌入:CXRendererGl + 列表/播放页切换 + ffmpeg 引擎;Qt3/Qt6 双绿,端到端截图验收)** →
 **M5-A2 ✅(qlvotube 音量/倍速/EQ 对话框/截图/引擎切换 + 总时长显示修复;Qt3/Qt6 双绿,gl-probe 增 EQ 像素断言)** →
+**M5-A3 ✅(qlvotube 字幕轨循环 + 文本叠加 + 外挂字幕;cxvideo 增 --mpv-wid-probe + 选轨幂等/线程关闭竞态修复;双内核绿)** →
 M5-B(qskvotube 接入,Quick/Widget 混合方案待定)。
 (注:M5 的 qlvotube 侧接线已先期落地:mainwindow 内 CXVideoPlayer + cxSetLocaleNumericC。)
 

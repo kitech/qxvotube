@@ -74,6 +74,11 @@ private slots:
     void onEqChanged();
     void onTakeScreenshot();
     void onToggleEngine();
+    /* M5-A3:字幕(轨道循环 + 外挂) */
+    void onCycleSubtitle();
+    void onLoadSubtitleFile();
+    void onSubtitleText(const QString& text);
+    void onQaAutoSub();      /* QA:QLVOTUBE_AUTOSUB=1 自动选字幕轨0 */
     void onPlayerPaused();
     void onPlayerStopped();
     void onPlayerFinished();
@@ -142,6 +147,7 @@ private:
     CXRendererGl* m_glRenderer;
     CXVideoEqDialog* m_eqDialog;
     QString m_curUrl;        /* 当前播放源(引擎切换后重开) */
+    int m_subIdx;            /* 当前字幕轨枚举序(-1=关) */
     std::vector<Playlist> m_library;
     int m_curPlaylistId;
     int m_curTrackIndex;

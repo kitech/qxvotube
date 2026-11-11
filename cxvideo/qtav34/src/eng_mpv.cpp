@@ -171,10 +171,13 @@ bool CXEngineMpv::open(const QString& url)
     m_seekTarget = -1;
 
     // M4-B:gl 路(host + render 符号齐)优先;失败逐级回退 wid 路
+    // CX_MPV_ROUTE=wid 可强制回退路(selftest --mpv-wid-probe 用)
+    const char* forced = getenv("CX_MPV_ROUTE");
     bool gl = p_host != 0 &&
               api.mpv_render_context_create != 0 &&
               api.mpv_render_context_render != 0 &&
-              api.mpv_render_context_free != 0;
+              api.mpv_render_context_free != 0 &&
+              !(forced != 0 && strcmp(forced, "wid") == 0);
     if (gl) {
         if (cxOpenCore(url, true))
             return true;

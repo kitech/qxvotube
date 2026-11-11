@@ -31,6 +31,7 @@ signals:
     void rateChanged(double r);
     void eqRequested();
     void shotRequested();
+    void subtitleRequested();   /* M5-A3:字幕轨循环 */
 
 protected:
     void paintEvent(QPaintEvent* e);
@@ -41,7 +42,7 @@ protected:
 
 private:
     enum Hit { HitNone, HitPrev, HitPlay, HitNext, HitProgress,
-               HitVol, HitRate, HitEq, HitShot };
+               HitVol, HitRate, HitEq, HitShot, HitSub };
     void setProgressFromX(int x);
     void setVolumeFromX(int x);
     QRect playRect() const;
@@ -52,6 +53,7 @@ private:
     QRect rateRect() const;
     QRect eqRect() const;
     QRect shotRect() const;
+    QRect ccRect() const;
 
     Track m_track;
     bool m_hasTrack;

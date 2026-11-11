@@ -464,6 +464,61 @@ static int cxRunGlProbe(void* appRaw)
     return 0;
 }
 
+// ── M4-B mpv-wid 回退路探针:强制 CX_MPV_ROUTE=wid ──
+// 断言:renderPath=mpv-wid + 帧流正常;EQ/截图在 wid 路应如实返回 false(不崩)
+static int cxRunMpvWidProbe(void* appRaw)
+{
+    QApplication* app = (QApplication*)appRaw;
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
+    setenv("CX_MPV_ROUTE", "wid", 1);
+    const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    if (system("test -f /tmp/opencode/cxvideo_selftest.mp4 "
+               "2>/dev/null </dev/null") != 0) {
+        printf("mpv-wid-probe: SKIP (media missing; run --ff-probe first)\n");
+        return 0;
+    }
+    CXEngine* eng = cxEngineCreateFor(CxEngineMpv);
+    if (eng == 0) {
+        printf("mpv-wid-probe: SKIP (libmpv unavailable)\n");
+        return 0;
+    }
+    printf("mpv-wid-probe: engine=%s\n", eng->name());
+    QWidget host;
+    host.resize(320, 240);
+    host.show();
+    eng->setHostWidget(&host);
+    CxFFProbeCounter cnt;
+    QObject::connect(eng, SIGNAL(finished()), &cnt, SLOT(onFinished()));
+    QObject::connect(eng, SIGNAL(finished()), app, SLOT(quit()));
+    QObject::connect(eng, SIGNAL(positionChanged(long)), &cnt, SLOT(onFrame(long)));
+    if (!eng->open(QString::fromLatin1(path))) {
+        printf("mpv-wid-probe: FAIL (open)\n");
+        delete eng;
+        return 1;
+    }
+    CXVideoEq eq;
+    eq.brightness = 30;
+    bool eqOk = ((CXEngineMpv*)eng)->setEq(eq);
+    eng->play();
+    QTimer::singleShot(10000, app, SLOT(quit()));
+    app->exec();
+    const char* rp = ((CXEngineMpv*)eng)->renderPath();
+    bool shotOk = ((CXEngineMpv*)eng)->screenshot(
+        QString::fromLatin1("/tmp/opencode/mpv_wid_shot.png"));
+    eng->stop();
+    delete eng;
+    bool pathOk = rp != 0 && strcmp(rp, "mpv-wid") == 0;
+    if (!pathOk || cnt.frames <= 0 || cnt.gotFinished != 1 || shotOk) {
+        printf("mpv-wid-probe: FAIL (render=%s frames=%d finished=%d shot=%d)\n",
+               rp != 0 ? rp : "none", cnt.frames, cnt.gotFinished, (int)shotOk);
+        return 1;
+    }
+    printf("mpv-wid-probe: OK (render=mpv-wid frames=%d eq=%d shot=%d)\n",
+           cnt.frames, (int)eqOk, (int)shotOk);
+    return 0;
+}
+
 // ── M4-B mpv-gl 探针:eng_mpv render_context 路 ──
 // 有 GL+render 符号 → OK(renderPath=mpv-gl;EQ 不炸;截图落地);
 // 否则如实 SKIP(wid 回退路帧流照旧断言)
@@ -551,7 +606,8 @@ int main(int argc, char* argv[])
     bool glProbeMode = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--gl-probe") == 0 ||
-            strcmp(argv[i], "--mpv-gl-probe") == 0)
+            strcmp(argv[i], "--mpv-gl-probe") == 0 ||
+            strcmp(argv[i], "--mpv-wid-probe") == 0)
             glProbeMode = true;
     }
 #ifdef QT3_BUILD
@@ -603,6 +659,13 @@ int main(int argc, char* argv[])
     }
     if (hwProbeMode)
         return cxRunHwProbe(&app);
+    bool mpvWidProbeMode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--mpv-wid-probe") == 0)
+            mpvWidProbeMode = true;
+    }
+    if (mpvWidProbeMode)
+        return cxRunMpvWidProbe(&app);
     bool mpvGlProbeMode = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--mpv-gl-probe") == 0)

@@ -211,9 +211,13 @@ void CXEngineFfmpeg::stopThreads()
 {
     if (m_vthread != 0) {
         m_vthread->requestStop();
-        m_vthread->wait(2000);
-        delete m_vthread;
-        m_vthread = 0;
+        if (!m_vthread->wait(2000)) {
+            // 停不下来就别 delete(QThread 运行中析构=abort);泄漏换稳定
+            m_vthread = 0;
+        } else {
+            delete m_vthread;
+            m_vthread = 0;
+        }
     }
     // 音频后端阻塞写可能不可中断(pulse-simple):超时则放弃回收
     // (线程/解码器/AO/时钟/队列一并泄漏),避免 delete 运行中线程崩溃
@@ -487,6 +491,11 @@ bool CXEngineFfmpeg::setSubtitleTrack(int idx)
             return false;
         if (curOrd == idx)
             return false; // 幂等:正在此轨
+        if (idx == 0 && m_subPrompt == -1) {
+            // 默认已是首轨(自动选中):仅固化选态,不重建管线
+            m_subPrompt = 0;
+            return true;
+        }
         m_subPrompt = idx;
     }
     return reopenAt(m_curMs, !m_paused);
