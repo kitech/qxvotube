@@ -299,6 +299,11 @@ while(!stop):
   1. cxvideo selftest(tools/selftest,qmake+EXPECT 框架)新增:无头段 **CxPacketQueue 停止语义单测**(stop 后空队列 take 立即返回空载体/阻塞 push 被 wake 唤醒不挂死/阻塞 take 被 wake 唤醒——退出竞态根因层)与 **`--stop-stress-probe`**(play 后 100~2350ms 递增时机 stop ×10 轮,复演队列满阻塞→demux 停不下→泄漏链,断言不崩+state 归 CxStopped)。buildqt3/buildqt6 双绿 0 failures。
   2. qskvotube 新增 doctest 单测(qlappcom 方式:doctest.h+直编直跑 build_tests.sh):`test_cxmsutil.cpp`(时间格式化)、`test_skinname.cpp`(皮肤名回归守卫:精确名加载成功/小写静默回退 Fluent2/LightScheme 可设,offscreen 平台)。
   3. qskvotube e2e 脚本:`qa_run.sh`(双引擎 QA 六步+退出码断言;媒体须长于 15s,缺省 m5a_long.mp4)、`qa_visual.sh`(pkill 清残留+`wmctrl -lx` WM_CLASS 精确定位抓拍)。
+- **二期 UI(M5-C,2026-11-12)**:控制条拆两行(rowA=播放/⏮⏭/进度/时间;rowB=音量/静音/倍速/CC/EQ/截图/皮肤):
+  1. **播放列表**:argv 位置参数=多文件导入(AUTOPLAY 兜底单目);`finished()` 自动连播(openPl:ffmpeg open+play,mpv attach 已挂时 open 直接 loadfile);窗口标题显示当前文件;列表播完 stop 不循环("列表播完"标题);⏮ 到头回绕。
+  2. **mute 按钮**:🔇/🔊 切换 `player->setMute`(状态按文本显示)。
+  3. **皮肤热切**:🎨 循环 Fusion→Material3→Fluent2(精确名!),切换后重设主题(applySkinTheme:LightScheme+字体 role);QskSkinManager 换 skin 后旧字体 hint 不继承,必须重设。
+  4. 验证:双引擎 qa_run ALL PASS;GUI 实点截图确认热切生效/mute 状态/连播/播完停。
 
 ## 8. Qt3 兼容层(逐条)
 

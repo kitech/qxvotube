@@ -21,6 +21,8 @@
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QRunnable>
+#include <QFile>
+#include <QFileInfo>
 
 #include "cxvideoplayer.h"
 #include "cxengine.h"
@@ -104,17 +106,21 @@ int main(int argc, char* argv[])
     libPaths.prepend("/opt/qt/qskinny/lib/qskinny/plugins");
     qskSkinManager->setPluginPaths(libPaths);
     qskSkinManager->setSkin(skinEnv != 0 ? skinEnv : "Fusion");
-    // anystik 同法:皮肤字体 role 显式设真实存在的字体——皮肤内置
-    // 字体(如 Segoe UI)本机缺失时经回退可能整段字形为空
+    // 皮肤主题应用(亮色+字体 role)抽 lambda:皮肤热切(二期)复用。
+    // 注:系统暗色主题(QSkinny 按 styleHints 解析成 DarkScheme)会把
+    // 浅色文字画在未填充的白窗底上(qskvotube 无面板件)——固定亮色
+    auto applySkinTheme = [](QskSkin* sk) {
+        sk->setColorScheme(QskSkin::LightScheme);
+        // anystik 同法:皮肤字体 role 显式设真实存在的字体——皮肤内置
+        // 字体(如 Segoe UI)本机缺失时经回退可能整段字形为空
+        QFont f("DejaVu Sans", 10);
+        sk->setFont({QskFontRole::Body, QskFontRole::Normal}, f);
+        sk->setFont({QskFontRole::Title, QskFontRole::Normal}, f);
+        sk->setFont({QskFontRole::Caption, QskFontRole::Normal}, f);
+        QGuiApplication::setFont(f);
+    };
     QskSkin* skin = qskSkinManager->skin();
-    // 系统暗色主题(QSkinny 按 styleHints 解析成 DarkScheme)会把浅色
-    // 文字画在未填充的白窗底上(qskvotube 无面板件,不像 anystik 用
-    // rootBox setPanel(true) 提供暗底)——显式固定亮色配色
-    skin->setColorScheme(QskSkin::LightScheme);
-    QFont f("DejaVu Sans", 10);
-    skin->setFont({QskFontRole::Body, QskFontRole::Normal}, f);
-    skin->setFont({QskFontRole::Title, QskFontRole::Normal}, f);
-    skin->setFont({QskFontRole::Caption, QskFontRole::Normal}, f);
+    applySkinTheme(skin);
 
     QskWindow window;
     window.setTitle("qskvotube");
@@ -160,6 +166,8 @@ int main(int argc, char* argv[])
     ctl->setSpacing(6);
 
     auto* playBtn = new QskPushButton("▶");
+    auto* prevBtn = new QskPushButton("⏮"); // 二期:列表上一
+    auto* nextBtn = new QskPushButton("⏭"); // 二期:列表下一
     auto* prog = new QskSlider(Qt::Horizontal);
     // Ignored:宽度完全由布局分配(默认 hint 会把盒子撑到 700+,视频区被顶出窗)
     prog->setSizePolicy(QskSizePolicy::Ignored, QskSizePolicy::Fixed);
@@ -171,26 +179,44 @@ int main(int argc, char* argv[])
     vol->setMinimum(0);
     vol->setMaximum(100);
     vol->setValue(100);
+    auto* muteBtn = new QskPushButton("🔇"); // 二期:静音切换
     auto* rateBtn = new QskPushButton("1.0x");
     auto* ccBtn = new QskPushButton("CC");
     auto* eqBtn = new QskPushButton("EQ");
     auto* shotBtn = new QskPushButton("图");
+    auto* skinBtn = new QskPushButton("🎨"); // 二期:皮肤热切循环
 
     // QskPushButton 默认 preferred 宽 120,合计把盒子撑出窗口——压窄
     // (anystik 同法:setPreferredSize(44,44),Fusion 下小尺寸文字正常)
-    for (QskPushButton* b : { playBtn, rateBtn, ccBtn, eqBtn, shotBtn })
+    for (QskPushButton* b : { playBtn, prevBtn, nextBtn, muteBtn,
+                              rateBtn, ccBtn, eqBtn, shotBtn, skinBtn })
         b->setPreferredSize(44, 36);
 
-    ctl->addItem(playBtn);
-    ctl->addItem(prog);
-    ctl->setStretchFactor(prog, 1);
-    ctl->addItem(timeLbl);
-    ctl->addItem(vol);
-    ctl->addItem(rateBtn);
-    ctl->addItem(ccBtn);
-    ctl->addItem(eqBtn);
-    ctl->addItem(shotBtn);
-    box->addItem(ctl);
+    // 控制条拆两行(640 窗宽挤不下 10+ 控件):
+    // rowA = 播放/列表/进度/时间;rowB = 音量/静音/倍速/CC/EQ/截图/皮肤
+    auto* ctlA = new QskLinearBox(Qt::Horizontal);
+    ctlA->setMargins(4);
+    ctlA->setSpacing(6);
+    auto* ctlB = new QskLinearBox(Qt::Horizontal);
+    ctlB->setMargins(4);
+    ctlB->setSpacing(6);
+
+    ctlA->addItem(playBtn);
+    ctlA->addItem(prevBtn);
+    ctlA->addItem(nextBtn);
+    ctlA->addItem(prog);
+    ctlA->setStretchFactor(prog, 1);
+    ctlA->addItem(timeLbl);
+    ctlB->addItem(vol);
+    ctlB->setStretchFactor(vol, 1);
+    ctlB->addItem(muteBtn);
+    ctlB->addItem(rateBtn);
+    ctlB->addItem(ccBtn);
+    ctlB->addItem(eqBtn);
+    ctlB->addItem(shotBtn);
+    ctlB->addItem(skinBtn);
+    box->addItem(ctlA);
+    box->addItem(ctlB);
     window.addItem(box);
 
     // ── 引擎接线(setEngine 成功后再配渲染器,与 qlvotube 同序)──
@@ -198,6 +224,38 @@ int main(int argc, char* argv[])
         ? QString::fromLocal8Bit(getenv("QLVOTUBE_AUTOPLAY"))
         : QString("/tmp/opencode/m5a_long.mp4");
     const bool dbg = getenv("QLVOTUBE_DEBUG") != 0;
+
+    // ── 播放列表(二期):argv 位置参数=多文件导入;AUTOPLAY 兜底单目 ──
+    QStringList pl;
+    const QStringList argvL = app.arguments();
+    for (int i = 1; i < argvL.size(); ++i) {
+        const QString a = argvL[i];
+        if (!a.startsWith("-") && QFile::exists(a))
+            pl << a;
+    }
+    if (pl.isEmpty())
+        pl << url;
+    int plIdx = 0;
+
+    // openPl:切歌(ffmpeg:open+play;mpv:attach 已挂时 open 直接 loadfile)
+    auto openPl = [&](int idx) {
+        if (pl.isEmpty())
+            return;
+        if (idx < 0)
+            idx = pl.size() - 1; // 上一首到头回绕
+        if (idx >= pl.size())
+            idx = -1; // 列表播完:停,不循环
+        plIdx = idx;
+        if (plIdx < 0) {
+            player->stop();
+            window.setTitle("qskvotube (列表播完)");
+            return;
+        }
+        window.setTitle("qskvotube - " +
+                        QFileInfo(pl[plIdx]).fileName());
+        player->open(pl[plIdx]);
+        player->play();
+    };
 
     if (!player->setEngine(wantMpv ? CxEngineMpv : CxEngineFfmpeg) ||
         player->engine() == 0) {
@@ -266,6 +324,36 @@ int main(int argc, char* argv[])
         [&]() { playBtn->setText("▶"); });
     QObject::connect(player, &CXVideoPlayer::stopped,
         [&]() { playBtn->setText("▶"); });
+
+    // ── 二期接线 ──
+    // 播完自动连播(ffmpeg/mpv 同:open 在 attach 已挂时直接 loadfile)
+    QObject::connect(player, &CXVideoPlayer::finished,
+        [&]() { openPl(plIdx + 1); });
+    QObject::connect(nextBtn, &QskAbstractButton::clicked, [&]() {
+        player->stop();
+        openPl(plIdx + 1);
+    });
+    QObject::connect(prevBtn, &QskAbstractButton::clicked, [&]() {
+        player->stop();
+        openPl(plIdx - 1);
+    });
+    bool muted = false;
+    QObject::connect(muteBtn, &QskAbstractButton::clicked, [&]() {
+        muted = !muted;
+        player->setMute(muted);
+        muteBtn->setText(muted ? "🔊" : "🔇"); // 按下时显示可恢复状态
+    });
+    // 皮肤热切循环(点击下一个;皮肤名精确大小写!切换后重设主题)
+    static const char* kSkins[] = { "Fusion", "Material3", "Fluent2" };
+    QObject::connect(skinBtn, &QskAbstractButton::clicked, [&]() {
+        const QString cur = qskSkinManager->skinName();
+        int idx = 0;
+        for (int i = 0; i < 3; i++)
+            if (cur == kSkins[i])
+                idx = i;
+        qskSkinManager->setSkin(kSkins[(idx + 1) % 3]);
+        applySkinTheme(qskSkinManager->skin());
+    });
 
     QObject::connect(playBtn, &QskAbstractButton::clicked, [&]() {
         if (player->state() == CxPlaying)
@@ -363,18 +451,19 @@ int main(int argc, char* argv[])
     }
 
     window.show();
+    window.setTitle("qskvotube - " + QFileInfo(pl[plIdx]).fileName());
     if (wantMpv) {
         // 时序:open 只建 mpv handle(vo=libmpv,不发 loadfile);
         // render job 在场景图线程挂 render_context,挂成后 quickGo 起播
         CXEngineMpv* em = (CXEngineMpv*)player->engine();
-        player->open(url); // 二段挂起:loadfile 延至 attach 成功
+        player->open(pl[plIdx]); // 二段挂起:loadfile 延至 attach 成功
         window.scheduleRenderJob(
-            new CxMpvAttachJob(em, &window, player, url),
+            new CxMpvAttachJob(em, &window, player, pl[plIdx]),
             QQuickWindow::BeforeSynchronizingStage);
     } else {
         // QLVOTUBE_NOPLAY=1:不 open/play,纯 UI 静置(排查视频链干扰)
         if (getenv("QLVOTUBE_NOPLAY") == 0) {
-            player->open(url);
+            player->open(pl[plIdx]);
             player->play();
         }
     }
