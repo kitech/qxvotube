@@ -324,6 +324,7 @@ bool CXEngineFfmpeg::play()
             m_athread->setPaused(false);
         if (m_ao != 0)
             m_ao->resume();
+        emit started(); // 暂停恢复:状态回 CxPlaying(初播由 open 发)
     }
     return true;
 }
@@ -340,6 +341,7 @@ bool CXEngineFfmpeg::pause()
             m_athread->setPaused(true);
         if (m_ao != 0)
             m_ao->pause();
+        emit paused(); // UI 依赖此信号回 CxPaused(原先缺失)
     }
     return true;
 }

@@ -110,7 +110,10 @@ private:
             } else if (pr->format == CxMpvFmtString &&
                        strcmp(pr->name, "sub-text") == 0) {
                 // M3-A 字幕文本(可能为空串 = 清屏)
-                char* t = strdup((const char*)pr->data);
+                // MPV_FORMAT_STRING 的 data 是 char**(二级指针),
+                // 直接当 char* 读会把指针字节当文本(乱码根因)
+                char* const* ps = (char* const*)pr->data;
+                char* t = (*ps != 0) ? strdup(*ps) : 0;
                 post(CxMpvUiEvSubtitle, 0, 0, t);
             }
             break;
@@ -312,7 +315,7 @@ bool CXEngineMpv::quickGo()
     if (h_mpv == 0 || m_quickUrl.isEmpty())
         return false;
     const QString u = m_quickUrl;
-    m_quickUrl.clear();
+    m_quickUrl = QString(); // Qt3 无 QString::clear
     QByteArray ba = qToUtf8(u);
     if (!cxMpvRunCmd2(api, h_mpv, "loadfile", ba.data())) {
         emit noticedError((int)CxErrOpenFail, u);
@@ -368,15 +371,23 @@ bool CXEngineMpv::play()
     if (h_mpv == 0)
         return false;
     CxMpvApi& api = CxMpvApi::instance();
-    // mpv 里"播放"=解除暂停(loadfile 已由 open 发出)
-    return cxMpvRunCmd3(api, h_mpv, "set", "pause", "no");
+    // mpv 里"播放"=解除暂停(loadfile 已由 open 发出);初播的 started
+    // 由泵线程文件加载事件发(m_loaded 未置位时这里不发,避免双发)
+    const bool ok = cxMpvRunCmd3(api, h_mpv, "set", "pause", "no");
+    if (ok && m_loaded)
+        emit started(); // 暂停恢复
+    return ok;
 }
 
 bool CXEngineMpv::pause()
 {
     if (h_mpv == 0)
         return false;
-    return cxMpvRunCmd3(CxMpvApi::instance(), h_mpv, "set", "pause", "yes");
+    const bool ok = cxMpvRunCmd3(CxMpvApi::instance(), h_mpv,
+                                 "set", "pause", "yes");
+    if (ok)
+        emit paused(); // UI 依赖此信号回 CxPaused(原先缺失)
+    return ok;
 }
 
 bool CXEngineMpv::stop()
@@ -430,13 +441,14 @@ bool CXEngineMpv::setMute(bool on)
 
 long CXEngineMpv::position() const
 {
-    // 进度走遥测(positionChanged 信号);同步接口仅返回缓存,首版不跨线程 get_property
-    return 0;
+    // 进度走遥测(positionChanged 信号);同步接口回泵缓存(线程内赋值,
+    // long 对齐读写原子性足够遥测用途)
+    return m_posMs;
 }
 
 long CXEngineMpv::duration() const
 {
-    return 0;
+    return m_durMs;
 }
 
 void CXEngineMpv::customEvent(CustomEventBase* e)
@@ -451,9 +463,12 @@ void CXEngineMpv::dispatchEvent(const CXMpvUiEvent* ev)
 {
     switch (ev->uiev) {
     case CxMpvUiEvPos:
+        m_posMs = ev->ms; // 缓存:同步 position() 用(首版回 0 会把
+                          // 宿主进度条手势逻辑带偏成 1s 循环 seek)
         emit positionChanged(ev->ms);
         break;
     case CxMpvUiEvDur:
+        m_durMs = ev->ms;
         emit durationChanged(ev->ms);
         break;
     case CxMpvUiEvStarted:

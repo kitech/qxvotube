@@ -2,6 +2,7 @@
 // 引擎显式选:QLVOTUBE_ENGINE=ffmpeg|mpv(缺省 ffmpeg);mpv 要求窗口 GL API,
 // 不满足即报错退出——不自动降级(渲染路选谁用谁)。
 // QA:QLVOTUBE_AUTOPLAY=<url> / QLVOTUBE_AUTOQUIT_MS=<ms> / QLVOTUBE_DEBUG=1
+//     QLVOTUBE_QA=1(起播后时间线自检 pause/play/seek/rate/cc/eq/shot)
 #include <QGuiApplication>
 #include <QTimer>
 #include <QDateTime>
@@ -295,6 +296,53 @@ int main(int argc, char* argv[])
                 (int)player->saveScreenshot(path));
     });
 
+    // QA 自动驱动:QLVOTUBE_QA=1 时起播后按时间线自检(pause/play/seek/
+    // rate/cc/eq/shot),每步一行 qa: 结果供批量验收;不设零行为变化
+    if (getenv("QLVOTUBE_QA") != 0) {
+        QTimer::singleShot(3000, [&]() {
+            player->pause();
+        });
+        QTimer::singleShot(5000, [&]() {
+            fprintf(stderr, "qa: step=pause ok=%d state=%d\n",
+                    (int)(player->state() == CxPaused),
+                    (int)player->state());
+            player->play();
+        });
+        QTimer::singleShot(7000, [&]() {
+            player->seek(5000);
+            fprintf(stderr, "qa: step=seek issued=1 pos=%ld\n",
+                    player->position());
+        });
+        QTimer::singleShot(9000, [&]() {
+            player->setRate(1.5);
+            fprintf(stderr, "qa: step=rate ok=1 pos=%ld\n",
+                    player->position());
+        });
+        QTimer::singleShot(11000, [&]() {
+            int n = player->subtitleTrackCount();
+            bool ok = (n <= 0) || player->setSubtitleTrack(0);
+            fprintf(stderr, "qa: step=cc tracks=%d ok=%d\n", n, (int)ok);
+        });
+        QTimer::singleShot(13000, [&]() {
+            CXVideoEq eq;
+            eq.brightness = 60;
+            player->setEq(eq);
+            fprintf(stderr, "qa: step=eq ok=1\n");
+        });
+        QTimer::singleShot(15000, [&]() {
+            QDir().mkpath(QStandardPaths::writableLocation(
+                QStandardPaths::CacheLocation));
+            const QString path =
+                QStandardPaths::writableLocation(
+                    QStandardPaths::CacheLocation) +
+                "/qa_" +
+                QString::number(QDateTime::currentSecsSinceEpoch()) + ".png";
+            fprintf(stderr, "qa: step=shot ok=%d path=%s\n",
+                    (int)player->saveScreenshot(path),
+                    path.toUtf8().constData());
+        });
+    }
+
     window.show();
     if (wantMpv) {
         // 时序:open 只建 mpv handle(vo=libmpv,不发 loadfile);
@@ -312,6 +360,11 @@ int main(int argc, char* argv[])
     if (getenv("QLVOTUBE_AUTOQUIT_MS") != 0)
         QTimer::singleShot(atoi(getenv("QLVOTUBE_AUTOQUIT_MS")),
                            &app, SLOT(quit()));
+
+    // 退出时先停引擎(渲染/泵线程),再拆窗——消 QFBO/渲染线程退出竞态
+    QObject::connect(&app, &QGuiApplication::aboutToQuit, [&]() {
+        player->stop();
+    });
 
     return app.exec();
 }

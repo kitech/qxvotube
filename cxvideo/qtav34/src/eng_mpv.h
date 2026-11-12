@@ -67,7 +67,8 @@ private:
 
     CXEngineMpv() : CXEngine(), h_mpv(0), m_pump(0), m_loaded(false),
                     h_rc(0), m_renderPath(0), m_glv(0)
-                    , m_quickRender(false), m_seekTarget(-1) { }
+                    , m_quickRender(false), m_seekTarget(-1)
+                    , m_posMs(0), m_durMs(0) { }
     void closeInternal();
     void dispatchEvent(const CXMpvUiEvent* ev);
     bool cxOpenCore(const QString& routeUrl, bool glRoute);
@@ -81,6 +82,8 @@ private:
     CXMpvPump* m_pump;
     bool m_loaded;
     long m_seekTarget;
+    long m_posMs; // 泵线程遥测缓存:position()/duration() 同步读
+    long m_durMs;
 };
 
 // libmpv 探测(无头;不需要窗口):
