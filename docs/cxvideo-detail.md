@@ -295,6 +295,10 @@ while(!stop):
   3. **皮肤插件路径**:经 `qskSkinManager->setPluginPaths(前置 /opt/qt/qskinny/lib/qskinny/plugins)` 加载(与 anystik 同法,插件与 libqskinny 同树);废弃 QT_PLUGIN_PATH/x64-nosys。皮肤字体 role 显式设 DejaVu(anystik 同法)。
   4. 排查方法教训:**wmctrl 精确定位须用 WM_CLASS**(`wmctrl -lx | awk '/q6vtube/'`)——标题含 "qskvotube" 的终端/残留窗口会污染抓拍,历史多轮"空白"截图部分是拍到残留窗口的假象;另 Material3 皮肤下按钮压到 40 宽时文字区(padding hint)归零,skinlet 整段跳过文字(Fusion 无此限制)。
   - **最终验收**:双引擎(ffmpeg+mpv)QLVOTUBE_QA 六步全 ok=1、AUTOQUIT 退出码 0;UI 截图 ▶/1.0x/CC/EQ/图 按钮文字、进度条、时间标签全部正常渲染。
+- **测试固化(2026-11-12)**:本轮验收用例按仓库既有框架归档:
+  1. cxvideo selftest(tools/selftest,qmake+EXPECT 框架)新增:无头段 **CxPacketQueue 停止语义单测**(stop 后空队列 take 立即返回空载体/阻塞 push 被 wake 唤醒不挂死/阻塞 take 被 wake 唤醒——退出竞态根因层)与 **`--stop-stress-probe`**(play 后 100~2350ms 递增时机 stop ×10 轮,复演队列满阻塞→demux 停不下→泄漏链,断言不崩+state 归 CxStopped)。buildqt3/buildqt6 双绿 0 failures。
+  2. qskvotube 新增 doctest 单测(qlappcom 方式:doctest.h+直编直跑 build_tests.sh):`test_cxmsutil.cpp`(时间格式化)、`test_skinname.cpp`(皮肤名回归守卫:精确名加载成功/小写静默回退 Fluent2/LightScheme 可设,offscreen 平台)。
+  3. qskvotube e2e 脚本:`qa_run.sh`(双引擎 QA 六步+退出码断言;媒体须长于 15s,缺省 m5a_long.mp4)、`qa_visual.sh`(pkill 清残留+`wmctrl -lx` WM_CLASS 精确定位抓拍)。
 
 ## 8. Qt3 兼容层(逐条)
 

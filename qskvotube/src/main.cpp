@@ -27,12 +27,9 @@
 #include "eng_mpv.h"
 #include "renderer_quick.h"
 #include "renderer_qmpv.h"
+#include "cxmsutil.h"
 
-static QString cxMsToText(long ms)
-{
-    long s = ms / 1000;
-    return QString("%1:%2").arg(s / 60).arg(s % 60, 2, 10, QChar('0'));
-}
+// 毫秒 → m:ss 文本已移 cxmsutil.h(单测复用)
 
 // mpv Quick 路起播时序:mpv_render_context_create 须在 mpv 起播之前
 // (render.h:"needs to be created before you start playback"),且必须

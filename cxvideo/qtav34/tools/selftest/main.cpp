@@ -16,6 +16,8 @@
 #include <functional>
 #endif
 #include "cxframe.h"
+#include "cxpqueue.h" // M5-B3:队列停止语义单测(退出竞态根因层)
+#include <qthread.h>
 #include "ffprobe_counter.h"
 #include <qtimer.h>
 #include <qfile.h>
@@ -30,6 +32,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef QT3_BUILD
+#define CX_QT_RUNNING(thr) (thr).running()
+#else
+#define CX_QT_RUNNING(thr) (thr).isRunning()
+#endif
 #define EXPECT(expr) \
     do { \
         if (!(expr)) { printf("FAIL: %s (line %d)\n", #expr, __LINE__); failures++; } \
@@ -103,6 +110,52 @@ static int cxRunPlayProbe(void* appRaw)
     printf("play-probe: OK (lifecycle event path exercised)\n");
     result = 0;
     return result;
+}
+
+// ── M5-B3 停止压力探针(--stop-stress-probe):退出竞态修复链回归。
+// 队列满阻塞 push 曾致 demux 停不下→泄漏线程引用已释放队列/解码器
+// →heap corruption→av_bsf_free segv。修法:stopThreads 先全员
+// requestStop+唤醒全部队列,线程停不下则其队列/解码器一并泄漏。
+// 此探针复演该场景 10 轮(不同退出时机),全程不崩、状态归 Stopped 即过。
+static int cxRunStopStressProbe(void* appRaw)
+{
+#ifdef QT3_BUILD
+    QApplication* app = (QApplication*)appRaw;
+#else
+    QCoreApplication* app = (QCoreApplication*)appRaw;
+#endif
+    Q_UNUSED(app)
+    const char* path = "/tmp/opencode/cxvideo_selftest.mp4";
+    if (!QFileInfo(path).exists()) {
+        printf("stop-stress-probe: SKIP (media missing; run --ff-probe first)\n");
+        return 0;
+    }
+    if (getenv("CX_FF_AO") == 0)
+        setenv("CX_FF_AO", "silent", 1);
+    for (int round = 0; round < 10; round++) {
+        CXVideoPlayer player;
+        if (!player.setEngine(CxEngineFfmpeg)) {
+            printf("stop-stress-probe: SKIP (ffmpeg engine off)\n");
+            return 0;
+        }
+        if (!player.open(path)) {
+            printf("stop-stress-probe: FAIL (open round=%d)\n", round);
+            return 1;
+        }
+        player.play();
+        // 轮次递增的退出时机:覆盖起播前/起播中/播到中段/播完 EOS
+        usleep((useconds_t)(100 + round * 250) * 1000);
+        player.stop();
+        if (player.state() != CxStopped) {
+            printf("stop-stress-probe: FAIL (round=%d state=%d)\n",
+                   round, (int)player.state());
+            return 1;
+        }
+        printf("stop-stress-probe: round=%d ok (state=%d pos=%ld)\n",
+               round, (int)player.state(), player.position());
+    }
+    printf("stop-stress-probe: OK (10 rounds, no crash)\n");
+    return 0;
 }
 
 // ── ffmpeg 内核实播探针(--ff-probe,M2.1:视频链 + 音频链/主时钟)──
@@ -730,6 +783,13 @@ int main(int argc, char* argv[])
 
     // --play-probe 分支(cmdmpv 实播;常规断言仍走完整测试)
     cxSetLocaleNumericC();
+    bool stopStressProbeMode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--stop-stress-probe") == 0)
+            stopStressProbeMode = true;
+    }
+    if (stopStressProbeMode)
+        return cxRunStopStressProbe(&app);
     bool playProbeMode = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--play-probe") == 0)
@@ -795,6 +855,59 @@ int main(int argc, char* argv[])
         return cxRunGlProbe(&app);
 
     EXPECT(strcmp(CXVIDEO_VERSION, CXVIDEO_VERSION) == 0);
+
+    // ── M5-B3:CxPacketQueue 停止语义(退出竞态根因层)──
+    {
+        // stop(wake)后空队列 take 立即返回空载体(pkt==0),不阻塞
+        CxPacketQueue q(4);
+        q.wake();
+        CxPkt p = q.take();
+        EXPECT(p.pkt == 0 && !p.eos);
+        // 阻塞中的 push 被 wake 唤醒(队列满阻塞 push 是 demux 停不下的根因)
+        CxPacketQueue q3(1);
+        AVPacket* held = av_packet_alloc(); // 占位包(队列 clear 统一释放)
+        AVPacket* blk = av_packet_alloc();  // 阻塞 worker 的包(未入队,自free)
+        EXPECT(held != 0 && blk != 0);
+        CxPkt ph; ph.pkt = held;
+        q3.push(ph); // 占满
+        class PWorker : public QThread {
+        public:
+            CxPacketQueue* q; AVPacket* p; bool done;
+            PWorker() : q(0), p(0), done(false) { }
+            PWorker(CxPacketQueue* qq, AVPacket* pp) : q(qq), p(pp), done(false) { }
+            void run() override {
+                CxPkt wp; wp.pkt = p;
+                q->push(wp); // 满载:阻塞直到 wake(stopped 静默丢弃)
+                done = true;
+            }
+        } w;
+        w.q = &q3; w.p = blk;
+        w.start();
+        usleep(300000); // 让 push 进入阻塞
+        q3.wake(); // stop+唤醒:阻塞 push 必须返回(退出竞态根因)
+        w.wait(2000);
+        EXPECT(!CX_QT_RUNNING(w) && w.done); // 挂死即失败
+        q3.clear(); // 释放占位包
+        av_packet_free(&blk);
+        // 阻塞中的 take 被 wake 唤醒
+        CxPacketQueue q4(4);
+        class TWorker : public QThread {
+        public:
+            CxPacketQueue* q; bool done;
+            TWorker() : q(0), done(false) { }
+            TWorker(CxPacketQueue* qq) : q(qq), done(false) { }
+            void run() override {
+                CxPkt tp = q->take(); // 阻塞直到 wake
+                done = (tp.pkt == 0);
+            }
+        } t;
+        t.q = &q4;
+        t.start();
+        usleep(300000);
+        q4.wake();
+        t.wait(2000);
+        EXPECT(!CX_QT_RUNNING(t) && t.done);
+    }
 
     // ── 无引擎基线 ──
     CXVideoPlayer player;
