@@ -11,10 +11,15 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-# QSkinny 安装位置可通过 -DCMAKE_PREFIX_PATH 覆盖
-#   本机: /opt/qt/qskinny/lib/cmake
-#   例:   cmake -B build -DCMAKE_PREFIX_PATH="/opt/qt/qskinny/lib/cmake"
-list(APPEND CMAKE_PREFIX_PATH "/opt/qt/qskinny/lib/cmake")
+# QSkinny 安装位置可通过 QSKINNY_CMAKE 覆盖
+#   缺省: /opt/qt/qskinny/lib/cmake(master 预编译;与 anystik 同法:
+#         qt-cmake 6.7.3 构建,运行期 LD_LIBRARY_PATH 前置 6.7.3)
+#   例:   QSKINNY_CMAKE=/opt/qt/qskinny.6.7/lib/cmake ./buildqt6.sh
+if(DEFINED ENV{QSKINNY_CMAKE})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{QSKINNY_CMAKE}")
+else()
+    list(APPEND CMAKE_PREFIX_PATH "/opt/qt/qskinny/lib/cmake")
+endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Quick Widgets Network Multimedia OpenGL OpenGLWidgets)
 set(QT_LIBS Qt6::Quick Qt6::Widgets Qt6::Network Qt6::Multimedia Qt6::OpenGL)
@@ -72,6 +77,7 @@ target_link_libraries(qskvotube PRIVATE
     Qt6::OpenGLWidgets
     PkgConfig::CXV_FFMPEG
     -Wl,-rpath,/opt/qt/6.7.3/gcc_64/lib
+    -L/opt/qt/6.7.3/gcc_64/lib # 未版本化 -lQt6* 须先命中 6.7.3(anystik 同法)
     GL
     ${CMAKE_DL_LIBS}   # eng_mpv dlopen libmpv
 )

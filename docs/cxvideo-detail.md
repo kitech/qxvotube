@@ -289,7 +289,12 @@ while(!stop):
   4. Qt3 兼容:`m_quickUrl.clear()` → `= QString()`(Qt3 无 clear)。
 - **验收(双引擎,QLVOTUBE_QA 全过)**:6 步全 ok=1;字幕序列 LINE ONE→FIVE;mpv 路 QA 截图彩条方向/时间码正向/字幕可见;AUTOQUIT_MS 退出码 0(aboutToQuit→player->stop() 先停引擎再拆窗);cxvideo buildqt3/buildqt6 双绿 0 failures;--quick-probe 三连跑 OK。
 - **宿主侧(qskvotube)环境教训**:QSkinny(master,x64-nosys 预编译)须 Qt 6.7.3 + 运行期 `LD_LIBRARY_PATH=/opt/qt/6.7.3/gcc_64/lib` 前置(其自身 DT_NEEDED 解析到 /usr/lib 发行版 Qt6.12;Qt6.8.1 配对曾窗口永不 map;6.7.3 后正常)+ `QT_PLUGIN_PATH=…/lib/qskinny/plugins`(skin 插件不在默认路径,缺了 `QskSkinManager` 断言)。QSkinny 布局坑:`QskWindow` 用 `setPreferredSize`(Show 时按 content 定尺寸;平台级 `setFixedSize` 会绕过内容约束);`QskPushButton` 默认 preferred 宽 120,按钮一多直接把布局盒子撑出窗;视频 item 进 `QskLinearBox` 用 `setStretchFactor(item,1)` 占满,勿用 `addStretch` 手工垫(会顶出窗外)。
-- **遗留(二期)**:QSkinny 文字/按钮在该预编译栈下不渲染(纯 Qt Quick 文字正常,skinlet 文字节点疑 ABI 配对问题;滑条 handle 等矢量件正常)——控制条文字缺失为已知环境限制,不影响引擎/渲染验收。
+- **遗留(二期)→ 已根治(2026-11-12)**:QSkinny 文字/按钮"不渲染"的根因是**皮肤加载静默失败**,与库 ABI 无关:
+  1. **皮肤名大小写敏感**:插件元数据名是 `Fluent2/Fusion/Material3`(大写驼峰),`QskSkinManager::setSkin("fusion"/"material3")` 查找失败后**静默回退到第一个可用皮肤 Fluent2,无任何警告**——所有皮肤"表现一致"的假象由此而来。修:一律用精确名(缺省 `Fusion`,与 anystik 同款;`QLVOTUBE_SKIN` 覆盖时也须用精确名)。
+  2. **系统暗色主题连锁**:QSkinny 按 `styleHints()->colorScheme()` 解析成 DarkScheme(枚举 2),暗色的浅色文字画在未填充的白窗底上 → 按钮/普通标签/滑条槽"全部不可见",而显式 `setBackgroundColor` 的标签(白字画红底)恰好可见——曾误导排查方向。qskvotube 无面板件(不像 anystik 用 `rootBox->setPanel(true)` 提供暗底),修:`skin->setColorScheme(QskSkin::LightScheme)` 显式固定亮色。
+  3. **皮肤插件路径**:经 `qskSkinManager->setPluginPaths(前置 /opt/qt/qskinny/lib/qskinny/plugins)` 加载(与 anystik 同法,插件与 libqskinny 同树);废弃 QT_PLUGIN_PATH/x64-nosys。皮肤字体 role 显式设 DejaVu(anystik 同法)。
+  4. 排查方法教训:**wmctrl 精确定位须用 WM_CLASS**(`wmctrl -lx | awk '/q6vtube/'`)——标题含 "qskvotube" 的终端/残留窗口会污染抓拍,历史多轮"空白"截图部分是拍到残留窗口的假象;另 Material3 皮肤下按钮压到 40 宽时文字区(padding hint)归零,skinlet 整段跳过文字(Fusion 无此限制)。
+  - **最终验收**:双引擎(ffmpeg+mpv)QLVOTUBE_QA 六步全 ok=1、AUTOQUIT 退出码 0;UI 截图 ▶/1.0x/CC/EQ/图 按钮文字、进度条、时间标签全部正常渲染。
 
 ## 8. Qt3 兼容层(逐条)
 
@@ -383,7 +388,7 @@ LIBS += -lmpv -lavformat -lavcodec -lswscale -lswresample -lopenal
   - ffmpeg 路:640x420 窗 map、material3 皮肤生效、视频区彩条持续渲染、pos 事件流(12+)、控制条滑条可见可动。
   - mpv 路:QFBO 渲染彩条(方向经 ground truth 帧核对正确,FlipY=0)、pos 持续推进(不卡帧)、二段起播链路(attach job → quickGo)通。
   - cxvideo `--quick-probe` 三连跑 OK;`buildqt6.sh` ret=0。
-  - 已知环境限制:QSkinny 预编译栈下按钮/文字不渲染(见 §7.8 遗留),控制条文字缺失不影响引擎/渲染验收;字面验证留二期(自建 QSkinny 或升级配对)。
+  - 已根治(2026-11-12):根因是皮肤名大小写错误致静默回退 + 系统暗色主题连锁,详见 §7.8 遗留收尾;双引擎 QA 全过、按钮/文字渲染正常。
 - **QA**:gdb+AUTOQUIT_MS 可复核退出;窗口定位 `wmctrl -l | grep qskvotube`(WM_CLASS=q6vtube)。
 
 ## 附:实现顺序(对照里程碑)

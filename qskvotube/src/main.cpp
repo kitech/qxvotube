@@ -10,6 +10,8 @@
 #include <QDir>
 
 #include <QskSkinManager.h>
+#include <QskSkin.h>
+#include <QskFontRole.h>
 #include <QskWindow.h>
 #include <QskTextLabel.h>
 #include <QskLinearBox.h>
@@ -96,7 +98,26 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    qskSkinManager->setSkin("material3");
+    // anystik 同法:皮肤插件路径经 QskSkinManager 前置(与 libqskinny
+    // 同树同 ABI)。注意:皮肤名大小写敏感(正确名 Fluent2/Fusion/
+    // Material3),传错会静默回退 Fluent2 且无警告——曾致文字/按钮
+    // "不渲染"(暗色配色画在浅色窗底)。QLVOTUBE_SKIN 可覆盖
+    const char* skinEnv = getenv("QLVOTUBE_SKIN");
+    QStringList libPaths = QCoreApplication::libraryPaths();
+    libPaths.prepend("/opt/qt/qskinny/lib/qskinny/plugins");
+    qskSkinManager->setPluginPaths(libPaths);
+    qskSkinManager->setSkin(skinEnv != 0 ? skinEnv : "Fusion");
+    // anystik 同法:皮肤字体 role 显式设真实存在的字体——皮肤内置
+    // 字体(如 Segoe UI)本机缺失时经回退可能整段字形为空
+    QskSkin* skin = qskSkinManager->skin();
+    // 系统暗色主题(QSkinny 按 styleHints 解析成 DarkScheme)会把浅色
+    // 文字画在未填充的白窗底上(qskvotube 无面板件,不像 anystik 用
+    // rootBox setPanel(true) 提供暗底)——显式固定亮色配色
+    skin->setColorScheme(QskSkin::LightScheme);
+    QFont f("DejaVu Sans", 10);
+    skin->setFont({QskFontRole::Body, QskFontRole::Normal}, f);
+    skin->setFont({QskFontRole::Title, QskFontRole::Normal}, f);
+    skin->setFont({QskFontRole::Caption, QskFontRole::Normal}, f);
 
     QskWindow window;
     window.setTitle("qskvotube");
@@ -159,8 +180,9 @@ int main(int argc, char* argv[])
     auto* shotBtn = new QskPushButton("图");
 
     // QskPushButton 默认 preferred 宽 120,合计把盒子撑出窗口——压窄
+    // (anystik 同法:setPreferredSize(44,44),Fusion 下小尺寸文字正常)
     for (QskPushButton* b : { playBtn, rateBtn, ccBtn, eqBtn, shotBtn })
-        b->setPreferredSize(40, 34);
+        b->setPreferredSize(44, 36);
 
     ctl->addItem(playBtn);
     ctl->addItem(prog);
@@ -353,8 +375,11 @@ int main(int argc, char* argv[])
             new CxMpvAttachJob(em, &window, player, url),
             QQuickWindow::BeforeSynchronizingStage);
     } else {
-        player->open(url);
-        player->play();
+        // QLVOTUBE_NOPLAY=1:不 open/play,纯 UI 静置(排查视频链干扰)
+        if (getenv("QLVOTUBE_NOPLAY") == 0) {
+            player->open(url);
+            player->play();
+        }
     }
 
     if (getenv("QLVOTUBE_AUTOQUIT_MS") != 0)

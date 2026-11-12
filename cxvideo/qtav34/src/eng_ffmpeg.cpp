@@ -209,10 +209,31 @@ bool CXEngineFfmpeg::open(const QString& url)
 
 void CXEngineFfmpeg::stopThreads()
 {
+    // 1) 全员先请求停止;2) 唤醒全部队列——队列满时阻塞 push 是 demux
+    //    停不下来的根因(消费者先停,队列塞满,demux 卡死在 push);
+    //    阻塞中的 push/take 被唤醒后立即返回,各线程得以退出
+    if (m_vthread != 0)
+        m_vthread->requestStop();
+    if (m_athread != 0)
+        m_athread->requestStop();
+    if (m_demux != 0)
+        m_demux->requestStop();
+    if (m_sthread != 0)
+        m_sthread->requestStop();
+    if (m_vq != 0)
+        m_vq->wake();
+    if (m_aq != 0)
+        m_aq->wake();
+    if (m_sq != 0)
+        m_sq->wake();
+
+    // 泄漏策略(M5-A3 起逐步完备):线程停不下来,则它引用的队列/解码器
+    // 一并泄漏不 delete——运行中析构任何一环都会 abort/segv
+    bool vLeak = false;
     if (m_vthread != 0) {
         m_vthread->requestStop();
         if (!m_vthread->wait(2000)) {
-            // 停不下来就别 delete(QThread 运行中析构=abort);泄漏换稳定
+            vLeak = true; // 停不下来就别 delete(QThread 运行中析构=abort)
             m_vthread = 0;
         } else {
             delete m_vthread;
@@ -234,17 +255,25 @@ void CXEngineFfmpeg::stopThreads()
     }
     if (m_demux != 0) {
         m_demux->requestStop();
-        m_demux->wait(2000);
-        delete m_demux;
-        m_demux = 0;
+        if (!m_demux->wait(2000)) {
+            m_demux = 0; // 停不下来就泄漏(同 v/a 线程;运行中析构=abort)
+        } else {
+            delete m_demux;
+            m_demux = 0;
+        }
     }
+    bool sLeak = false;
     if (m_sthread != 0) {
         m_sthread->requestStop();
-        m_sthread->wait(2000);
-        delete m_sthread;
-        m_sthread = 0;
+        if (!m_sthread->wait(2000)) {
+            sLeak = true;
+            m_sthread = 0;
+        } else {
+            delete m_sthread;
+            m_sthread = 0;
+        }
     }
-    if (m_vq != 0) {
+    if (!vLeak && m_vq != 0) {
         m_vq->wake();
         m_vq->clear();
         delete m_vq;
@@ -256,26 +285,32 @@ void CXEngineFfmpeg::stopThreads()
         delete m_aq;
         m_aq = 0;
     }
-    if (m_sq != 0) {
+    if (!sLeak && m_sq != 0) {
         m_sq->wake();
         m_sq->clear();
         delete m_sq;
         m_sq = 0;
     }
-    if (m_dec != 0) {
+    if (!vLeak && m_dec != 0) {
+        fprintf(stderr, "cx: dec close begin\n");
         m_dec->close();
+        fprintf(stderr, "cx: dec close done\n");
         delete m_dec;
         m_dec = 0;
     }
-    if (m_sdec != 0) {
+    if (!sLeak && m_sdec != 0) {
+        fprintf(stderr, "cx: sdec close begin\n");
         m_sdec->close();
+        fprintf(stderr, "cx: sdec close done\n");
         delete m_sdec;
         m_sdec = 0;
     }
     m_subTl.clear(); // 内嵌时间轴重建;外挂 m_subTlExt 保留(重启不清)
     if (!audioLeak) {
         if (m_adec != 0) {
+            fprintf(stderr, "cx: adec close begin\n");
             m_adec->close();
+            fprintf(stderr, "cx: adec close done\n");
             delete m_adec;
             m_adec = 0;
         }
