@@ -11,6 +11,7 @@ class CXVideoPlayer;
 class CXQuickVideoItem;
 class CXQuickMpvFboItem;
 class CxDropHook;
+class CxUserAvatar;
 class QskLinearBox;
 class QskPushButton;
 class QskSlider;
@@ -27,6 +28,8 @@ public:
 
     void showEngineError(const QString& text);
     void stopPlayback();   // 退出前停引擎(消渲染线程退出竞态)
+    // 用户区(qskmusic 同语义;登录能力落地前无调用方,仅区分已登录/未登录)
+    void setLoggedIn(const QString& nickname, const QString& avatarSeed);
 
 protected:
     void onCreate(const QVariantMap& launchArgs,
@@ -49,6 +52,9 @@ private:
     QskSlider* m_prog = nullptr;
     QskTextLabel* m_timeLbl = nullptr;
     QskTextLabel* m_subLabel = nullptr;
+    CxUserAvatar* m_userAvatar = nullptr;
+    QskTextLabel* m_userName = nullptr;
+    QskTextLabel* m_userStatus = nullptr;
 
     QStringList m_pl;
     int m_plIdx = 0;

@@ -95,6 +95,8 @@ qt_add_executable(qskvotube
     src/keepalive.cpp
     src/androidutils.cpp
     src/uistyle.cpp
+    src/useravatar.cpp
+    ../qlcomp/identicon.cpp
     ${QSKCOMP_SOURCES}
     ${CXV_SOURCES}
     ${CXV_EXTRA}
@@ -105,6 +107,7 @@ target_include_directories(qskvotube PRIVATE
     /opt/qt/6.7.3/gcc_64/include/QtOpenGLWidgets
     /opt/qt/6.7.3/gcc_64/include/QtOpenGL
     ${QSKCOMP_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp
     ${CXV_INCLUDE_DIRS}
     ${Qt6Core_PRIVATE_INCLUDE_DIRS}
     ${Qt6Quick_PRIVATE_INCLUDE_DIRS}

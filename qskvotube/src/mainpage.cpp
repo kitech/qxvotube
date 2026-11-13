@@ -27,6 +27,8 @@
 #include <QskPopup.h>
 #include <QskSkinManager.h>
 #include <QskSkin.h>
+#include <QskFontRole.h>
+#include <private/qquicktaphandler_p.h>
 
 #include "menuoverlay.h"
 #include "pagemanager.h"
@@ -39,6 +41,7 @@
 #include "cxmsutil.h"
 #include "uistyle.h"
 #include "androidutils.h"
+#include "useravatar.h"
 
 // CXVideoEq 工厂(有自定义 ctor 非聚合,不能花括号构造)
 static CXVideoEq cxvEq(int b, int c, int s, int h)
@@ -141,6 +144,20 @@ MainPage::~MainPage()
     }
 }
 
+void MainPage::setLoggedIn(const QString& nickname, const QString& avatarSeed)
+{
+    const bool loggedIn = !nickname.isEmpty();
+    if (m_userAvatar != 0)
+        m_userAvatar->setSeed(loggedIn || !avatarSeed.isEmpty()
+                              ? (avatarSeed.isEmpty() ? nickname : avatarSeed)
+                              : QStringLiteral("anonymous"));
+    if (m_userName != 0)
+        m_userName->setText(loggedIn ? nickname : QString::fromUtf8("未登录"));
+    if (m_userStatus != 0)
+        m_userStatus->setText(loggedIn ? QString::fromUtf8("已登录")
+                                       : QString::fromUtf8("点击登录"));
+}
+
 void MainPage::stopPlayback()
 {
     if (m_player != 0)
@@ -176,12 +193,38 @@ void MainPage::onCreate(const QVariantMap&, const QVariantMap&)
     m_box->setSpacing(2);
     m_box->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
 
-    // ── TopBar:标题 + ⋮ 主菜单 ──
+    // ── TopBar:左用户区 | 中标题 | 右 ⋮ 主菜单 ──
     {
         auto* topBar = new QskLinearBox(Qt::Horizontal, m_box);
         topBar->setPanel(true);
         topBar->setPreferredHeight(48);
         topBar->setSpacing(6);
+
+        // 左:identicon 头像 28dp + 两行(昵称/状态);整块点击=登录占位(空操作)
+        auto* userBox = new QskLinearBox(Qt::Horizontal, topBar);
+        userBox->setSpacing(8);
+        m_userAvatar = new CxUserAvatar(userBox);
+        m_userAvatar->setPreferredSize(28, 28);
+        auto* userCol = new QskLinearBox(Qt::Vertical, userBox);
+        userCol->setSpacing(0);
+        userCol->setPreferredWidth(96);
+        m_userName = new QskTextLabel(QString::fromUtf8("未登录"), userCol);
+        m_userName->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        m_userStatus = new QskTextLabel(QString::fromUtf8("点击登录"), userCol);
+        m_userStatus->setFontRole(
+            QskFontRole(QskFontRole::Caption, QskFontRole::Normal));
+        m_userStatus->setTextColor(QColor(0x9a, 0x9a, 0x9a));
+        m_userStatus->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+
+        // 登录占位:空操作(Android toast;桌面仅 debug 日志)
+        auto* userTap = new QQuickTapHandler(userBox);
+        connect(userTap, &QQuickTapHandler::singleTapped, this,
+            [this](QEventPoint, Qt::MouseButton) {
+                showAndroidToast(QString::fromUtf8("登录功能开发中"));
+                if (m_dbg)
+                    fprintf(stderr, "user: 登录功能开发中\n");
+            });
+
         auto* title = new QskTextLabel("qskvotube", topBar);
         title->setAlignment(Qt::AlignCenter);
         title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
@@ -195,6 +238,10 @@ void MainPage::onCreate(const QVariantMap&, const QVariantMap&)
                     p.x() + optionsBtn->width(),
                     p.y() + optionsBtn->height()));
             });
+
+        // 登录态(两版统一 key:userName / userAvatarSeed;空=未登录)
+        setLoggedIn(QSettings().value("userName").toString(),
+                    QSettings().value("userAvatarSeed").toString());
     }
 
     // ── 视频区 + 引擎/渲染器显式配对(不互备)──
