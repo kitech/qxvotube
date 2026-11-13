@@ -1,7 +1,11 @@
 #include "renderer_mpvgl.h"
 #include "cxmpv_def.h"
 #if CXV_LEGACY_GL
-#include <GL/glx.h> // glXGetProcAddressARB(Qt3 QGLContext 无 getProcAddress)
+#if defined(QT3_BUILD)
+#include <GL/glx.h>   // Qt3:glXGetProcAddressARB(Qt3 QGLContext 无 getProcAddress)
+#else
+#include <QGLContext> // Qt4:getProcAddress 全平台(含 macOS,无 GLX)
+#endif
 #else
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -31,7 +35,13 @@ void cxMpvGlUpdateHook(void* /*ctx*/)
 static void* cxMpvGlProcThunk(void* /*ctx*/, const char* name)
 {
 #if CXV_LEGACY_GL
+#if defined(QT3_BUILD)
     return (void*)glXGetProcAddressARB((const GLubyte*)name);
+#else
+    // Qt4(含 macOS):QGLContext::getProcAddress,勿用 GLX
+    const QGLContext* c = QGLContext::currentContext();
+    return c != 0 ? (void*)c->getProcAddress(QString::fromLatin1(name)) : 0;
+#endif
 #else
     QOpenGLContext* c = QOpenGLContext::currentContext();
     return c != 0 ? (void*)c->getProcAddress(name) : 0;

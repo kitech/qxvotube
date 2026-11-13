@@ -93,13 +93,17 @@ FF_DEPS = $$system(pkg-config --libs libavformat libavcodec libswscale libswresa
     # rpath-link,且应取 **FFmpeg 自己的 libdir**(--variable=libdir 推导,
     # 不写死路径;多架构/自定义 prefix 均随之走)。放 LIBS 内(命令行位于
     # Qt/宿主 rpath-link 之后,DBus 等先由 Qt 目录命中,不误拉)
+    # 注意:rpath-link 是 GNU ld 选项,ld64(macOS)无此参数(报 unknown option),
+    # macOS 构建期由 -L/框架解析,运行期由 install_name 或 -Wl,-rpath 处理
     FF_LIBDIR = $$system(pkg-config --variable=libdir libavformat 2>/dev/null)
-    !isEmpty(FF_LIBDIR): LIBS += -Wl,-rpath-link,$$FF_LIBDIR
+    !isEmpty(FF_LIBDIR):!macx: LIBS += -Wl,-rpath-link,$$FF_LIBDIR
     LIBS += $$FF_DEPS
 
     # M4-A:GL 渲染路(Qt3/Qt4 QGLWidget 需 -lGL + Qt4 opengl 模块;
     # Qt6 需 openglwidgets 模块)
-    LIBS += -lGL
+    # macOS 用 OpenGL.framework(由 QT += opengl 经 QMAKE_LIBS_OPENGL 注入),
+    # 无 libGL 且 -lGL 会失败
+    !macx: LIBS += -lGL
     greaterThan(QT_MAJOR_VERSION, 5): QT += openglwidgets
     equals(QT_MAJOR_VERSION, 4): QT += opengl
     DEFINES += WITH_CX_RENDERER_GL

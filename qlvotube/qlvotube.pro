@@ -106,6 +106,9 @@ FREETYPE_LIBS = $$system(pkg-config --libs freetype2 2>/dev/null)
 macx {
     INCLUDEPATH += /opt/vcpkg/installed/x64-osx-dynamic/include
     LIBS += -L/opt/vcpkg/installed/x64-osx-dynamic/lib -Wl,-rpath,/opt/vcpkg/installed/x64-osx-dynamic/lib -lhjson
+    # sleepblocker.cpp 用 CFString/CFRelease(CoreFoundation);IOKit/CoreGraphics
+    # 亦在 macx 链接面显式声明,避免依赖其它 .pri 的隐式注入
+    LIBS += -framework CoreFoundation -framework IOKit -framework CoreGraphics
 } else {
     INCLUDEPATH += /opt/vcpkg/installed/x64-linux-dynamic/include
     LIBS += -L/opt/vcpkg/installed/x64-linux-dynamic/lib -Wl,-rpath,/opt/vcpkg/installed/x64-linux-dynamic/lib -lhjson
