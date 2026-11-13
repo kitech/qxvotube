@@ -103,7 +103,11 @@ int main(int argc, char* argv[])
     // "不渲染"(暗色配色画在浅色窗底)。QLVOTUBE_SKIN 可覆盖
     const char* skinEnv = getenv("QLVOTUBE_SKIN");
     QStringList libPaths = QCoreApplication::libraryPaths();
+#ifndef Q_OS_ANDROID
+    // Android:皮肤插件平铺在 JNI libs 目录,Qt 已自动纳入 libraryPaths
+    // (qskmusic main.cpp 同法);桌面才需要显式前置插件路径
     libPaths.prepend("/opt/qt/qskinny/lib/qskinny/plugins");
+#endif
     qskSkinManager->setPluginPaths(libPaths);
     qskSkinManager->setSkin(skinEnv != 0 ? skinEnv : "Fusion");
     // 皮肤主题应用(亮色+字体 role)抽 lambda:皮肤热切(二期)复用。
