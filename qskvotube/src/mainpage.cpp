@@ -42,10 +42,16 @@
 #include "uistyle.h"
 #include "androidutils.h"
 #include "useravatar.h"
+#include "translator.h"
+
+// 词表取值便捷封装(qlcomp Translator)
+static QString trKey(const char* key)
+{
+    return Translator::instance().t(QString::fromLatin1(key));
+}
 
 // CXVideoEq 工厂(有自定义 ctor 非聚合,不能花括号构造)
-static CXVideoEq cxvEq(int b, int c, int s, int h)
-{
+static CXVideoEq cxvEq(int b, int c, int s, int h){
     CXVideoEq eq;
     eq.brightness = b;
     eq.contrast = c;
@@ -104,7 +110,7 @@ public:
                 m_player->play();
             } else if (m_page) {
                 m_page->showEngineError(
-                    "mpv render_context 创建失败(不降级,退出)");
+                    trKey("engine.mpv_render_failed"));
                 QTimer::singleShot(2500, qApp, SLOT(quit()));
             }
         }, Qt::QueuedConnection);
@@ -152,14 +158,33 @@ void MainPage::setLoggedIn(const QString& nickname, const QString& avatarSeed)
                               ? (avatarSeed.isEmpty() ? nickname : avatarSeed)
                               : QStringLiteral("anonymous"));
     if (m_userName != 0)
-        m_userName->setText(loggedIn ? nickname : QString::fromUtf8("未登录"));
+        m_userName->setText(loggedIn ? nickname : trKey("user.not_login"));
     if (m_userStatus != 0)
-        m_userStatus->setText(loggedIn ? QString::fromUtf8("已登录")
-                                       : QString::fromUtf8("点击登录"));
+        m_userStatus->setText(loggedIn ? trKey("user.logged_in")
+                                       : trKey("user.click_to_login"));
 }
 
-void MainPage::stopPlayback()
+void MainPage::retranslate()
 {
+    // 用户区(按登录态重算)/ EQ 档位名 / 窗口标题
+    setLoggedIn(QSettings().value("userName").toString(),
+                QSettings().value("userAvatarSeed").toString());
+    static const char* const kEqKeys[5] = {
+        "player.eq_default", "player.eq_bright", "player.eq_contrast",
+        "player.eq_saturation", "player.eq_warm"
+    };
+    if (m_eqBtn != nullptr && m_eqIdx >= 0 && m_eqIdx < 5)
+        m_eqBtn->setText(trKey(kEqKeys[m_eqIdx]));
+    if (QskWindow* w = qobject_cast<QskWindow*>(window())) {
+        if (m_pl.isEmpty() || m_plIdx < 0 || m_plIdx >= m_pl.size())
+            return;
+        w->setTitle(m_pl[m_plIdx].isEmpty()
+                    ? ("qskvotube (" + trKey("player.no_media") + ")")
+                    : ("qskvotube - " + QFileInfo(m_pl[m_plIdx]).fileName()));
+    }
+}
+
+void MainPage::stopPlayback(){
     if (m_player != 0)
         m_player->stop();
 }
@@ -208,9 +233,9 @@ void MainPage::onCreate(const QVariantMap&, const QVariantMap&)
         auto* userCol = new QskLinearBox(Qt::Vertical, userBox);
         userCol->setSpacing(0);
         userCol->setPreferredWidth(96);
-        m_userName = new QskTextLabel(QString::fromUtf8("未登录"), userCol);
+        m_userName = new QskTextLabel(trKey("user.not_login"), userCol);
         m_userName->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
-        m_userStatus = new QskTextLabel(QString::fromUtf8("点击登录"), userCol);
+        m_userStatus = new QskTextLabel(trKey("user.click_to_login"), userCol);
         m_userStatus->setFontRole(
             QskFontRole(QskFontRole::Caption, QskFontRole::Normal));
         m_userStatus->setTextColor(QColor(0x9a, 0x9a, 0x9a));
@@ -220,9 +245,10 @@ void MainPage::onCreate(const QVariantMap&, const QVariantMap&)
         auto* userTap = new QQuickTapHandler(userBox);
         connect(userTap, &QQuickTapHandler::singleTapped, this,
             [this](QEventPoint, Qt::MouseButton) {
-                showAndroidToast(QString::fromUtf8("登录功能开发中"));
+                showAndroidToast(trKey("user.login_developing"));
                 if (m_dbg)
-                    fprintf(stderr, "user: 登录功能开发中\n");
+                    fprintf(stderr, "user: %s\n",
+                            trKey("user.login_developing").toUtf8().constData());
             });
 
         auto* title = new QskTextLabel("qskvotube", topBar);
@@ -256,7 +282,7 @@ void MainPage::onCreate(const QVariantMap&, const QVariantMap&)
     if (m_wantMpv) {
         if (QQuickWindow::graphicsApi() != QSGRendererInterface::OpenGL) {
             showEngineError(
-                "mpv 需要窗口 GL 渲染 API,当前环境不支持(不降级,退出)");
+                trKey("engine.mpv_needs_gl"));
             QTimer::singleShot(2500, qApp, SLOT(quit()));
             return;
         }
@@ -315,8 +341,8 @@ void MainPage::onCreate(const QVariantMap&, const QVariantMap&)
     // ── 引擎 ──
     if (!m_player->setEngine(m_wantMpv ? CxEngineMpv : CxEngineFfmpeg) ||
         m_player->engine() == 0) {
-        showEngineError(m_wantMpv ? "libmpv 不可用(显式选择,不回退)"
-                                  : "ffmpeg 引擎不可用");
+        showEngineError(m_wantMpv ? trKey("engine.mpv_unavailable")
+                                  : trKey("engine.ffmpeg_unavailable"));
         QTimer::singleShot(2500, qApp, SLOT(quit()));
         return;
     }
@@ -422,10 +448,14 @@ void MainPage::onCreate(const QVariantMap&, const QVariantMap&)
         });
     }
 
+    // ── 多语言热切:用户区/标题/EQ 档位名重译 ──
+    connect(&Translator::instance(), &Translator::languageChanged,
+            this, [this]() { retranslate(); });
+
     // ── 起播 ──
     if (QskWindow* w = qobject_cast<QskWindow*>(window())) {
         w->setTitle(m_pl[m_plIdx].isEmpty()
-                    ? QString("qskvotube (无媒体)")
+                    ? ("qskvotube (" + trKey("player.no_media") + ")")
                     : ("qskvotube - " + QFileInfo(m_pl[m_plIdx]).fileName()));
     }
     if (!m_pl[m_plIdx].isEmpty()) {
@@ -461,12 +491,12 @@ void MainPage::openPl(int idx)
     if (m_plIdx < 0) {
         m_player->stop();
         if (w != 0)
-            w->setTitle("qskvotube (列表播完)");
+            w->setTitle("qskvotube (" + trKey("player.list_finished") + ")");
         return;
     }
     if (m_pl[m_plIdx].isEmpty()) {
         if (w != 0)
-            w->setTitle("qskvotube (无媒体)");
+            w->setTitle("qskvotube (" + trKey("player.no_media") + ")");
         return;                   // 无媒体:不 open/play
     }
     if (w != 0)
@@ -588,18 +618,19 @@ void MainPage::buildControls(QskLinearBox* box)
     });
     connect(eqBtn, &QskAbstractButton::clicked, this, [this, eqBtn]() {
         static const struct {
-            const char* label;
+            const char* key;
             CXVideoEq eq;
         } kEqs[] = {
-            { "默认",   cxvEq(  0,  0,  0,   0) },
-            { "提亮",   cxvEq( 60, 10,  0,   0) },
-            { "高对比", cxvEq(  0, 50, 10,   0) },
-            { "高饱和", cxvEq(  0,  0, 60,   0) },
-            { "暖色",   cxvEq( 10,  0,  0, -30) },
+            { "player.eq_default",    cxvEq(  0,  0,  0,   0) },
+            { "player.eq_bright",     cxvEq( 60, 10,  0,   0) },
+            { "player.eq_contrast",   cxvEq(  0, 50, 10,   0) },
+            { "player.eq_saturation", cxvEq(  0,  0, 60,   0) },
+            { "player.eq_warm",       cxvEq( 10,  0,  0, -30) },
         };
         m_eqIdx = (m_eqIdx + 1) % 5;
+        m_eqBtn = eqBtn;
         m_player->setEq(kEqs[m_eqIdx].eq);
-        eqBtn->setText(QString::fromUtf8(kEqs[m_eqIdx].label));
+        eqBtn->setText(trKey(kEqs[m_eqIdx].key));
     });
     connect(shotBtn, &QskAbstractButton::clicked, this, [this]() {
         const QString path = cxShotDir() + "/shot_" +
@@ -611,8 +642,8 @@ void MainPage::buildControls(QskLinearBox* box)
     connect(subBtn, &QskAbstractButton::clicked, this, [this]() {
         // 外挂字幕:setSubtitleFile(srt/ass);解析失败走 noticedError
         const QString f = QFileDialog::getOpenFileName(
-            nullptr, "加载外挂字幕", QString(),
-            "Subtitles (*.srt *.ass *.ssa *.vtt)");
+            nullptr, trKey("player.subtitle_open"), QString(),
+            trKey("player.subtitle_filter"));
         if (!f.isEmpty())
             m_player->setSubtitleFile(f);
     });
@@ -631,11 +662,11 @@ void MainPage::showOptionsMenu(const QPointF& origin)
     menu->setPopupFlag(QskPopup::DeleteOnClose, false);   // 防与 overlay 双删
 
     const int idxKeepOn = menu->addOption(QskLabelData(
-        m_keepScreenOn ? QString::fromUtf8("✓ 保持屏幕常亮")
-                       : QString::fromUtf8("  保持屏幕常亮")));
+        m_keepScreenOn ? ("✓ " + trKey("menu.keep_screen_on"))
+                       : ("  " + trKey("menu.keep_screen_on"))));
     menu->addSeparator();
-    const int idxSettings = menu->addOption(QskLabelData(QString::fromUtf8("设置")));
-    const int idxAbout = menu->addOption(QskLabelData(QString::fromUtf8("关于")));
+    const int idxSettings = menu->addOption(QskLabelData(trKey("menu.settings")));
+    const int idxAbout = menu->addOption(QskLabelData(trKey("menu.about")));
 
     qreal menuW = menu->implicitWidth();
     if (menuW <= 0)

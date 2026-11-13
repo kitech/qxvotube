@@ -30,6 +30,7 @@
 #include "keepalive.h"
 #include "androidutils.h"
 #include "uistyle.h"
+#include "translator.h"
 
 namespace {
 
@@ -93,6 +94,31 @@ int main(int argc, char* argv[])
     app.setOrganizationName("qlvotube");
     app.setFont(cxBaseFont());
 
+    // ── 多语言(qlcomp Translator,JSON 词表,与 qlvotube 同源)──
+    // 构建目录运行 → appdir=build/,appdir/../lang 命中源码 qskvotube/lang/
+    {
+#ifdef Q_OS_ANDROID
+        // Qt Android assets 不支持普通 QFile 路径:首次启动把词表拷到数据目录
+        const QString dataLang = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation) + "/lang";
+        QDir().mkpath(dataLang);
+        for (const QString& code : { "zh-CN", "zh-TW", "en-US" }) {
+            const QString dst = dataLang + "/" + code + ".json";
+            if (!QFile::exists(dst))
+                QFile::copy("assets:/lang/" + code + ".json", dst);
+        }
+        Translator::instance().addTranslationPath(dataLang);
+#else
+        Translator::instance().addTranslationPath(
+            app.applicationDirPath() + "/../lang");
+        Translator::instance().addTranslationPath(
+            app.applicationDirPath() + "/lang");
+        Translator::instance().addTranslationPath("lang");
+#endif
+        Translator::instance().loadLanguage(
+            QSettings().value("lang", "zh-CN").toString());
+    }
+
     for (const auto& a : app.arguments()) {
         if (a == "-v" || a == "--version") {
             printf("%s %s\n", "qskvotube",
@@ -101,15 +127,15 @@ int main(int argc, char* argv[])
         }
     }
 
-    // 无头环境无法加载图形皮肤插件，QskSkinManager 会断言；
-    // 仅在可创建平台窗口时才进 UI。Android 平台名即 "android"，必须放行
-    // (曾致 APK 启动即闪退: logcat "no GUI platform (android), exiting")
+    // 无头环境(QPA offscreen/minimal 等)无法加载图形皮肤插件,
+    // QskSkinManager 会断言 → 黑名单退出(qskmusic 思路:不写白名单,
+    // 以免 macOS "cocoa"/Windows "windows" 等真实平台被误挡)
     {
         const QString plat = QGuiApplication::platformName();
-        const bool guiCapable = plat.startsWith("xcb")
-            || plat.startsWith("wayland") || plat == "android";
-        if (!guiCapable) {
-            fprintf(stderr, "qskvotube: no GUI platform (%s), exiting\n",
+        const bool headless = plat == "offscreen" || plat == "minimal"
+            || plat.isEmpty();
+        if (headless) {
+            fprintf(stderr, "qskvotube: headless platform (%s), exiting\n",
                     plat.toUtf8().constData());
             return 1;
         }

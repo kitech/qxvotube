@@ -30,6 +30,7 @@ public:
     void stopPlayback();   // 退出前停引擎(消渲染线程退出竞态)
     // 用户区(qskmusic 同语义;登录能力落地前无调用方,仅区分已登录/未登录)
     void setLoggedIn(const QString& nickname, const QString& avatarSeed);
+    void retranslate();   // 语言热切:用户区/EQ 档位名/标题
 
 protected:
     void onCreate(const QVariantMap& launchArgs,
@@ -49,6 +50,7 @@ private:
 
     QskLinearBox* m_box = nullptr;
     QskPushButton* m_playBtn = nullptr;
+    QskPushButton* m_eqBtn = nullptr;
     QskSlider* m_prog = nullptr;
     QskTextLabel* m_timeLbl = nullptr;
     QskTextLabel* m_subLabel = nullptr;

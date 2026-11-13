@@ -90,6 +90,11 @@ fi
 cp "$QSK_ANDROID/lib/qskinny/plugins/skins/"*.so "$LIB_DIR/"
 cp "$QSK_ANDROID/lib/qskinny/plugins/platforminputcontexts/"*.so "$LIB_DIR/"
 
+# 清掉上次的 manifest:androiddeployqt(aux-mode) 目标存在时会报
+# "Failed to copy .../AndroidManifest.xml"(QFile::copy 不覆盖);我们的
+# 自定义 manifest 在 deploy 之后才拷入,这里删除安全
+rm -f "$APK_DIR/AndroidManifest.xml"
+
 "$QT_HOST/bin/androiddeployqt" \
     --input "$BUILD_DIR/android-qskvotube-deployment-settings.json" \
     --output "$APK_DIR" \
@@ -108,6 +113,10 @@ fi
 # 自定义 Java(保活 service + 权限助手;qsktox 同 aux-mode 需手拷)
 mkdir -p "$APK_DIR/src/main/java"
 cp -R android/src/java/* "$APK_DIR/src/main/java/"
+
+# 多语言词表(JSON;qlcomp Translator 运行期从 assets:/lang 拷到数据目录)
+mkdir -p "$APK_DIR/assets/lang"
+cp lang/*.json "$APK_DIR/assets/lang/"
 
 # 覆盖 manifest(qskmusic 同:Qt 模板缺 lib_name/icon)
 cp android/AndroidManifest.xml "$APK_DIR/AndroidManifest.xml"

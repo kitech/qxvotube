@@ -499,12 +499,12 @@ void MainWindow::buildMenus()
     addMenuItem(tool, this, SLOT(onDemoApiRequest()), "demo.api_request");
     addMenuSeparator(tool);
     addMenuItem(tool, this, SLOT(openSettings()), "menu.settings");
-    /* M5-A2:EQ / 截图 / 引擎切换(中文 key 作 fallback 文案) */
+    /* M5-A2:EQ / 截图 / 引擎切换 / 外挂字幕(JSON key,见 lang/*.json 的 menu.*) */
     addMenuSeparator(tool);
-    addMenuItem(tool, this, SLOT(onOpenEqDialog()), "音视频均衡器(EQ)...");
-    addMenuItem(tool, this, SLOT(onTakeScreenshot()), "截图(保存到缓存目录)");
-    addMenuItem(tool, this, SLOT(onToggleEngine()), "切换播放引擎(ffmpeg/mpv)");
-    addMenuItem(tool, this, SLOT(onLoadSubtitleFile()), "加载外挂字幕...");
+    addMenuItem(tool, this, SLOT(onOpenEqDialog()), "menu.eq");
+    addMenuItem(tool, this, SLOT(onTakeScreenshot()), "menu.screenshot");
+    addMenuItem(tool, this, SLOT(onToggleEngine()), "menu.engine");
+    addMenuItem(tool, this, SLOT(onLoadSubtitleFile()), "menu.subtitle");
     MenuWidget34* help = static_cast<MenuWidget34*>(addTopMenu("menu.help"));
     addMenuItem(help, qApp, SLOT(aboutQt()), "menu.aboutqt");
     addMenuItem(help, this, SLOT(onAboutApp()), "menu.about_qlvotube");

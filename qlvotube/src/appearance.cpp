@@ -27,7 +27,9 @@ void attachAppearanceMenu(QPushButton* btn, MenuWidget34* menu)
 
 const char* const* appearanceLangLabelKeys()
 {
-    static const char* const kKeys[3] = { "简体中文", "繁體中文", "English" };
+    // JSON key(见 lang/*.json 的 lang.zh_CN/zh_TW/en_US);
+    // 此前传中文串当 key → 查表必失败,永远走 fallback 且英文界面显示中文
+    static const char* const kKeys[3] = { "lang.zh_CN", "lang.zh_TW", "lang.en_US" };
     return kKeys;
 }
 

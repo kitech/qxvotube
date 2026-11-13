@@ -9,6 +9,15 @@
 #include <QQuickWindow>
 #include <QScreen>
 #include "version_config.h"
+#include "translator.h"
+
+namespace {
+// 词表取值(qlcomp Translator);About 为 Transient 页,每次打开重建即用当前语言
+QString trKey(const char* key)
+{
+    return Translator::instance().t(QString::fromLatin1(key));
+}
+} // namespace
 
 AboutPage::AboutPage(QQuickItem* parent)
     : Page(parent)
@@ -28,7 +37,7 @@ void AboutPage::onCreate(const QVariantMap&, const QVariantMap&)
 
     auto* backBtn = new QskPushButton(QString::fromUtf8("←"), topBar);
     backBtn->setPreferredSize(44, 44);
-    auto* title = new QskTextLabel("About", topBar);
+    auto* title = new QskTextLabel(trKey("about.title"), topBar);
     title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
     title->setAlignment(Qt::AlignCenter);
 
@@ -56,36 +65,36 @@ void AboutPage::onCreate(const QVariantMap&, const QVariantMap&)
     };
 
     // ── Section: App ──
-    addSection("App");
-    addRow("Name", "qskvotube");
-    addRow("Version", QString(APP_VERSION_NAME " (%1)").arg(APP_VERSION_CODE));
-    addRow("Qt", QT_VERSION_STR);
-    addRow("RHI", QQuickWindow::sceneGraphBackend());
+    addSection(trKey("about.app"));
+    addRow(trKey("about.name"), "qskvotube");
+    addRow(trKey("about.version"), QString(APP_VERSION_NAME " (%1)").arg(APP_VERSION_CODE));
+    addRow(trKey("about.qt"), QT_VERSION_STR);
+    addRow(trKey("about.rhi"), QQuickWindow::sceneGraphBackend());
 #ifdef Q_PROCESSOR_ARM_V8
-    addRow("Arch", "arm64-v8a");
+    addRow(trKey("about.arch"), "arm64-v8a");
 #else
-    addRow("Arch", "unknown");
+    addRow(trKey("about.arch"), "unknown");
 #endif
 
     // ── Section: Device ──
-    addSection("Device");
+    addSection(trKey("about.device"));
 
     auto* screen = QGuiApplication::primaryScreen();
     QString screenInfo = QString("%1x%2 @%3x")
         .arg(screen->size().width()).arg(screen->size().height())
         .arg(screen->devicePixelRatio(), 0, 'f', 2);
 
-    addRow("Brand", QSysInfo::productType());
-    addRow("Model", QSysInfo::prettyProductName());
+    addRow(trKey("about.brand"), QSysInfo::productType());
+    addRow(trKey("about.model"), QSysInfo::prettyProductName());
 #if defined(QT_ANDROID_EXAMPLES) || defined(Q_OS_ANDROID)
-    addRow("Android", QString("%1 (API %2)")
+    addRow(trKey("about.android"), QString("%1 (API %2)")
         .arg(QSysInfo::productVersion())
         .arg(QSysInfo::buildAbi().split('-').first().toInt()));
 #endif
-    addRow("Screen", screenInfo);
-    addRow("DPI", QString::number(screen->logicalDotsPerInch(), 'f', 0));
-    addRow("DPR", QString::number(screen->devicePixelRatio(), 'f', 2));
-    addRow("Kernel", QSysInfo::kernelType() + " " + QSysInfo::kernelVersion());
+    addRow(trKey("about.screen"), screenInfo);
+    addRow(trKey("about.dpi"), QString::number(screen->logicalDotsPerInch(), 'f', 0));
+    addRow(trKey("about.dpr"), QString::number(screen->devicePixelRatio(), 'f', 2));
+    addRow(trKey("about.kernel"), QSysInfo::kernelType() + " " + QSysInfo::kernelVersion());
 
     layout->addStretch(1);
 }

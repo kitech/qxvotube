@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(qskvotube
     VERSION 0.1.0
-    LANGUAGES CXX)
+    LANGUAGES C CXX)      # C:qlcomp/cJSON.c(Translator JSON 后端)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,8 +20,11 @@ if(DEFINED ENV{QSKINNY_CMAKE})
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Quick Widgets Network Multimedia OpenGL OpenGLWidgets)
-# GL 走导入目标(Linux→libGL / macOS→OpenGL.framework),不写死 -lGL
-find_package(OpenGL REQUIRED)
+# GL 走导入目标(Linux→libGL / macOS→OpenGL.framework),不写死 -lGL;
+# Android 无桌面 GL(EGL/GLES 由 Qt 平台插件带),跳过 find_package
+if(NOT ANDROID)
+    find_package(OpenGL REQUIRED)
+endif()
 set(QT_LIBS Qt6::Quick Qt6::Widgets Qt6::Network Qt6::Multimedia Qt6::OpenGL)
 
 # M5-B:cxvideo(ffmpeg+mpv 双内核 + Quick 渲染器;cxvideo.cmake 提供 CXV_*)
@@ -97,6 +100,8 @@ qt_add_executable(qskvotube
     src/uistyle.cpp
     src/useravatar.cpp
     ../qlcomp/identicon.cpp
+    ../qlcomp/translator.cpp
+    ../qlcomp/cJSON.c
     ${QSKCOMP_SOURCES}
     ${CXV_SOURCES}
     ${CXV_EXTRA}
@@ -139,7 +144,9 @@ target_compile_definitions(qskvotube PRIVATE
 )
 # 音频输出后端(桌面 pkg-config 探测;ANDROID 跳过——宿主 pkg-config
 # 会探到 x86-64 库污染交叉链接;Android 走 CX_FF_AO=silent 兜底)
-if(NOT ANDROID)
+# macOS 同理跳过:pkg-config 可能残存 .pc 但无 dylib(-lpulse-simple 必失败),
+# 且 mac 无 PulseAudio/ALSA 生态 → CX_FF_AO silent 兜底
+if(UNIX AND NOT APPLE AND NOT ANDROID)
 pkg_check_modules(CXV_PULSE libpulse-simple)
 if(CXV_PULSE_FOUND)
     target_compile_definitions(qskvotube PRIVATE WITH_CX_FF_AO_PULSE)
@@ -158,4 +165,4 @@ if(CXV_SDL_FOUND)
     target_include_directories(qskvotube PRIVATE ${CXV_SDL_INCLUDE_DIRS})
     target_link_libraries(qskvotube PRIVATE ${CXV_SDL_LIBRARIES})
 endif()
-endif() # NOT ANDROID
+endif() # Linux only(APPLE/ANDROID 走 silent)
