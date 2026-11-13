@@ -115,8 +115,10 @@ int main(int argc, char* argv[])
             app.applicationDirPath() + "/lang");
         Translator::instance().addTranslationPath("lang");
 #endif
+        // 无 "lang" 键 = 跟随系统(qskmusic 语义);缺省按 QLocale 判定
+        const QString langKey = QSettings().value("lang").toString();
         Translator::instance().loadLanguage(
-            QSettings().value("lang", "zh-CN").toString());
+            langKey.isEmpty() ? SettingsPage::cxDefaultLang() : langKey);
     }
 
     for (const auto& a : app.arguments()) {
@@ -194,21 +196,18 @@ int main(int argc, char* argv[])
     auto* stackBox = new QskStackBox(rootBox);
     stackBox->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
     stackBox->setAnimator(new QskStackBoxAnimator4(stackBox));
-    auto* pageManager = new PageManager(stackBox);
 
-    // 持久化的切换动画(与设置页同键)
+    /* 恢复转场选择（anystik 同口径：0=Slide 1=2D 2=3D 3=Perspective） */
     {
-        const int idx = QSettings().value("transition", 3).toInt();
+        const int t = QSettings().value("transition", 3).toInt();
         QskStackBoxAnimator* a = nullptr;
-        switch (idx) {
-            case 0: a = new QskStackBoxAnimator1(stackBox); break;
-            case 1: a = new QskStackBoxAnimator2(stackBox); break;
-            case 2: a = new QskStackBoxAnimator3(stackBox); break;
-            default: break;   // 3 = 默认 Perspective,已设置
-        }
-        if (a != nullptr)
-            stackBox->setAnimator(a);
+        if (t == 0) a = new QskStackBoxAnimator1(stackBox);
+        else if (t == 1) a = new QskStackBoxAnimator2(stackBox);
+        else if (t == 2) a = new QskStackBoxAnimator3(stackBox);
+        if (a) stackBox->setAnimator(a);
     }
+
+    auto* pageManager = new PageManager(stackBox);
 
     pageManager->registerPage("main", []() -> Page* {
         return new MainPage();

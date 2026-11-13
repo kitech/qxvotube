@@ -23,8 +23,12 @@ void CXQuickVideoItem::showFrame(const CXVideoFrame* f)
         img = cxEqApplyRgb(img, lut, cxEqSatPermil(m_eq)); // 与软渲/GL 同源
     }
     m_pendingImg = img;
-    m_lastImg = img;
-    update(); // 渲染线程侧 updatePaintNode
+    m_lastImg = img;   // 截图用(隐藏时也保留最后一帧)
+    // 页面被 StackBox 隐藏(如打开设置页)时不再驱动场景图更新:
+    // 隐藏窗口上 createTextureFromImage 可能返回 null,每帧刷
+    // "No QSGTexture provided from updateSampledImage(). This is wrong."
+    if (isVisible())
+        update();
 }
 
 void CXQuickVideoItem::setViewport(const QRect& r) { m_viewport = r; }
@@ -52,7 +56,12 @@ QSGNode* CXQuickVideoItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
         node->setRect(QRect((r.width() - int(img.width() * sc)) / 2,
                             (r.height() - int(img.height() * sc)) / 2,
                             int(img.width() * sc), int(img.height() * sc)));
-        node->setTexture(window()->createTextureFromImage(img));
+        // createTextureFromImage 可能返回 null(隐藏/未暴露窗口、上下文丢失):
+        // 不能 setTexture(null),否则渲染期刷 "No QSGTexture provided..."
+        QSGTexture* tex = window() != 0
+            ? window()->createTextureFromImage(img) : 0;
+        if (tex != 0)
+            node->setTexture(tex);
     }
     return node;
 }

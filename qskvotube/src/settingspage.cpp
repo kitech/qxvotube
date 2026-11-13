@@ -3,6 +3,10 @@
 #include <QSettings>
 #include <QLocale>
 
+// 注意:QskComboBox::addOption(iconSource, text) —— 不是 (text, value);
+// 选项值一律用索引,文本必须走 QskLabelData 重载
+// (qxmusic 72c2c12「fix setting combo invalid item values」踩过)
+
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
@@ -27,10 +31,12 @@ namespace {
 const int kFontScales[] = { 12, 16, 20, 24 };
 
 // 语言下拉:code / 显示名 key
-const char* const kLangCodes[] = { "zh-CN", "zh-TW", "en-US" };
-const char* const kLangKeys[]  = { "lang.zh_CN", "lang.zh_TW", "lang.en_US" };
+// 显示顺序与 qxmusic 一致:0=跟随系统 1=English 2=简体中文 3=繁體中文;
+// 选项值只用索引,绝不把 code 放进列表(Qt i18n 规范)
+const char* const kLangCodes[] = { "en-US", "zh-CN", "zh-TW" };
+const char* const kLangKeys[]  = { "lang.en_US", "lang.zh_CN", "lang.zh_TW" };
 
-QString tr(const char* key)
+QString trKey(const char* key)
 {
     return Translator::instance().t(QString::fromLatin1(key));
 }
@@ -68,13 +74,19 @@ void SettingsPage::retranslate()
 {
     for (const TrItem& it : m_tr) {
         if (it.label != nullptr)
-            it.label->setText(tr(it.key));
+            it.label->setText(trKey(it.key));
     }
     if (m_langCombo != nullptr) {
+        // 0 = 跟随系统(qskmusic 同款)
         QVector<QskLabelData> opts;
+        opts.append(QskLabelData(trKey("settings.lang_system")));
         for (int i = 0; i < 3; ++i)
-            opts.append(QskLabelData(tr(kLangKeys[i])));
+            opts.append(QskLabelData(trKey(kLangKeys[i])));
+        const int cur = m_langCombo->currentIndex();
+        m_langCombo->blockSignals(true);
         m_langCombo->setOptions(opts);
+        m_langCombo->setCurrentIndex(cur);
+        m_langCombo->blockSignals(false);
     }
 }
 
@@ -90,7 +102,7 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     topBar->setPreferredHeight(56);
     auto* backBtn = new QskPushButton(QString::fromUtf8("←"), topBar);
     backBtn->setPreferredSize(44, 44);
-    auto* title = new QskTextLabel(tr("settings.title"), topBar);
+    auto* title = new QskTextLabel(trKey("settings.title"), topBar);
     title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
     title->setAlignment(Qt::AlignCenter);
     m_tr.push_back({ title, "settings.title" });
@@ -99,7 +111,7 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     layout->addSpacer(16, 0);
 
     auto addLabel = [this](QskLinearBox* row, const char* key) {
-        auto* l = new QskTextLabel(tr(key), row);
+        auto* l = new QskTextLabel(trKey(key), row);
         l->setPreferredWidth(160);
         m_tr.push_back({ l, key });
         return l;
@@ -111,10 +123,11 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     addLabel(row1, "settings.transition");
     m_transitionCombo = new QskComboBox(row1);
     m_transitionCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
-    m_transitionCombo->addOption(QskLabelData("Slide"));
-    m_transitionCombo->addOption(QskLabelData("2D"));
-    m_transitionCombo->addOption(QskLabelData("3D"));
-    m_transitionCombo->addOption(QskLabelData("Perspective"));
+    /* 与 anystik/QskStackBoxAnimator1..4 一一对应（默认 3=Perspective=Animator4） */
+    const QStringList transitions{ trKey("Slide"), trKey("2D"),
+                                   trKey("3D"), trKey("Perspective") };
+    for (const QString& s : transitions)
+        m_transitionCombo->addOption(QskLabelData(s));
     m_transitionCombo->setCurrentIndex(3);
 
     new QskSeparator(Qt::Horizontal, layout);
@@ -148,10 +161,10 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     addLabel(row4, "settings.font_size");
     m_fontScaleCombo = new QskComboBox(row4);
     m_fontScaleCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
-    m_fontScaleCombo->addOption(QskLabelData(tr("settings.size_s")));
-    m_fontScaleCombo->addOption(QskLabelData(tr("settings.size_m")));
-    m_fontScaleCombo->addOption(QskLabelData(tr("settings.size_l")));
-    m_fontScaleCombo->addOption(QskLabelData(tr("settings.size_xl")));
+    m_fontScaleCombo->addOption(QskLabelData(trKey("settings.size_s")));
+    m_fontScaleCombo->addOption(QskLabelData(trKey("settings.size_m")));
+    m_fontScaleCombo->addOption(QskLabelData(trKey("settings.size_l")));
+    m_fontScaleCombo->addOption(QskLabelData(trKey("settings.size_xl")));
 
     new QskSeparator(Qt::Horizontal, layout);
 
@@ -172,8 +185,10 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     addLabel(row6, "settings.language");
     m_langCombo = new QskComboBox(row6);
     m_langCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
+    // 0 = 跟随系统;1..3 = English / 简体中文 / 繁體中文(qxmusic 同款语义)
+    m_langCombo->addOption(QskLabelData(trKey("settings.lang_system")));
     for (int i = 0; i < 3; ++i)
-        m_langCombo->addOption(QskLabelData(tr(kLangKeys[i])));
+        m_langCombo->addOption(QskLabelData(trKey(kLangKeys[i])));
 
     new QskSeparator(Qt::Horizontal, layout);
 
@@ -198,21 +213,20 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
         s.value("engine", "ffmpeg").toString() == QLatin1String("mpv") ? 1 : 0);
     m_debugBgSwitch->setChecked(s.value("debugBackground", false).toBool());
 
-    const QString savedLang = s.value("lang", cxDefaultLang()).toString();
+    // 语言:QSettings 无 "lang" 键 = 跟随系统(qskmusic 语义)
+    const QString savedLang = s.value("lang").toString();
     int langIdx = 0;
     for (int i = 0; i < 3; ++i)
         if (savedLang == QLatin1String(kLangCodes[i]))
-            langIdx = i;
+            langIdx = i + 1;   // 0 = 跟随系统
     m_langCombo->setCurrentIndex(langIdx);
 
-    schemeVal->setText(m_darkSwitch->isChecked() ? tr("settings.dark")
-                                                 : tr("settings.light"));
+    schemeVal->setText(m_darkSwitch->isChecked() ? trKey("settings.dark")
+                                                 : trKey("settings.light"));
     if (m_debugBgSwitch->isChecked())
         QskSetup::setUpdateFlag(QskItem::DebugForceBackground, true);
 
-    // 首次写入缺省值(便于其它模块读到同一口径)
-    if (!s.contains("lang"))
-        s.setValue("lang", kLangCodes[langIdx]);
+    // 首次写入字号缺省值;lang 不写(缺键即"跟随系统")
     if (!s.contains("fontScale"))
         s.setValue("fontScale", m_fontScaleCombo->currentIndex());
 
@@ -222,43 +236,28 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
             retranslate();
             // 字号 4 档选项与明暗值也随语言刷新
             QVector<QskLabelData> sizeOpts;
-            sizeOpts.append(QskLabelData(tr("settings.size_s")));
-            sizeOpts.append(QskLabelData(tr("settings.size_m")));
-            sizeOpts.append(QskLabelData(tr("settings.size_l")));
-            sizeOpts.append(QskLabelData(tr("settings.size_xl")));
+            sizeOpts.append(QskLabelData(trKey("settings.size_s")));
+            sizeOpts.append(QskLabelData(trKey("settings.size_m")));
+            sizeOpts.append(QskLabelData(trKey("settings.size_l")));
+            sizeOpts.append(QskLabelData(trKey("settings.size_xl")));
             const int cur = m_fontScaleCombo->currentIndex();
             m_fontScaleCombo->blockSignals(true);
             m_fontScaleCombo->setOptions(sizeOpts);
             m_fontScaleCombo->setCurrentIndex(cur);
             m_fontScaleCombo->blockSignals(false);
             schemeVal->setText(m_darkSwitch->isChecked()
-                               ? tr("settings.dark") : tr("settings.light"));
+                               ? trKey("settings.dark") : trKey("settings.light"));
         });
 
     if (m_signalsConnected)
         return;
     m_signalsConnected = true;
 
-    // ── 切动画:同类型不重建(qsktox 同款去重)──
-    connect(m_transitionCombo, &QskComboBox::currentIndexChanged,
-        this, [this](int index) {
-            if (index == m_currentAnimatorIdx)
-                return;
-            m_currentAnimatorIdx = index;
-            QSettings().setValue("transition", index);
-            auto* sb = pageManager() ? pageManager()->stackBox() : nullptr;
-            if (!sb)
-                return;
-            QskStackBoxAnimator* a = nullptr;
-            switch (index) {
-                case 0: a = new QskStackBoxAnimator1(sb); break;
-                case 1: a = new QskStackBoxAnimator2(sb); break;
-                case 2: a = new QskStackBoxAnimator3(sb); break;
-                default: a = new QskStackBoxAnimator4(sb); break;
-            }
-            if (a)
-                sb->setAnimator(a);
-        });
+    // ── 切动画:即时应用(不必重启)──
+    connect(m_transitionCombo, &QskComboBox::currentIndexChanged, this, [this](int idx) {
+        QSettings().setValue("transition", idx);
+        applyTransition(idx);
+    });
 
     connect(m_skinCombo, &QskComboBox::currentIndexChanged,
         this, [](int index) {
@@ -272,8 +271,8 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
 
     connect(m_darkSwitch, &QskAbstractButton::toggled,
         this, [schemeVal](bool checked) {
-            schemeVal->setText(checked ? tr("settings.dark")
-                                       : tr("settings.light"));
+            schemeVal->setText(checked ? trKey("settings.dark")
+                                       : trKey("settings.light"));
             cxSetDarkMode(checked);   // 持久化 + 应用(统一入口)
         });
 
@@ -293,9 +292,15 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
 
     connect(m_langCombo, &QskComboBox::currentIndexChanged,
         this, [](int idx) {
-            if (idx < 0 || idx > 2)
+            if (idx == 0) {                      // 跟随系统
+                QSettings().remove("lang");      // 键消失 = 跟随系统
+                Translator::instance().loadLanguage(
+                    SettingsPage::cxDefaultLang());
                 return;
-            const QString code = QString::fromLatin1(kLangCodes[idx]);
+            }
+            if (idx > 3)
+                return;
+            const QString code = QString::fromLatin1(kLangCodes[idx - 1]);
             QSettings().setValue("lang", code);
             Translator::instance().loadLanguage(code);   // → languageChanged
         });
@@ -305,4 +310,32 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
             QSettings().setValue("debugBackground", checked);
             QskSetup::setUpdateFlag(QskItem::DebugForceBackground, checked);
         });
+
+    /* 防御:combo 选项里出现形如 "xxx.yyy" 的未翻译 key → 告警(不下发到界面文案)
+     * (qxmusic 同款 i18n 守卫,便于 logcat 一眼发现配置遗漏) */
+    for (QskComboBox* combo : { m_skinCombo, m_transitionCombo, m_langCombo }) {
+        if (combo == nullptr)
+            continue;
+        for (int i = 0; i < combo->options().size(); ++i) {
+            const QString t = combo->optionAt(i).text();
+            if (t.contains(QLatin1Char('.')) && !t.contains(QLatin1Char(' ')))
+                qWarning("[SETTINGS] untranslated key in combo: %s",
+                         t.toUtf8().constData());
+        }
+    }
+}
+
+void SettingsPage::applyTransition(int idx)
+{
+    auto* pm = pageManager();
+    QskStackBox* box = pm ? pm->stackBox() : nullptr;
+    if (!box) return;
+    QskStackBoxAnimator* a = nullptr;
+    switch (idx) {
+    case 0: a = new QskStackBoxAnimator1(box); break;
+    case 1: a = new QskStackBoxAnimator2(box); break;
+    case 2: a = new QskStackBoxAnimator3(box); break;
+    default: a = new QskStackBoxAnimator4(box); break;   // Perspective
+    }
+    box->setAnimator(a);
 }

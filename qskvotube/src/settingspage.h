@@ -29,6 +29,7 @@ private:
     struct TrItem { QskTextLabel* label; const char* key; };
 
     void retranslate();
+    void applyTransition(int idx);   // 切转场动画(即时生效,不必重启)
 
     QskComboBox* m_transitionCombo = nullptr;
     QskComboBox* m_skinCombo = nullptr;
