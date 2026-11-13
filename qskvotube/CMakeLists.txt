@@ -11,17 +11,17 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-# QSkinny 安装位置可通过 QSKINNY_CMAKE 覆盖
-#   缺省: /opt/qt/qskinny/lib/cmake(master 预编译;与 anystik 同法:
-#         qt-cmake 6.7.3 构建,运行期 LD_LIBRARY_PATH 前置 6.7.3)
-#   例:   QSKINNY_CMAKE=/opt/qt/qskinny.6.7/lib/cmake ./buildqt6.sh
+# QSkinny 位置由调用方指定(qskmusic 同法,CMakeLists 不写死路径):
+#   buildqt6.sh   → -DCMAKE_PREFIX_PATH="<Qt cmake>;<qskinny cmake>"
+#   build-android.sh → -DQSkinny_DIR=<qskinny-arm64>/lib/cmake/QSkinny
+# 也可用环境变量 QSKINNY_CMAKE=<dir> 追加
 if(DEFINED ENV{QSKINNY_CMAKE})
     list(APPEND CMAKE_PREFIX_PATH "$ENV{QSKINNY_CMAKE}")
-else()
-    list(APPEND CMAKE_PREFIX_PATH "/opt/qt/qskinny/lib/cmake")
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Quick Widgets Network Multimedia OpenGL OpenGLWidgets)
+# GL 走导入目标(Linux→libGL / macOS→OpenGL.framework),不写死 -lGL
+find_package(OpenGL REQUIRED)
 set(QT_LIBS Qt6::Quick Qt6::Widgets Qt6::Network Qt6::Multimedia Qt6::OpenGL)
 
 # M5-B:cxvideo(ffmpeg+mpv 双内核 + Quick 渲染器;cxvideo.cmake 提供 CXV_*)
@@ -104,29 +104,25 @@ qt_add_executable(qskvotube
 
 target_include_directories(qskvotube PRIVATE
     src
-    /opt/qt/6.7.3/gcc_64/include/QtOpenGLWidgets
-    /opt/qt/6.7.3/gcc_64/include/QtOpenGL
     ${QSKCOMP_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp
     ${CXV_INCLUDE_DIRS}
-    ${Qt6Core_PRIVATE_INCLUDE_DIRS}
-    ${Qt6Quick_PRIVATE_INCLUDE_DIRS}
-    ${Qt6Qml_PRIVATE_INCLUDE_DIRS}
 )
 
 target_link_libraries(qskvotube PRIVATE
     ${QT_LIBS}
     Qsk::QSkinny
     Qt6::OpenGLWidgets
+    Qt6::QuickPrivate     # qquicktaphandler_p.h 等私有头(qskmusic 同法,不写死 include 路径)
 )
 if(ANDROID)
     target_link_libraries(qskvotube PRIVATE CXV_FFMPEG_PREBUILT)
 else()
+    # GL 走 find_package(OpenGL) 的导入目标:Linux→libGL,macOS→OpenGL.framework,
+    # 不再手写 -lGL / -L/-rpath /opt/qt 路径(qskmusic 同法)
     target_link_libraries(qskvotube PRIVATE
         PkgConfig::CXV_FFMPEG
-        -Wl,-rpath,/opt/qt/6.7.3/gcc_64/lib
-        -L/opt/qt/6.7.3/gcc_64/lib # 未版本化 -lQt6* 须先命中 6.7.3(anystik 同法)
-        GL
+        OpenGL::GL
         ${CMAKE_DL_LIBS}   # eng_mpv dlopen libmpv
     )
 endif()
