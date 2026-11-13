@@ -44,6 +44,12 @@
 #include <qfiledialog.h>
 #include <qfileinfo.h>
 #include <qurl.h>
+#ifdef QT3_BUILD
+#include <qdragobject.h>   /* QUriDrag:Qt3 拖放 MIME 解码 */
+#include <qstrlist.h>
+#else
+#include <QMimeData>       /* dragEnter/dropEvent 的 mimeData() 完整类型 */
+#endif
 
 #include <cstdlib>
 #include <fstream>
@@ -1317,6 +1323,11 @@ void MainWindow::onDemoApiRequest()
  * argv 模式未启用时以拖入集合启用之;复用 playArgvAt(回绕/播完停)。 */
 void MainWindow::dragEnterEvent(QDragEnterEvent* e)
 {
+#ifdef QT3_BUILD
+    /* Qt3.2 无 mimeData/acceptProposedAction:走 QUriDrag(qdragobject.h) */
+    if (QUriDrag::canDecode(e))
+        e->accept();
+#else
     const QList<QUrl> urls = e->mimeData()->urls();
     for (int i = 0; i < urls.size(); i++) {
         if (urls[i].isLocalFile()) {
@@ -1324,24 +1335,47 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* e)
             return;
         }
     }
+#endif
 }
 
 void MainWindow::dropEvent(QDropEvent* e)
 {
     QStringList files;
+#ifdef QT3_BUILD
+    QStrList uris;
+    if (QUriDrag::decode(e, uris)) {
+        /* Qt3 QStrList 迭代经典式( iterator 无 const char* 隐式转换) */
+        QStrListIterator it(uris);
+        for (const char* u = it.toFirst(); u != 0; u = it.current(), ++it) {
+            const char* lf = QUriDrag::uriToLocalFile(u);
+            if (lf != 0) {
+                const QString f = QString::fromLocal8Bit(lf);
+                if (!f.isEmpty() && QFile::exists(f))
+                    files.append(f);   /* Qt3 QStringList 无 <<(QStringList) */
+            }
+        }
+    }
+#else
     const QList<QUrl> urls = e->mimeData()->urls();
     for (int i = 0; i < urls.size(); i++) {
         const QString f = urls[i].toLocalFile();
         if (!f.isEmpty() && QFile::exists(f))
             files << f;
     }
+#endif
     if (files.isEmpty())
         return;
-    const int base = m_argvUrls.size();
-    m_argvUrls << files;
+    /* Qt3 QStringList 无 <<(QStringList);逐个 append 两版通用 */
+    for (int i = 0; i < files.size(); ++i)
+        m_argvUrls.append(files[i]);
+    const int base = m_argvUrls.size() - files.size();
     m_curPlaylistId = -1;
     playArgvAt(base);   /* 从首个新文件起播 */
+#ifdef QT3_BUILD
+    e->accept();
+#else
     e->acceptProposedAction();
+#endif
 }
 
 void MainWindow::customEvent(CustomEventBase* event)

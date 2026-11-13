@@ -4,6 +4,22 @@
 #   - 无 libncm/go extras/i18n lrelease/version_config 段(qskvotube 不用)
 #   - ffmpeg 改为 arm64 预编译库 fail-fast(eng_ffmpeg 链接依赖;
 #     libmpv 为 dlopen 运行期加载,缺失只影响 mpv 引擎可用性)
+#
+# ── ffmpeg arm64 预编译库(vendor/android-ffmpeg/arm64-v8a)──
+# 来源:husen-hn/ffmpeg-android-binary 的 release tag **v2.0.0**,
+#      该 tag 内含的是 **FFmpeg 7.1**(libavformat 61.7.100,非仓库版本号);
+#      NDK r26b 构建,min API 21,aarch64,SO 无版本后缀(Android 友好)。
+#      头文件取自 ffmpeg.org 的 ffmpeg-7.1.tar.bz2(与 so 同版本)。
+# 重取方法(慢/失败时加 https://gh-proxy.com/ 前缀):
+#   curl -L "https://gh-proxy.com/https://github.com/husen-hn/ffmpeg-android-binary/releases/download/v2.0.0/arm64-v8a.zip"
+#   解包 zip 内 arm64-v8a/lib/*.so → vendor/android-ffmpeg/arm64-v8a/lib/
+#   tar -xjf ffmpeg-7.1.tar.bz2 后拷 libav*/libsw*/*.h → include/<lib名>/
+# 详见 vendor/vendorinfos.md。
+#
+# ── libmpv arm64(vendor/android-libmpv/libmpv.so)──
+# 来源:media-kit/libmpv-android-video-build release tag v1.1.11
+# (asset default-arm64-v8a.jar 解出);自包含(NEDED 仅系统库,ffmpeg 内嵌),
+# eng_mpv dlopen 即用。重取命令见 vendor/vendorinfos.md。
 set -e
 export JAVA_HOME=/opt/jdk-17.0.13+11
 export ANDROID_SDK_ROOT=/opt/android-sdk
@@ -26,8 +42,10 @@ BUILD_DIR=build-android
 # CMake 端经 env 读同一路径建 IMPORTED 目标。
 FFDIR=${CXV_FFMPEG_ARM64_DIR:-$(cd .. && pwd)/vendor/android-ffmpeg/arm64-v8a}
 for L in libavformat libavcodec libavutil libswscale libswresample; do
-    if ! ls "$FFDIR/lib/lib${L}.so" >/dev/null 2>&1; then
+    # L 已含 lib 前缀(如 libavformat),勿再拼 lib,否则查成 liblibavformat.so
+    if ! ls "$FFDIR/lib/${L}.so" >/dev/null 2>&1; then
         echo "FATAL: ffmpeg arm64 预编译缺 $L: $FFDIR/lib/" >&2
+        ls -la "$FFDIR/lib/" 2>&1 | head -10 >&2   # 失败时打出实况,便于定位
         echo "  备好后重跑,或 CXV_FFMPEG_ARM64_DIR=<dir> 指向它" >&2
         exit 1
     fi
@@ -83,7 +101,7 @@ mkdir -p "$APK_DIR/res/drawable"
 if [ -f app_icon.png ]; then
     cp app_icon.png "$APK_DIR/res/drawable/ic_launcher.png"
 else
-    cp ../qxmusic/qskmusic/app_icon.png "$APK_DIR/res/drawable/ic_launcher.png"
+    cp ../../qxmusic/qskmusic/app_icon.png "$APK_DIR/res/drawable/ic_launcher.png"
 fi
 
 # 覆盖 manifest(qskmusic 同:Qt 模板缺 lib_name/icon)

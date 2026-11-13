@@ -304,6 +304,12 @@ while(!stop):
   2. **mute 按钮**:🔇/🔊 切换 `player->setMute`(状态按文本显示)。
   3. **皮肤热切**:🎨 循环 Fusion→Material3→Fluent2(精确名!),切换后重设主题(applySkinTheme:LightScheme+字体 role);QskSkinManager 换 skin 后旧字体 hint 不继承,必须重设。
   4. 验证:双引擎 qa_run ALL PASS;GUI 实点截图确认热切生效/mute 状态/连播/播完停。
+- **Android 构建支撑(2026-11-13)**:
+  1. `qskvotube/build-android.sh` 自 qxmusic/qskmusic 移植(qt-cmake + androiddeployqt aux-mode + gradle assembleDebug 同流程;裁掉 libncm/go/i18n 段)。
+  2. ffmpeg arm64 预编译库入库 `vendor/android-ffmpeg/arm64-v8a`——来源 husen-hn/ffmpeg-android-binary
+     **release tag v2.0.0,内含 FFmpeg 7.1**(tag 号≠FFmpeg 版本,勿混淆);NDK r26b/min API 21/aarch64/SONAME 无版本后缀;头文件取自 ffmpeg-7.1.tar.bz2。选型与 sha256 详见 `vendor/vendorinfos.md`;重取走 gh-proxy 前缀。CMake ANDROID 分支以 `$ENV{CXV_FFMPEG_ARM64_DIR}`(缺省该 vendor 目录)IMPORTED 链接,桌面构建不受影响(仍 pkg-config)。
+  3. libmpv arm64 可选(`CXV_MPV_ARM64_SO`)——已入库 `vendor/android-libmpv/libmpv.so`
+     (media-kit/libmpv-android-video-build **v1.1.11**,自包含/NEDED 仅系统库;详见 vendorinfos.md),APK 内 mpv 引擎可用。
 
 ## 8. Qt3 兼容层(逐条)
 
