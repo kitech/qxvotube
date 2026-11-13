@@ -310,6 +310,31 @@ while(!stop):
      **release tag v2.0.0,内含 FFmpeg 7.1**(tag 号≠FFmpeg 版本,勿混淆);NDK r26b/min API 21/aarch64/SONAME 无版本后缀;头文件取自 ffmpeg-7.1.tar.bz2。选型与 sha256 详见 `vendor/vendorinfos.md`;重取走 gh-proxy 前缀。CMake ANDROID 分支以 `$ENV{CXV_FFMPEG_ARM64_DIR}`(缺省该 vendor 目录)IMPORTED 链接,桌面构建不受影响(仍 pkg-config)。
   3. libmpv arm64 可选(`CXV_MPV_ARM64_SO`)——已入库 `vendor/android-libmpv/libmpv.so`
      (media-kit/libmpv-android-video-build **v1.1.11**,自包含/NEDED 仅系统库;详见 vendorinfos.md),APK 内 mpv 引擎可用。
+- **二期第二批(2026-11-13)**:
+  1. **Qt4 构建支持**:cxvideo 渲染器 guard 原只判 `QT3_BUILD`,Qt4(qlvotube.pro 仅 Qt3 定义)
+     落入 Qt5+ 的 QOpenGLWidget 分支 → `QOpenGLWidget` 头缺失。改为 `CXV_LEGACY_GL`
+     (`QT3_BUILD || QT_VERSION < 5.0.0`),`renderer_gl.{h,cpp}`/`renderer_mpvgl.{h,cpp}`
+     全部 guard 换新宏;Qt3 独有 QImage API(`convertDepth`/`swapRGB`)单独按 `QT3_BUILD` 分;
+     `eng_mpv.cpp` Quick 挂载改 `CXV_QUICK_BUILD`(仅 Qt6+,renderer_qmpv 只在 Qt6 入 SOURCES,
+     否则 Qt4 链接期 `cxMpvQuickUpdateHook` 未定义);`cxvideo.pri` 增 Qt4 `QT += opengl`。
+     验证:`buildqt4.sh` 绿(q4votube),`buildqt3.sh`/`buildqt6.sh` 回归双绿。
+  2. **qlvotube 同步四项**:mute 按钮、argv 多文件导入(优先 AUTOPLAY)、⏮ 到头回绕、
+     QLVOTUBE_QA 六步自检;拖放 Qt3 走 `QUriDrag` 条件编译。验证:双构建绿 + QA 六步全过 +
+     GUI 实点(argv 连播 s3→long、mute 图标切换)。
+  3. **qskvotube 二批**:拖拽导入(CxDropHook eventFilter 截获 QQuickWindow DragEnter/Drop,
+     无私有头;**GUI 拖放实点未完成,运行期行为待人工验证**)、“字”外挂字幕
+     (QFileDialog→setSubtitleFile)、EQ 五档预设循环(默认/提亮/高对比/高饱和/暖色)。
+     验证:桌面构建绿;`qa_run.sh` 双引擎六步(ffmpeg 6/6;mpv 复跑 6/6,首轮 shot 偶发 0
+     属渲染竞态,重跑即过)。
+  4. **候选项**:
+     - 播放列表持久化(仅 argv 列表):qskvotube `QSettings("qlvotube","qskvotube")` 存
+       `playlist`/`plIdx`,启动 argv 为空且无 AUTOPLAY 时恢复(失效文件剔除);
+       qlvotube 用 `Config` 存 `argv_playlist`(换行连接)/`argv_idx`,同条件恢复。
+     - 截图目录 `QLVOTUBE_SHOT_DIR`(两版 `cxShotDir()`;缺省缓存目录,自动 mkpath,
+       顺带修 qlvotube onTakeScreenshot 原不建目录)。
+     - EQ 完整对话框**不做**(Widgets 系 CXVideoEqDialog 移入共享层成本>收益,五档预设已覆盖)。
+  5. 环境限制记录:本机桌面被占用时不宜弹窗做 GUI 合成点击验收(截图存在局部重绘黑块假象,
+     且 X 合成帧可能滞后);功能验证优先 QA 钩子 + 人工实点。
 
 ## 8. Qt3 兼容层(逐条)
 

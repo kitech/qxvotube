@@ -7,7 +7,7 @@
 
 static inline float cxMinF(float a, float b) { return a < b ? a : b; }
 
-#ifndef QT3_BUILD
+#if !CXV_LEGACY_GL
 #include <QSurfaceFormat>
 // Qt6 core profile:GLSL 150(in/out/texture;Qt 自动拼 #version)
 static const char* kGlVertSrc =
@@ -57,7 +57,7 @@ static void cxHueMatrix(int hue, float* m)
 }
 
 CXRendererGl::CXRendererGl(QWidget* parent)
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     : QGLWidget(parent, 0)
 #else
     : QOpenGLWidget(parent)
@@ -65,7 +65,7 @@ CXRendererGl::CXRendererGl(QWidget* parent)
       , m_tex(0), m_eqOn(false)
 {
     setMinimumSize(320, 180);
-#ifndef QT3_BUILD
+#if !CXV_LEGACY_GL
     // Qt6:显式 core profile(#version 150 shader 的硬前提;默认兼容上下文
     // 会把 shader 当 GLSL 1.10 编译,in/out 直接报错)
     QSurfaceFormat fmt = format();
@@ -75,7 +75,7 @@ CXRendererGl::CXRendererGl(QWidget* parent)
     m_progReady = false;
 #endif
     cxEqBuildLut(m_eq, m_lut);
-#ifndef QT3_BUILD
+#if !CXV_LEGACY_GL
     m_prog = 0;
     m_vbuf = 0;
     m_vao = 0;
@@ -93,13 +93,13 @@ void CXRendererGl::showFrame(const CXVideoFrame* f)
     if (f == 0)
         return;
     // Qt3:CPU LUT 在入侧应用(QGLWidget 无 shader);Qt6:原帧入,shader 时变
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     m_pendingImg = (m_eqOn ? (cxEqApplyRgb(f->img, m_lut,
                                            cxEqSatPermil(m_eq))) : f->img);
 #else
     m_pendingImg = f->img;
 #endif
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     updateGL();
 #else
     update();
@@ -116,7 +116,7 @@ void CXRendererGl::setVideoEq(const CXVideoEq& eq)
     m_eq = eq;
     cxEqBuildLut(m_eq, m_lut);
     m_eqOn = !cxEqNeutral(m_eq);
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     updateGL();
 #else
     update();
@@ -127,7 +127,7 @@ bool CXRendererGl::saveScreenshot(const QString& path)
 {
     if (m_pendingImg.isNull())
         return false;
-#ifndef QT3_BUILD
+#if !CXV_LEGACY_GL
     makeCurrent();
     QImage img = grabFramebuffer(); // QOpenGLWidget 自带回读
     doneCurrent();
@@ -138,7 +138,7 @@ bool CXRendererGl::saveScreenshot(const QString& path)
 }
 
 // ── Qt3:固定管线 ──
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
 
 void CXRendererGl::initializeGL()
 {
@@ -173,11 +173,19 @@ void CXRendererGl::paintFrame()
         return;
     QImage img = m_pendingImg;
     if (img.depth() != 32)
-        img = img.convertDepth(32);
+#if defined(QT3_BUILD)
+        img = img.convertDepth(32); // Qt3(legacy QImage API)
+#else
+        img = img.convertToFormat(QImage::Format_RGB32); // Qt4/Qt5+/Qt6
+#endif
     if (img.width() <= 0 || img.height() <= 0)
         return;
     // QImage RGB32 小端 BGRX → rgbSwapped 转 RGBA 上传(免 GL_BGRA 扩展赌注)
-    img = img.swapRGB();
+#if defined(QT3_BUILD)
+    img = img.swapRGB(); // Qt3
+#else
+    img = img.rgbSwapped(); // Qt4/Qt5+:QImage 换色序
+#endif
     m_lastImg = m_pendingImg;
     glBindTexture(GL_TEXTURE_2D, m_tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);

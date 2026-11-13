@@ -10,7 +10,16 @@
 #include "cxvideo_global.h"
 #include "cxmpv_def.h" // CxMpvOpenglInitParams(cxMpvGlViewInitParams)
 
-#ifdef QT3_BUILD
+#include <qglobal.h> // QT_VERSION(_CHECK)
+// Qt3/Qt4 同走 QGLWidget 固定管线(renderer_gl.h 同款判定)
+#if defined(QT3_BUILD) || \
+    (defined(QT_VERSION) && QT_VERSION < QT_VERSION_CHECK(5, 0, 0))
+#define CXV_LEGACY_GL 1
+#else
+#define CXV_LEGACY_GL 0
+#endif
+
+#if CXV_LEGACY_GL
 #include <qgl.h>
 #else
 #include <QOpenGLWidget>
@@ -19,7 +28,7 @@
 #include <qevent.h>
 
 class CXRendererMpvGl
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     : public QGLWidget {
 #else
     : public QOpenGLWidget {
@@ -37,7 +46,7 @@ protected:
     void resizeGL(int w, int h);
     void paintGL();
 
-#ifndef QT3_BUILD
+#if !CXV_LEGACY_GL
     QOpenGLVertexArrayObject* m_vao; // core profile 下无 VAO 默认即 INVALID_OPERATION
 #endif
     void* m_rc; // mpv_render_context*(engine 注入)

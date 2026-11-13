@@ -43,6 +43,7 @@
 #include <qdatetime.h>
 #include <qfiledialog.h>
 #include <qfileinfo.h>
+#include <qdir.h>
 #include <qurl.h>
 #ifdef QT3_BUILD
 #include <qdragobject.h>   /* QUriDrag:Qt3 拖放 MIME 解码 */
@@ -55,6 +56,22 @@
 #include <fstream>
 
 #include "app_icon.xpm"
+
+// 截图目录:QLVOTUBE_SHOT_DIR 环境变量优先,缺省缓存目录;确保目录存在
+// (qa 自检与 onTakeScreenshot 共用;顺带修后者原不建目录)
+static QString cxShotDir()
+{
+    const char* env = getenv("QLVOTUBE_SHOT_DIR");
+    QString dir = (env != 0 && *env != 0)
+        ? QString::fromLocal8Bit(env)
+        : (qGetHomePath() + "/.cache/qlvotube");
+#ifdef QT3_BUILD
+    QDir d; d.mkdir(dir); /* Qt3 无 mkpath */
+#else
+    QDir().mkpath(dir);
+#endif
+    return dir;
+}
 
 static const char* const kTopMenuKeys[] = {
     "menu.file", "menu.edit", "menu.tool", "menu.help"
@@ -766,8 +783,25 @@ void MainWindow::setAutoplayFiles(const QStringList& files)
 
 void MainWindow::startAutoplayFiles()
 {
-    if (m_argvUrls.isEmpty())
+    if (m_argvUrls.isEmpty()) {
+        /* 候选项 a:无 argv 且未设 AUTOPLAY 时恢复上次 argv 列表 */
+        const char* au = getenv("QLVOTUBE_AUTOPLAY");
+        if (au == 0 || au[0] == 0) {
+            const QStringList saved = qStrSplit(Config::value("argv_playlist"), "\n", true);
+            for (int i = 0; i < saved.size(); ++i) {
+                if (QFile::exists(saved[i]))
+                    m_argvUrls.append(saved[i]);
+            }
+            if (!m_argvUrls.isEmpty()) {
+                int idx = Config::value("argv_idx").toInt();
+                if (idx < 0 || idx >= (int)m_argvUrls.size())
+                    idx = 0;
+                playArgvAt(idx);
+                return;
+            }
+        }
         return;
+    }
     playArgvAt(0);
     startQaTimeline();
 }
@@ -788,6 +822,9 @@ void MainWindow::playArgvAt(int idx)
         return;
     }
     m_argvIdx = idx;
+    /* 候选项 a:argv 播放列表持久化(仅 argv 列表,不做库列表) */
+    Config::setValue("argv_playlist", m_argvUrls.join("\n"));
+    Config::setValue("argv_idx", QString::number(idx));
     Track t;
     t.id = -1;
     t.title = QFileInfo(m_argvUrls[idx]).fileName();
@@ -885,9 +922,10 @@ void MainWindow::onQaStepShot()
         fprintf(stderr, "qa: step=shot ok=0 path=\n");
         return;
     }
-    QString path = qGetHomePath() + "/.cache/qlvotube/qa_" +
+    const QString dir = cxShotDir();
+    QString path = dir + "/qa_" +
                    QString::number((unsigned long long)
-#ifdef QT3_BUILD
+#if defined(QT3_BUILD) || (defined(QT_VERSION) && QT_VERSION < QT_VERSION_CHECK(5, 0, 0))
                        QDateTime::currentDateTime().toTime_t()
 #else
                        QDateTime::currentDateTime().toSecsSinceEpoch()
@@ -1123,8 +1161,8 @@ void MainWindow::onTakeScreenshot()
         SharedStatusBar::instance()->showMessage(qFromUtf8("播放引擎未接入"), 2000);
         return;
     }
-    QString dir = qGetHomePath() + "/.cache/qlvotube";
-#ifdef QT3_BUILD
+    const QString dir = cxShotDir();
+#if defined(QT3_BUILD) || (defined(QT_VERSION) && QT_VERSION < QT_VERSION_CHECK(5, 0, 0))
     unsigned long long stamp = (unsigned long long)QDateTime::currentDateTime().toTime_t();
 #else
     unsigned long long stamp =

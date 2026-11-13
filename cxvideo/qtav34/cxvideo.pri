@@ -97,9 +97,11 @@ FF_DEPS = $$system(pkg-config --libs libavformat libavcodec libswscale libswresa
     !isEmpty(FF_LIBDIR): LIBS += -Wl,-rpath-link,$$FF_LIBDIR
     LIBS += $$FF_DEPS
 
-    # M4-A:GL 渲染路(Qt3 QGLWidget 需 -lGL;Qt6 需 openglwidgets 模块)
+    # M4-A:GL 渲染路(Qt3/Qt4 QGLWidget 需 -lGL + Qt4 opengl 模块;
+    # Qt6 需 openglwidgets 模块)
     LIBS += -lGL
     greaterThan(QT_MAJOR_VERSION, 5): QT += openglwidgets
+    equals(QT_MAJOR_VERSION, 4): QT += opengl
     DEFINES += WITH_CX_RENDERER_GL
     DEFINES += WITH_CX_ENGINE_FFMPEG
 

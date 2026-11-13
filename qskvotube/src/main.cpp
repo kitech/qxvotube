@@ -28,6 +28,7 @@
 #include <QMimeData>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QSettings>
 #include <functional>
 
 #include "cxvideoplayer.h"
@@ -116,6 +117,18 @@ private:
     CXVideoPlayer* m_player;
     QString m_url;
 };
+
+// 截图目录:QLVOTUBE_SHOT_DIR 环境变量优先,缺省 CacheLocation;确保存在
+// (截图按钮与 qa step=shot 共用,与 qlvotube cxShotDir 同语义)
+static QString cxShotDir()
+{
+    const char* env = getenv("QLVOTUBE_SHOT_DIR");
+    QString dir = (env != 0 && *env != 0)
+        ? QString::fromLocal8Bit(env)
+        : QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    QDir().mkpath(dir);
+    return dir;
+}
 
 int main(int argc, char* argv[])
 {
@@ -287,14 +300,35 @@ int main(int argc, char* argv[])
     // ── 播放列表(二期):argv 位置参数=多文件导入;AUTOPLAY 兜底单目 ──
     QStringList pl;
     const QStringList argvL = app.arguments();
+    bool argvFilesEmpty = true;
     for (int i = 1; i < argvL.size(); ++i) {
         const QString a = argvL[i];
-        if (!a.startsWith("-") && QFile::exists(a))
+        if (!a.startsWith("-") && QFile::exists(a)) {
             pl << a;
+            argvFilesEmpty = false;
+        }
     }
     if (pl.isEmpty())
         pl << url;
     int plIdx = 0;
+
+    // ── 播放列表持久化(候选项 a):argv 为空且未设 AUTOPLAY 时恢复上次
+    // QSettings("qlvotube","qskvotube") 存的 playlist/plIdx;仅 argv 列表,
+    // 不做库列表持久化 ──
+    QSettings plSet(QString::fromUtf8("qlvotube"), QString::fromUtf8("qskvotube"));
+    if (argvFilesEmpty && getenv("QLVOTUBE_AUTOPLAY") == 0) {
+        QStringList saved = plSet.value("playlist").toStringList();
+        for (int i = saved.size() - 1; i >= 0; --i) {
+            if (!QFile::exists(saved[i]))
+                saved.removeAt(i); // 失效文件剔除
+        }
+        if (!saved.isEmpty()) {
+            pl = saved;
+            plIdx = plSet.value("plIdx", 0).toInt();
+            if (plIdx < 0 || plIdx >= pl.size())
+                plIdx = 0;
+        }
+    }
 
     // openPl:切歌(ffmpeg:open+play;mpv:attach 已挂时 open 直接 loadfile)
     auto openPl = [&](int idx) {
@@ -314,6 +348,9 @@ int main(int argc, char* argv[])
                         QFileInfo(pl[plIdx]).fileName());
         player->open(pl[plIdx]);
         player->play();
+        // 写回持久化(候选项 a)
+        plSet.setValue("playlist", pl);
+        plSet.setValue("plIdx", plIdx);
     };
     std::function<void(int)> openPlFn = openPl; // 拖拽钩子需可存储可调用体
 
@@ -462,11 +499,7 @@ int main(int argc, char* argv[])
         eqBtn->setText(QString::fromUtf8(kEqs[eqIdx].label));
     });
     QObject::connect(shotBtn, &QskAbstractButton::clicked, [&]() {
-        QDir().mkpath(QStandardPaths::writableLocation(
-            QStandardPaths::CacheLocation));
-        const QString path = QStandardPaths::writableLocation(
-                                 QStandardPaths::CacheLocation) +
-                             "/shot_" +
+        const QString path = cxShotDir() + "/shot_" +
                              QString::number(QDateTime::currentSecsSinceEpoch()) +
                              ".png";
         fprintf(stderr, "qskvotube shot %s -> %d\n",
@@ -516,12 +549,8 @@ int main(int argc, char* argv[])
             fprintf(stderr, "qa: step=eq ok=1\n");
         });
         QTimer::singleShot(15000, [&]() {
-            QDir().mkpath(QStandardPaths::writableLocation(
-                QStandardPaths::CacheLocation));
             const QString path =
-                QStandardPaths::writableLocation(
-                    QStandardPaths::CacheLocation) +
-                "/qa_" +
+                cxShotDir() + "/qa_" +
                 QString::number(QDateTime::currentSecsSinceEpoch()) + ".png";
             fprintf(stderr, "qa: step=shot ok=%d path=%s\n",
                     (int)player->saveScreenshot(path),

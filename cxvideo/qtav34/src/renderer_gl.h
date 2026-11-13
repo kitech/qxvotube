@@ -4,7 +4,18 @@
 #include "cxrenderer.h"
 #include "cxvideo_global.h"
 
-#ifdef QT3_BUILD
+#include <qglobal.h> // QT_VERSION(_CHECK)
+
+// Qt3/Qt4 同走 QGLWidget 固定管线(qlvotube.pro 仅 Qt3 定义 QT3_BUILD,
+// Qt4 落 "Qt4+" 分支不带 QT3_BUILD,须按版本号补判)
+#if defined(QT3_BUILD) || \
+    (defined(QT_VERSION) && QT_VERSION < QT_VERSION_CHECK(5, 0, 0))
+#define CXV_LEGACY_GL 1
+#else
+#define CXV_LEGACY_GL 0
+#endif
+
+#if CXV_LEGACY_GL
 #include <qgl.h> // QGLWidget(Qt3/Qt4 固定管线)
 #else
 #include <QOpenGLWidget>
@@ -23,7 +34,7 @@
 // - Qt5.4+/Qt6:QOpenGLWidget core profile;fragment shader uniforms
 //   (brightness/contrast/saturation/**hue mat3 旋转**)
 class CXRendererGl
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     : public QGLWidget, public CXVideoRenderer {
 #else
     : public QOpenGLWidget, public CXVideoRenderer, protected QOpenGLFunctions {
@@ -39,7 +50,7 @@ public:
 
     // Qt6:shader 链就绪位(Qt3 固定管线恒 true;探针可据此判真渲染)
     bool glReady() const {
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
         return true;
 #else
         return m_progReady;
@@ -61,7 +72,7 @@ private:
     CXVideoEq m_eq;
     unsigned char m_lut[256];
     bool m_eqOn; // Qt3 侧 CPU LUT 生效位
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     // QGLWidget 固定管线无需 shader
 #else
     QOpenGLShaderProgram* m_prog;

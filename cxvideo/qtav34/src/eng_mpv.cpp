@@ -2,11 +2,20 @@
 #include "eng_mpv.h"
 #include "cxmpv_def.h"
 #include "renderer_mpvgl.h"
-#ifndef QT3_BUILD
+#include <qglobal.h>
+// Quick 路仅 Qt6+ 编(renderer_quick/qmpv 在 cxvideo.pri 里 greaterThan(5) 才入
+// SOURCES;Qt4 同 Qt3 一样无 Quick,否则引用 cxMpvQuickUpdateHook 链接失败)
+#if defined(QT3_BUILD) || \
+    (defined(QT_VERSION) && QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+#define CXV_QUICK_BUILD 0
+#else
+#define CXV_QUICK_BUILD 1
+#endif
+#if CXV_QUICK_BUILD
 // M5-B:Quick 路钩子(renderer_qmpv.cpp 导出;eng_mpv 只见原型,不 include
 // QQuickFramebufferObject 头——demo/selftest qmake 工程不必 QT += quick)
 void cxMpvQuickUpdateHook(void* ctx);
-#endif // M4-B GL 路
+#endif // CXV_QUICK_BUILD
 #include "cxthread.h"
 #include "cxframe.h"
 #include <qapplication.h>
@@ -686,7 +695,7 @@ bool cxEngineMpvSmokeHeadless()
     return cxEngineMpvProbeLib() == 2;
 }
 
-#ifndef QT3_BUILD
+#if CXV_QUICK_BUILD
 // ── M5-B:Quick 路懒挂(QQuickFramebufferObject 首帧调用;
 // 调用者保证 GL context current;失败显式报错不回退 wid)──
 bool CXEngineMpv::attachQuickRender()
@@ -717,4 +726,4 @@ bool CXEngineMpv::attachQuickRender()
     return true;
 }
 
-#endif // !QT3_BUILD
+#endif // CXV_QUICK_BUILD

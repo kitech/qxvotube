@@ -1,6 +1,6 @@
 #include "renderer_mpvgl.h"
 #include "cxmpv_def.h"
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
 #include <GL/glx.h> // glXGetProcAddressARB(Qt3 QGLContext 无 getProcAddress)
 #else
 #include <QOpenGLContext>
@@ -30,7 +30,7 @@ void cxMpvGlUpdateHook(void* /*ctx*/)
 // get_proc_address:调用时须 GL context current(engine 侧 makeCurrent 后创建)
 static void* cxMpvGlProcThunk(void* /*ctx*/, const char* name)
 {
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     return (void*)glXGetProcAddressARB((const GLubyte*)name);
 #else
     QOpenGLContext* c = QOpenGLContext::currentContext();
@@ -39,14 +39,14 @@ static void* cxMpvGlProcThunk(void* /*ctx*/, const char* name)
 }
 
 CXRendererMpvGl::CXRendererMpvGl(QWidget* parent)
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     : QGLWidget(parent, 0)
 #else
     : QOpenGLWidget(parent)
 #endif
 {
     m_rc = 0;
-#ifndef QT3_BUILD
+#if !CXV_LEGACY_GL
     m_vao = 0;
 #endif
     cxMpvGlView = this;
@@ -65,7 +65,7 @@ bool CXRendererMpvGl::event(QEvent* ev)
         update();
         return true; // 事件由 QApplication::sendPostedEvents 统一析构
     }
-#ifdef QT3_BUILD
+#if CXV_LEGACY_GL
     return QGLWidget::event(ev);
 #else
     return QOpenGLWidget::event(ev);
@@ -74,7 +74,7 @@ bool CXRendererMpvGl::event(QEvent* ev)
 
 void CXRendererMpvGl::initializeGL()
 {
-#ifndef QT3_BUILD
+#if !CXV_LEGACY_GL
     // Qt6 core profile:建空 VAO(mpv 自家 render 不动 attrib 状态,
     // 但 core context 无 VAO 时 attrib 相关默认态均非法)
     m_vao = new QOpenGLVertexArrayObject(this);
