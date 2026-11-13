@@ -347,6 +347,41 @@ while(!stop):
   验证:桌面 buildqt6 绿;`build-android.sh` 重出 APK(59MB),`strings` 确认 Android 分支
   (`libfusionskin`、`libqskinny_arm64-v8a.so`、`/skins/`)已编入;真机验证待 adb 接入
   (`adb logcat -s qskvotube:V *:E` 看是否仍有 `no GUI platform` / `skin 加载失败`)。
+- **页面机制/主菜单/保活移植(2026-11-13)**:自 `doxhttpd/qsktox` 移植 Page + PageManager +
+  主页 ⋮ 菜单 + 设置/关于页 + keepScreenOn + KeepAlive;并对照 `qxmusic/qskmusic` 做差异核对:
+  1. **采用 qsktox 版 PageManager(597 行)= qskmusic 版的加固超集**,9 处切换加固全量保留:
+     destroyPage 前必停运行中 animator(否则 done()/advanceIndex 拿重排后错位索引)、
+     pendingDestroy/pendingRemove 判 `!= currentPage()`、SingleInstance 延时 removeItem 同判、
+     当前页可见性保底 + `stackBox->update()`(快速来回切后 animator 把当前页 setVisible(false)
+     → 白屏)、`m_busy` 忙锁(动画中忽略 open/back/replace)、finishRequested 判 currentPage。
+  2. **补齐 qsktox 相对 qskmusic 丢掉的两处焦点修复**:`Page` 构造 `setFocusPolicy(StrongFocus)`
+     (焦点链 StackBox→Page→文本控件)、`setStackBoxCurrent` 末尾 `forceActiveFocus`
+     (qsktox 用可见性修复替换时误删,键盘输入不可达)。
+  3. MenuOverlay 用 qskvotube 已有 qskcomp 版(带 parentMenu,比 qsktox 版新);菜单交互采用
+     qskmusic 成熟写法:`QskPopup::DeleteOnClose=false` 防双删、`closed`/`destroyed` 双保险、
+     `addOption` 返回值捕获索引(不用魔数)。
+  4. 结构:main.cpp 精简为 app 初始化 + skin + StackBox/PageManager 注册 + open("main") +
+     BackButtonFilter(返回键:栈深>1 回退;栈底 2s 双击退出)+ Android `KeepAlive::start()`;
+     原 main.cpp 的全部 UI/播放器/拖拽/QA/持久化搬入 `MainPage`(Permanent,切页不重建),
+     局部变量全部提升为成员(lambda 捕 `[this]`,消除悬垂引用)。
+  5. 设置页 6 行:页面切换动画(Slide/2D/3D/Perspective,同类型不重建)、主题
+     (Fusion/Fluent2/Material3)、**明暗(缺省 Dark)**,字号(12/16/20/24pt)、
+     **播放引擎(ffmpeg/mpv,重启生效;env `QLVOTUBE_ENGINE` 优先)**、调试背景。
+  6. 主页 ⋮ 菜单:✓保持屏幕常亮(默认开,延迟 50ms 调 JNI FLAG_KEEP_SCREEN_ON;桌面空操作)、
+     设置、关于;`onResume` 重新施加常亮(Android)。
+  7. 保活与 qsktox 一致:Android 启动即 `KeepAlive::start()`(通知权限 + 电池白名单一次性
+     引导 + KeepAliveService);Java 侧 `PermissionHelper` **去掉 androidx 依赖**(原生
+     requestPermissions/checkSelfPermission,minSdk 23 足够),`KeepAliveService` 逐字移植
+     (白名单→普通 startService;否则 dataSync FGS + 低优先级通知;保留 6h 限制论证注释)。
+  8. 验证:桌面 `buildqt6` 绿;`qa_run.sh` 双引擎 6/6(ffmpeg 首轮一次 139 偶发,复跑 4 次
+     全绿);`build-android.sh` 出 APK(60MB),dex 内确认 `io/fedlet/qskvotube/KeepAliveService`
+     与 `PermissionHelper`,manifest 含 service 与 3 条新权限。
+  9. **明暗配色(2026-11-13)**:此前 `cxApplySkinTheme` 硬编码 `LightScheme` → APK 启动必浅色。
+     改为统一入口 `cxDarkMode()`(QSettings `darkMode`,**缺省 true**,取 qskmusic 值;
+     qsktox 缺省为 Light)+ `cxSetDarkMode()`(写配置并即时应用);设置页开关走同一函数;
+     主页根容器加 `setPanel(true)`,深色下由皮肤填充背景(否则浅字画在窗口底——即此前
+     固定亮色的原因)。注意:旧安装的 `darkMode=false` 会保留,验证前需
+     `adb shell pm clear io.fedlet.qskvotube` 或卸载重装。
 
 ## 8. Qt3 兼容层(逐条)
 

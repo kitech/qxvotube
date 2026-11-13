@@ -12,7 +12,11 @@ QFont cxBaseFont();
 // 设置页字号:按 pt 覆盖基准字号并立即应用到 app + 当前皮肤 role
 void cxSetBasePointSize(int pt);
 int  cxBasePointSize();
-// 亮色 + 三个 font role 统一为当前基准字体
+// 明暗:缺省 dark=true(与 qskmusic 一致)
+bool cxDarkMode();
+void cxSetDarkMode(bool on);   // 写 QSettings + 立即应用到当前皮肤
+
+// 配色(按 cxDarkMode) + 三个 font role 统一为当前基准字体
 void cxApplySkinTheme(QskSkin* sk);
 
 #endif

@@ -133,7 +133,7 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     m_currentAnimatorIdx = transIdx;
     m_transitionCombo->setCurrentIndex(transIdx);
     m_skinCombo->setCurrentIndex(s.value("skin", 0).toInt());
-    m_darkSwitch->setChecked(s.value("darkMode", false).toBool());
+    m_darkSwitch->setChecked(s.value("darkMode", true).toBool());   // 缺省深色
     m_fontScaleCombo->setCurrentIndex(s.value("fontScale", 1).toInt());
     m_engineCombo->setCurrentIndex(
         s.value("engine", "ffmpeg").toString() == QLatin1String("mpv") ? 1 : 0);
@@ -180,12 +180,8 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
 
     connect(m_darkSwitch, &QskAbstractButton::toggled,
         this, [schemeVal](bool checked) {
-            QSettings().setValue("darkMode", checked);
             schemeVal->setText(checked ? "Dark" : "Light");
-            if (auto* sk = qskSkinManager->skin()) {
-                sk->setColorScheme(checked ? QskSkin::DarkScheme
-                                           : QskSkin::LightScheme);
-            }
+            cxSetDarkMode(checked);   // 持久化 + 应用(统一入口)
         });
 
     connect(m_fontScaleCombo, &QskComboBox::currentIndexChanged,

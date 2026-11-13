@@ -1,7 +1,8 @@
 #!/bin/bash
 # qskvotube Android 构建(移植自 ../qxmusic/qskmusic/build-android.sh):
 # 同 env/同 qt-cmake+androiddeployqt aux-mode 打包流程;差异:
-#   - 无 libncm/go extras/i18n lrelease/version_config 段(qskvotube 不用)
+#   - 无 libncm/go extras/i18n lrelease 段;version_config.h 为静态头
+#     (src/version_config.h,同 .tmpl 内容,不按 commit 数注入)
 #   - ffmpeg 改为 arm64 预编译库 fail-fast(eng_ffmpeg 链接依赖;
 #     libmpv 为 dlopen 运行期加载,缺失只影响 mpv 引擎可用性)
 #

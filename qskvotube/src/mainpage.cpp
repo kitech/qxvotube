@@ -170,6 +170,8 @@ void MainPage::onCreate(const QVariantMap&, const QVariantMap&)
 {
     setAutoLayoutChildren(true);
     m_box = new QskLinearBox(Qt::Vertical, this);
+    // 深色方案下需要皮肤填充背景,否则浅字画在窗口底(此前固定亮色的原因)
+    m_box->setPanel(true);
     m_box->setMargins(0);
     m_box->setSpacing(2);
     m_box->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);

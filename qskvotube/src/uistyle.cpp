@@ -1,6 +1,7 @@
 #include "uistyle.h"
 
 #include <QGuiApplication>
+#include <QSettings>
 #include <QskSkinManager.h>
 #include <QskSkin.h>
 #include <QskFontRole.h>
@@ -47,11 +48,27 @@ void cxSetBasePointSize(int pt)
     cxApplySkinTheme(qskSkinManager ? qskSkinManager->skin() : 0);
 }
 
+bool cxDarkMode()
+{
+    // 缺省深色(qskmusic 同款;qsktox 缺省为浅色,本项目取深色)
+    return QSettings().value("darkMode", true).toBool();
+}
+
+void cxSetDarkMode(bool on)
+{
+    QSettings().setValue("darkMode", on);
+    QskSkin* sk = qskSkinManager ? qskSkinManager->skin() : 0;
+    if (sk != 0)
+        sk->setColorScheme(on ? QskSkin::DarkScheme : QskSkin::LightScheme);
+}
+
 void cxApplySkinTheme(QskSkin* sk)
 {
     if (sk == 0)
         return;
-    sk->setColorScheme(QskSkin::LightScheme);
+    // 配色与字体统一入口:配色按持久化 darkMode(缺省深色)应用
+    sk->setColorScheme(cxDarkMode() ? QskSkin::DarkScheme
+                                    : QskSkin::LightScheme);
     // anystik 同法:皮肤字体 role 显式设真实存在的字体——皮肤内置字体
     // (如 Segoe UI)本机缺失时经回退可能整段字形为空
     const QFont f = cxBaseFont();
