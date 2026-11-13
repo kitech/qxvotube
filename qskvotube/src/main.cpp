@@ -143,8 +143,15 @@ int main(int argc, char* argv[])
     app.setApplicationName("qskvotube");
     app.setApplicationVersion("0.2.0");
     app.setOrganizationName("qlvotube");
-    // 缺省字体解析出 Adwaita Sans 时 QSkinny 文字渲染异常——用 DejaVu
-    app.setFont(QFont("DejaVu Sans", 10));
+    // 桌面:DejaVu(Adwaita Sans 会让 QSkinny 文字渲染异常);
+    // Android:无 DejaVu,用默认族 + 加大 pt(anystik 同法,CJK 靠字体合并)
+#ifdef Q_OS_ANDROID
+    QFont cxUiFont;
+    cxUiFont.setPointSizeF(16);
+#else
+    QFont cxUiFont("DejaVu Sans", 10);
+#endif
+    app.setFont(cxUiFont);
 
     for (const auto& a : app.arguments()) {
         if (a == "-v" || a == "--version") {
@@ -155,13 +162,49 @@ int main(int argc, char* argv[])
     }
 
     // 头less 环境无法加载图形皮肤插件，QskSkinManager 会断言；
-    // 仅在可创建平台窗口时才进 UI。
-    if (!QGuiApplication::platformName().startsWith("xcb") &&
-        !QGuiApplication::platformName().startsWith("wayland")) {
-        fprintf(stderr, "qskvotube: no GUI platform (%s), exiting\n",
-            QGuiApplication::platformName().toUtf8().constData());
-        return 1;
+    // 仅在可创建平台窗口时才进 UI。Android 平台名即 "android"，必须放行
+    // (曾致 APK 启动即闪退: logcat "no GUI platform (android), exiting")
+    {
+        const QString plat = QGuiApplication::platformName();
+        const bool guiCapable = plat.startsWith("xcb")
+            || plat.startsWith("wayland") || plat == "android";
+        if (!guiCapable) {
+            fprintf(stderr, "qskvotube: no GUI platform (%s), exiting\n",
+                    plat.toUtf8().constData());
+            return 1;
+        }
     }
+
+#ifdef Q_OS_ANDROID
+    // JNI lib 平铺目录无 skins/ 子目录,QskSkinManager 按 <path>/skins/ 找插件;
+    // 拷到 AppLocalDataLocation/skins 再 addLibraryPath(qskmusic/anystik 同法),
+    // 否则 setSkin 失败 → skin() 为 null → 后续解引用崩溃
+    {
+        const QString dataDir = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation);
+        const QStringList libPaths0 = QCoreApplication::libraryPaths();
+        for (const QString& libPath : libPaths0) {
+            QDir srcDir(libPath);
+            if (!srcDir.exists("libqskinny_arm64-v8a.so"))
+                continue;
+            QDir().mkpath(dataDir + "/skins");
+            const char* names[] = { "libfusionskin", "libfluent2skin",
+                                    "libmaterial3skin" };
+            for (const char* name : names) {
+                const QString fileName = QString::fromLatin1(name)
+                    + "_arm64-v8a.so";
+                const QString dst = dataDir + "/skins/" + fileName;
+                if (QFile::exists(dst))
+                    continue;
+                if (QFile::copy(srcDir.absoluteFilePath(fileName), dst))
+                    QFile(dst).setPermissions(QFile::ReadOwner | QFile::ExeOwner
+                                             | QFile::ReadUser | QFile::ExeUser);
+            }
+            break;
+        }
+        QCoreApplication::addLibraryPath(dataDir);
+    }
+#endif
 
     // anystik 同法:皮肤插件路径经 QskSkinManager 前置(与 libqskinny
     // 同树同 ABI)。注意:皮肤名大小写敏感(正确名 Fluent2/Fusion/
@@ -179,18 +222,20 @@ int main(int argc, char* argv[])
     // 皮肤主题应用(亮色+字体 role)抽 lambda:皮肤热切(二期)复用。
     // 注:系统暗色主题(QSkinny 按 styleHints 解析成 DarkScheme)会把
     // 浅色文字画在未填充的白窗底上(qskvotube 无面板件)——固定亮色
-    auto applySkinTheme = [](QskSkin* sk) {
+    auto applySkinTheme = [&](QskSkin* sk) {
         sk->setColorScheme(QskSkin::LightScheme);
         // anystik 同法:皮肤字体 role 显式设真实存在的字体——皮肤内置
         // 字体(如 Segoe UI)本机缺失时经回退可能整段字形为空
-        QFont f("DejaVu Sans", 10);
-        sk->setFont({QskFontRole::Body, QskFontRole::Normal}, f);
-        sk->setFont({QskFontRole::Title, QskFontRole::Normal}, f);
-        sk->setFont({QskFontRole::Caption, QskFontRole::Normal}, f);
-        QGuiApplication::setFont(f);
+        sk->setFont({QskFontRole::Body, QskFontRole::Normal}, cxUiFont);
+        sk->setFont({QskFontRole::Title, QskFontRole::Normal}, cxUiFont);
+        sk->setFont({QskFontRole::Caption, QskFontRole::Normal}, cxUiFont);
+        QGuiApplication::setFont(cxUiFont);
     };
     QskSkin* skin = qskSkinManager->skin();
-    applySkinTheme(skin);
+    if (skin != 0)
+        applySkinTheme(skin);
+    else
+        fprintf(stderr, "qskvotube: skin 加载失败(插件路径?)\n");
 
     QskWindow window;
     window.setTitle("qskvotube");
@@ -294,7 +339,11 @@ int main(int argc, char* argv[])
     // ── 引擎接线(setEngine 成功后再配渲染器,与 qlvotube 同序)──
     QString url = getenv("QLVOTUBE_AUTOPLAY") != 0
         ? QString::fromLocal8Bit(getenv("QLVOTUBE_AUTOPLAY"))
+#ifdef Q_OS_ANDROID
+        : QString();   // 设备上无 /tmp 测试件:空列表,待用户选/拖
+#else
         : QString("/tmp/opencode/m5a_long.mp4");
+#endif
     const bool dbg = getenv("QLVOTUBE_DEBUG") != 0;
 
     // ── 播放列表(二期):argv 位置参数=多文件导入;AUTOPLAY 兜底单目 ──
@@ -308,8 +357,10 @@ int main(int argc, char* argv[])
             argvFilesEmpty = false;
         }
     }
-    if (pl.isEmpty())
+    if (pl.isEmpty() && !url.isEmpty())
         pl << url;
+    if (pl.isEmpty())
+        pl << QString();   // 占位(无媒体):后续 open 空串走失败分支,不越界
     int plIdx = 0;
 
     // ── 播放列表持久化(候选项 a):argv 为空且未设 AUTOPLAY 时恢复上次
@@ -346,6 +397,10 @@ int main(int argc, char* argv[])
         }
         window.setTitle("qskvotube - " +
                         QFileInfo(pl[plIdx]).fileName());
+        if (pl[plIdx].isEmpty()) {
+            window.setTitle("qskvotube (无媒体)");
+            return;   // 无媒体:不 open/play
+        }
         player->open(pl[plIdx]);
         player->play();
         // 写回持久化(候选项 a)
@@ -559,25 +614,29 @@ int main(int argc, char* argv[])
     }
 
     window.show();
-    window.setTitle("qskvotube - " + QFileInfo(pl[plIdx]).fileName());
+    window.setTitle(pl[plIdx].isEmpty()
+                    ? QString("qskvotube (无媒体)")
+                    : ("qskvotube - " + QFileInfo(pl[plIdx]).fileName()));
     // 拖拽导入(window 对象已在场景后安装过滤器)
     CxDropHook dropHook;
     dropHook.pl = &pl;
     dropHook.openPl = &openPlFn;
     window.installEventFilter(&dropHook);
-    if (wantMpv) {
-        // 时序:open 只建 mpv handle(vo=libmpv,不发 loadfile);
-        // render job 在场景图线程挂 render_context,挂成后 quickGo 起播
-        CXEngineMpv* em = (CXEngineMpv*)player->engine();
-        player->open(pl[plIdx]); // 二段挂起:loadfile 延至 attach 成功
-        window.scheduleRenderJob(
-            new CxMpvAttachJob(em, &window, player, pl[plIdx]),
-            QQuickWindow::BeforeSynchronizingStage);
-    } else {
-        // QLVOTUBE_NOPLAY=1:不 open/play,纯 UI 静置(排查视频链干扰)
-        if (getenv("QLVOTUBE_NOPLAY") == 0) {
-            player->open(pl[plIdx]);
-            player->play();
+    if (!pl[plIdx].isEmpty()) {
+        if (wantMpv) {
+            // 时序:open 只建 mpv handle(vo=libmpv,不发 loadfile);
+            // render job 在场景图线程挂 render_context,挂成后 quickGo 起播
+            CXEngineMpv* em = (CXEngineMpv*)player->engine();
+            player->open(pl[plIdx]); // 二段挂起:loadfile 延至 attach 成功
+            window.scheduleRenderJob(
+                new CxMpvAttachJob(em, &window, player, pl[plIdx]),
+                QQuickWindow::BeforeSynchronizingStage);
+        } else {
+            // QLVOTUBE_NOPLAY=1:不 open/play,纯 UI 静置(排查视频链干扰)
+            if (getenv("QLVOTUBE_NOPLAY") == 0) {
+                player->open(pl[plIdx]);
+                player->play();
+            }
         }
     }
 

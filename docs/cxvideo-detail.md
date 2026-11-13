@@ -335,6 +335,18 @@ while(!stop):
      - EQ 完整对话框**不做**(Widgets 系 CXVideoEqDialog 移入共享层成本>收益,五档预设已覆盖)。
   5. 环境限制记录:本机桌面被占用时不宜弹窗做 GUI 合成点击验收(截图存在局部重绘黑块假象,
      且 X 合成帧可能滞后);功能验证优先 QA 钩子 + 人工实点。
+- **APK 启动闪退修复(2026-11-13)**:对照 qskmusic/anystik 启动流程定位四处 Android 缺口:
+  1. `main.cpp` 的 GUI 平台白名单只认 `xcb`/`wayland` → Android(`platformName()=="android"`)
+     启动即 `return 1`(logcat: `no GUI platform (android), exiting`) → 白名单补 `android`;
+  2. **皮肤插件路径**:JNI lib 目录是平铺的,`QskSkinManager` 按 `<path>/skins/` 找插件 →
+     移植 qskmusic 的「拷 `lib*fusionskin/fluent2skin/material3skin_arm64-v8a.so` 到
+     `AppLocalDataLocation/skins/` + `addLibraryPath`」;`skin()` 增判空(否则空指针崩溃);
+  3. **字体**:Android 无 DejaVu → 平台分支用默认族 + 16pt(anystik 同法,桌面仍 DejaVu 10);
+  4. **默认媒体**:Android 不再兜底 `/tmp/opencode/*.mp4`(设备无此路径),空列表显示
+     “无媒体”,`open/play` 全程加空串守卫(含标题与 mpv attach 分支)。
+  验证:桌面 buildqt6 绿;`build-android.sh` 重出 APK(59MB),`strings` 确认 Android 分支
+  (`libfusionskin`、`libqskinny_arm64-v8a.so`、`/skins/`)已编入;真机验证待 adb 接入
+  (`adb logcat -s qskvotube:V *:E` 看是否仍有 `no GUI platform` / `skin 加载失败`)。
 
 ## 8. Qt3 兼容层(逐条)
 
