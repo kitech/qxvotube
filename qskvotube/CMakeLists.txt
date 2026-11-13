@@ -87,6 +87,14 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../qskcomp/qskcomp.cmake)
 # (androiddeployqt 消费;桌面仍为普通可执行)
 qt_add_executable(qskvotube
     src/main.cpp
+    src/page.cpp
+    src/pagemanager.cpp
+    src/mainpage.cpp
+    src/settingspage.cpp
+    src/aboutpage.cpp
+    src/keepalive.cpp
+    src/androidutils.cpp
+    src/uistyle.cpp
     ${QSKCOMP_SOURCES}
     ${CXV_SOURCES}
     ${CXV_EXTRA}

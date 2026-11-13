@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<!-- qskvotube Android 包清单(移植自 qskmusic/android,裁掉保活 service) -->
+<!-- qskvotube Android 包清单(移植自 qsktox/android:含保活 service) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.fedlet.qskvotube"
     android:installLocation="auto"
@@ -7,6 +7,9 @@
     android:versionName="0.1">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <supports-screens
         android:anyDensity="true"
@@ -41,5 +44,11 @@
                 android:name="android.app.arguments"
                 android:value="" />
         </activity>
+
+        <!-- 后台保活(qsktox 同款:白名单→普通 service;否则 dataSync FGS) -->
+        <service
+            android:name="io.fedlet.qskvotube.KeepAliveService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
     </application>
 </manifest>

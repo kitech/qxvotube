@@ -104,6 +104,10 @@ else
     cp ../../qxmusic/qskmusic/app_icon.png "$APK_DIR/res/drawable/ic_launcher.png"
 fi
 
+# 自定义 Java(保活 service + 权限助手;qsktox 同 aux-mode 需手拷)
+mkdir -p "$APK_DIR/src/main/java"
+cp -R android/src/java/* "$APK_DIR/src/main/java/"
+
 # 覆盖 manifest(qskmusic 同:Qt 模板缺 lib_name/icon)
 cp android/AndroidManifest.xml "$APK_DIR/AndroidManifest.xml"
 
