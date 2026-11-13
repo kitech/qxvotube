@@ -23,6 +23,12 @@
 #include <QRunnable>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileDialog>
+#include <QUrl>
+#include <QMimeData>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <functional>
 
 #include "cxvideoplayer.h"
 #include "cxengine.h"
@@ -37,6 +43,53 @@
 // (render.h:"needs to be created before you start playback"),且必须
 // 在 GL context current 的线程——即场景图渲染线程。用 render job 挂接,
 // 挂成后回 GUI 线程 open+play;失败显式报错,不回退(渲染路选谁用谁)。
+// CXVideoEq 工厂(有自定义 ctor 非聚合,不能花括号构造)
+static CXVideoEq cxvEq(int b, int c, int s, int h)
+{
+    CXVideoEq eq;
+    eq.brightness = b;
+    eq.contrast = c;
+    eq.saturation = s;
+    eq.hue = h;
+    return eq;
+}
+
+// 拖拽导入钩子:QQuickWindow 无 drag 虚函数/QML DropArea 需私有头——
+// 改用 window 对象的 eventFilter 截获 DragEnter/Drop(过滤器先于
+// QQuickWindow::event 的场景图投递,无需私有头)。
+// 运行期验证:若平台 drag 未投递到 window 对象(X11 dnd 路径差异),
+// 退化方案 = 叠加 QML DropArea(需引入 QQmlEngine,单独立项)。
+class CxDropHook : public QObject {
+public:
+    QStringList* pl;                        /* 播放列表(尾部追加) */
+    std::function<void(int)>* openPl;
+    bool eventFilter(QObject* obj, QEvent* ev) override {
+        switch (ev->type()) {
+        case QEvent::DragEnter:
+            ((QDragEnterEvent*)ev)->acceptProposedAction();
+            return true;
+        case QEvent::DragMove:
+            ((QDragMoveEvent*)ev)->acceptProposedAction();
+            return true;
+        case QEvent::Drop: {
+            QDropEvent* de = (QDropEvent*)ev;
+            const QList<QUrl> urls = de->mimeData()->urls();
+            for (const QUrl& u : urls) {
+                const QString f = u.toLocalFile();
+                if (!f.isEmpty() && QFile::exists(f)) {
+                    *pl << f;
+                    (*openPl)(pl->size() - 1);
+                }
+            }
+            de->acceptProposedAction();
+            return true;
+        }
+        default:
+            return QObject::eventFilter(obj, ev);
+        }
+    }
+};
+
 class CxMpvAttachJob : public QRunnable
 {
 public:
@@ -188,12 +241,13 @@ int main(int argc, char* argv[])
     auto* ccBtn = new QskPushButton("CC");
     auto* eqBtn = new QskPushButton("EQ");
     auto* shotBtn = new QskPushButton("图");
+    auto* subBtn = new QskPushButton("字"); // 外挂字幕(同步 qlvotube 菜单)
     auto* skinBtn = new QskPushButton("🎨"); // 二期:皮肤热切循环
 
     // QskPushButton 默认 preferred 宽 120,合计把盒子撑出窗口——压窄
     // (anystik 同法:setPreferredSize(44,44),Fusion 下小尺寸文字正常)
     for (QskPushButton* b : { playBtn, prevBtn, nextBtn, muteBtn,
-                              rateBtn, ccBtn, eqBtn, shotBtn, skinBtn })
+                              rateBtn, ccBtn, eqBtn, shotBtn, subBtn, skinBtn })
         b->setPreferredSize(44, 36);
 
     // 控制条拆两行(640 窗宽挤不下 10+ 控件):
@@ -218,6 +272,7 @@ int main(int argc, char* argv[])
     ctlB->addItem(ccBtn);
     ctlB->addItem(eqBtn);
     ctlB->addItem(shotBtn);
+    ctlB->addItem(subBtn);
     ctlB->addItem(skinBtn);
     box->addItem(ctlA);
     box->addItem(ctlB);
@@ -260,6 +315,7 @@ int main(int argc, char* argv[])
         player->open(pl[plIdx]);
         player->play();
     };
+    std::function<void(int)> openPlFn = openPl; // 拖拽钩子需可存储可调用体
 
     if (!player->setEngine(wantMpv ? CxEngineMpv : CxEngineFfmpeg) ||
         player->engine() == 0) {
@@ -387,12 +443,23 @@ int main(int argc, char* argv[])
         player->setSubtitleTrack(subIdx); // -1=关;引擎幂等(M5-A3)
     });
     QObject::connect(eqBtn, &QskAbstractButton::clicked, [&]() {
-        // EQ 三键循环:brightness -60→0→+60(CPU LUT 路;ffmpeg 恒可,mpv 属性路)
+        // EQ 预设循环(对齐 qlvotube EQ 对话框四参能力;CPU LUT 路,
+        // ffmpeg 恒可,mpv 属性路):默认/提亮/高对比/高饱和/暖色
+        // (CXVideoEq 有自定义 ctor 非聚合,用工厂函数构造)
+        static const struct {
+            const char* label;
+            CXVideoEq eq;
+        } kEqs[] = {
+            { "默认",   cxvEq(  0,  0,  0,   0) },
+            { "提亮",   cxvEq( 60, 10,  0,   0) },
+            { "高对比", cxvEq(  0, 50, 10,   0) },
+            { "高饱和", cxvEq(  0,  0, 60,   0) },
+            { "暖色",   cxvEq( 10,  0,  0, -30) },
+        };
         static int eqIdx = 0;
-        CXVideoEq eq;
-        eq.brightness = (eqIdx == 1) ? 60 : (eqIdx == 2) ? -60 : 0;
-        eqIdx = (eqIdx + 1) % 3;
-        player->setEq(eq);
+        eqIdx = (eqIdx + 1) % 5;
+        player->setEq(kEqs[eqIdx].eq);
+        eqBtn->setText(QString::fromUtf8(kEqs[eqIdx].label));
     });
     QObject::connect(shotBtn, &QskAbstractButton::clicked, [&]() {
         QDir().mkpath(QStandardPaths::writableLocation(
@@ -405,6 +472,14 @@ int main(int argc, char* argv[])
         fprintf(stderr, "qskvotube shot %s -> %d\n",
                 path.toUtf8().constData(),
                 (int)player->saveScreenshot(path));
+    });
+    QObject::connect(subBtn, &QskAbstractButton::clicked, [&]() {
+        // 外挂字幕:setSubtitleFile(srt/ass);引擎解析失败会走 noticedError
+        const QString f = QFileDialog::getOpenFileName(
+            nullptr, "加载外挂字幕", QString(),
+            "Subtitles (*.srt *.ass *.ssa *.vtt)");
+        if (!f.isEmpty())
+            player->setSubtitleFile(f);
     });
 
     // QA 自动驱动:QLVOTUBE_QA=1 时起播后按时间线自检(pause/play/seek/
@@ -456,6 +531,11 @@ int main(int argc, char* argv[])
 
     window.show();
     window.setTitle("qskvotube - " + QFileInfo(pl[plIdx]).fileName());
+    // 拖拽导入(window 对象已在场景后安装过滤器)
+    CxDropHook dropHook;
+    dropHook.pl = &pl;
+    dropHook.openPl = &openPlFn;
+    window.installEventFilter(&dropHook);
     if (wantMpv) {
         // 时序:open 只建 mpv handle(vo=libmpv,不发 loadfile);
         // render job 在场景图线程挂 render_context,挂成后 quickGo 起播

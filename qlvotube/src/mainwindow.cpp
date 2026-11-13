@@ -43,6 +43,7 @@
 #include <qdatetime.h>
 #include <qfiledialog.h>
 #include <qfileinfo.h>
+#include <qurl.h>
 
 #include <cstdlib>
 #include <fstream>
@@ -334,6 +335,7 @@ void MainWindow::buildCentralWidget()
 
     framelessHelper = new FramelessHelper(this);
     framelessHelper->setup(this);
+    setAcceptDrops(true);   /* 拖拽导入媒体文件(二期同步) */
     titleBar->connectFramelessHelper(framelessHelper);
     QObject::connect(titleBar, SIGNAL(appMenuClicked()), titleBar, SLOT(toggleMenu()));
 }
@@ -1309,6 +1311,37 @@ void MainWindow::onDemoApiRequest()
 {
     HttpRequest req("http://localhost:8181/api/self", "GET", "", 10);
     Api::request(req, ApiGetSelf);
+}
+
+/* 拖拽导入:拖入本地文件 → 并入 argv 播放列表并起播首个新文件。
+ * argv 模式未启用时以拖入集合启用之;复用 playArgvAt(回绕/播完停)。 */
+void MainWindow::dragEnterEvent(QDragEnterEvent* e)
+{
+    const QList<QUrl> urls = e->mimeData()->urls();
+    for (int i = 0; i < urls.size(); i++) {
+        if (urls[i].isLocalFile()) {
+            e->acceptProposedAction();   /* 本地文件即接受,后缀宽容 */
+            return;
+        }
+    }
+}
+
+void MainWindow::dropEvent(QDropEvent* e)
+{
+    QStringList files;
+    const QList<QUrl> urls = e->mimeData()->urls();
+    for (int i = 0; i < urls.size(); i++) {
+        const QString f = urls[i].toLocalFile();
+        if (!f.isEmpty() && QFile::exists(f))
+            files << f;
+    }
+    if (files.isEmpty())
+        return;
+    const int base = m_argvUrls.size();
+    m_argvUrls << files;
+    m_curPlaylistId = -1;
+    playArgvAt(base);   /* 从首个新文件起播 */
+    e->acceptProposedAction();
 }
 
 void MainWindow::customEvent(CustomEventBase* event)

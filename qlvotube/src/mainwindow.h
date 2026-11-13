@@ -38,6 +38,8 @@ public:
 protected:
     virtual void closeEvent(QCloseEvent* event);
     virtual void customEvent(CustomEventBase* event);
+    virtual void dragEnterEvent(QDragEnterEvent* event); /* 拖拽导入视频 */
+    virtual void dropEvent(QDropEvent* event);
 
 private slots:
     void onTitleUilang(int index);
