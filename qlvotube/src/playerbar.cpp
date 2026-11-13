@@ -48,7 +48,7 @@ void drawTriangle(QPainter& p, const QRect& r, bool left, const QColor& c)
 PlayerBar::PlayerBar(QWidget* parent)
     : QWidget(parent), m_hasTrack(false), m_playing(false),
       m_progressMs(0), m_durationMs(0), m_hover(HitNone), m_dragging(false),
-      m_volDrag(false), m_volume(100), m_rate(1.0)
+      m_volDrag(false), m_volume(100), m_rate(1.0), m_muted(false)
 {
     setMouseTracking(true);
     setFixedHeight(80);
@@ -91,6 +91,12 @@ void PlayerBar::setRate(double r)
     update();
 }
 
+void PlayerBar::setMuted(bool on)
+{
+    m_muted = on;
+    update();
+}
+
 void PlayerBar::setPlaying(bool on)
 {
     if (m_playing == on) return;
@@ -129,6 +135,8 @@ QRect PlayerBar::rateRect() const  { return QRect(width() - 172, 22, 40, 20); }
 QRect PlayerBar::ccRect() const    { return QRect(width() - 126, 22, 30, 20); }
 QRect PlayerBar::eqRect() const    { return QRect(width() - 90, 22, 34, 20); }
 QRect PlayerBar::shotRect() const  { return QRect(width() - 52, 22, 34, 20); }
+/* 二期同步:静音按钮(音量条左侧) */
+QRect PlayerBar::muteRect() const  { return QRect(width() - 288, 22, 30, 20); }
 
 void PlayerBar::setVolumeFromX(int x)
 {
@@ -216,6 +224,12 @@ void PlayerBar::paintEvent(QPaintEvent*)
     p.drawText(QRect(pr.right() + 4, pr.y() - 8, 44, 20), Qt::AlignVCenter | Qt::AlignLeft,
                fmtMs(m_durationMs));
 
+    /* 静音按钮(🔊/🔇;二期同步自 qskvotube) */
+    p.setFont(small);
+    p.setPen(m_hover == HitMute ? pal.accent : pal.textMuted);
+    p.drawText(muteRect(), Qt::AlignCenter,
+               m_muted ? qFromUtf8("🔇") : qFromUtf8("🔊"));
+
     /* 音量条 + 倍速/EQ/截图(右侧) */
     QRect vr = volRect();
     p.setPen(Qt::NoPen);
@@ -254,6 +268,10 @@ void PlayerBar::mousePressEvent(QMouseEvent* e)
     } else if (progressRect().contains(e->pos())) {
         m_dragging = true;
         setProgressFromX(e->pos().x());
+    } else if (muteRect().contains(e->pos())) {
+        m_muted = !m_muted;
+        update();
+        emit muteChanged(m_muted);
     } else if (volRect().contains(e->pos())) {
         m_volDrag = true;
         setVolumeFromX(e->pos().x());
@@ -294,6 +312,7 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
     else if (ccRect().contains(e->pos())) h = HitSub;
     else if (eqRect().contains(e->pos())) h = HitEq;
     else if (shotRect().contains(e->pos())) h = HitShot;
+    else if (muteRect().contains(e->pos())) h = HitMute;
     if (h != m_hover) {
         m_hover = h;
         update();

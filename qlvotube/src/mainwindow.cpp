@@ -42,6 +42,7 @@
 #include <qsplitter.h>
 #include <qdatetime.h>
 #include <qfiledialog.h>
+#include <qfileinfo.h>
 
 #include <cstdlib>
 #include <fstream>
@@ -123,6 +124,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_subIdx(-1)
     , m_curPlaylistId(0)
     , m_curTrackIndex(-1)
+    , m_argvIdx(-1)
     , demoLeftLabel(0)
     , demoLeftBtn(0)
     , demoRightLabel(0)
@@ -298,6 +300,8 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onSeekRequested(int)));
         QObject::connect(playerBar, SIGNAL(volumeChanged(int)),
                          this, SLOT(onVolumeChanged(int)));
+        QObject::connect(playerBar, SIGNAL(muteChanged(bool)),
+                         this, SLOT(onMuteChanged(bool)));
         QObject::connect(playerBar, SIGNAL(rateChanged(double)),
                          this, SLOT(onRateChanged(double)));
         QObject::connect(playerBar, SIGNAL(eqRequested()),
@@ -747,8 +751,53 @@ void MainWindow::ensurePlayerReady()
     }
 }
 
+void MainWindow::setAutoplayFiles(const QStringList& files)
+{
+    m_argvUrls = files;
+}
+
+void MainWindow::startAutoplayFiles()
+{
+    if (m_argvUrls.isEmpty())
+        return;
+    playArgvAt(0);
+    startQaTimeline();
+}
+
+/* 二期同步:argv 列表切歌(⏮ 到头回绕/播完停止,与 qskvotube 同语义) */
+void MainWindow::playArgvAt(int idx)
+{
+    if (m_argvUrls.isEmpty())
+        return;
+    if (idx < 0)
+        idx = (int)m_argvUrls.size() - 1;   /* 上一首到头回绕 */
+    if (idx >= (int)m_argvUrls.size()) {
+        /* 列表播完:停止,不循环 */
+        if (m_player != 0) m_player->stop();
+        m_argvIdx = -1;
+        if (playerBar) playerBar->setPlaying(false);
+        SharedStatusBar::instance()->showMessage(qFromUtf8("列表播完"), 4000);
+        return;
+    }
+    m_argvIdx = idx;
+    Track t;
+    t.id = -1;
+    t.title = QFileInfo(m_argvUrls[idx]).fileName();
+    t.url = m_argvUrls[idx];
+    t.playable = true;
+    t.durationMs = 0;
+    t.ncmId = 0;
+    t.albumId = 0;
+    if (playerBar) playerBar->setTrack(t);
+    qSetWindowTitle(this, t.title);
+    m_curPlaylistId = -1;   /* argv 模式:库列表索引无效 */
+    tryPlayTrack(t);
+}
+
 void MainWindow::onQaAutoplay()
 {
+    if (!m_argvUrls.isEmpty())
+        return;   /* argv 多文件优先(二期同步) */
     const char* u = getenv("QLVOTUBE_AUTOPLAY");
     if (u == 0 || u[0] == 0)
         return;
@@ -762,6 +811,89 @@ void MainWindow::onQaAutoplay()
     t.albumId = 0;
     if (playerBar) playerBar->setTrack(t);
     tryPlayTrack(t);
+    startQaTimeline();
+}
+
+/* 二期同步:QLVOTUBE_QA=1 六步自检(与 qskvotube src/main.cpp 同格式) */
+void MainWindow::startQaTimeline()
+{
+    if (getenv("QLVOTUBE_QA") == 0)
+        return;
+    QTimer::singleShot(3000, this, SLOT(onQaStepPause()));
+    QTimer::singleShot(5000, this, SLOT(onQaStepPlay()));
+    QTimer::singleShot(7000, this, SLOT(onQaStepSeek()));
+    QTimer::singleShot(9000, this, SLOT(onQaStepRate()));
+    QTimer::singleShot(11000, this, SLOT(onQaStepCc()));
+    QTimer::singleShot(13000, this, SLOT(onQaStepEq()));
+    QTimer::singleShot(15000, this, SLOT(onQaStepShot()));
+}
+
+void MainWindow::onQaStepPause()
+{
+    if (m_player != 0) m_player->pause();
+}
+
+void MainWindow::onQaStepPlay()
+{
+    fprintf(stderr, "qa: step=pause ok=%d state=%d\n",
+            (int)(m_player != 0 && m_player->state() == CxPaused),
+            (int)(m_player != 0 ? m_player->state() : 0));
+    if (m_player != 0) m_player->play();
+}
+
+void MainWindow::onQaStepSeek()
+{
+    if (m_player == 0) return;
+    m_player->seek(5000);
+    fprintf(stderr, "qa: step=seek issued=1 pos=%ld\n", m_player->position());
+}
+
+void MainWindow::onQaStepRate()
+{
+    if (m_player == 0) return;
+    m_player->setRate(1.5);
+    fprintf(stderr, "qa: step=rate ok=1 pos=%ld\n", m_player->position());
+}
+
+void MainWindow::onQaStepCc()
+{
+    int n = m_player != 0 ? m_player->subtitleTrackCount() : 0;
+    bool ok = (n <= 0) || m_player->setSubtitleTrack(0);
+    fprintf(stderr, "qa: step=cc tracks=%d ok=%d\n", n, (int)ok);
+}
+
+void MainWindow::onQaStepEq()
+{
+    if (m_player == 0) return;
+    CXVideoEq eq;
+    eq.brightness = 60;
+    m_player->setEq(eq);
+    fprintf(stderr, "qa: step=eq ok=1\n");
+}
+
+void MainWindow::onQaStepShot()
+{
+    if (m_player == 0 || m_player->engine() == 0) {
+        fprintf(stderr, "qa: step=shot ok=0 path=\n");
+        return;
+    }
+    QString path = qGetHomePath() + "/.cache/qlvotube/qa_" +
+                   QString::number((unsigned long long)
+#ifdef QT3_BUILD
+                       QDateTime::currentDateTime().toTime_t()
+#else
+                       QDateTime::currentDateTime().toSecsSinceEpoch()
+#endif
+                       ) +
+                   ".png";
+#ifdef QT3_BUILD
+    const char* pathC = path.latin1();
+#else
+    QByteArray pathBa = path.toLatin1();
+    const char* pathC = pathBa.constData();
+#endif
+    fprintf(stderr, "qa: step=shot ok=%d path=%s\n",
+            (int)m_player->saveScreenshot(path), pathC);
 }
 
 void MainWindow::tryPlayTrack(const Track& t)
@@ -926,6 +1058,10 @@ void MainWindow::onPlayerFinished()
 {
     if (playerBar) playerBar->setPlaying(false);
     /* 简易连播:顺序换下一首(引擎 finished 后 UI 流迁移) */
+    if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
+        playArgvAt(m_argvIdx + 1);   /* 到尾自动停("列表播完") */
+        return;
+    }
     onNext();
 }
 
@@ -949,6 +1085,11 @@ void MainWindow::onVolumeChanged(int pct)
 void MainWindow::onRateChanged(double r)
 {
     if (m_player != 0) m_player->setRate(r);
+}
+
+void MainWindow::onMuteChanged(bool on)
+{
+    if (m_player != 0) m_player->setMute(on);
 }
 
 void MainWindow::onOpenEqDialog()
@@ -1110,11 +1251,25 @@ void MainWindow::onSeekRequested(int ms)
 
 void MainWindow::onPrev()
 {
-    if (m_curTrackIndex > 0) showTrackStub(m_curPlaylistId, m_curTrackIndex - 1);
+    if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
+        playArgvAt(m_argvIdx - 1);   /* 到头回绕 */
+        return;
+    }
+    const Playlist* pl = findPlaylist(m_library, m_curPlaylistId);
+    if (pl == 0 || pl->tracks.empty())
+        return;
+    /* ⏮ 到头回绕(二期同步 qskvotube) */
+    int idx = m_curTrackIndex > 0
+                  ? m_curTrackIndex - 1 : (int)pl->tracks.size() - 1;
+    showTrackStub(m_curPlaylistId, idx);
 }
 
 void MainWindow::onNext()
 {
+    if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
+        playArgvAt(m_argvIdx + 1);
+        return;
+    }
     const Playlist* pl = findPlaylist(m_library, m_curPlaylistId);
     if (!pl) return;
     if (m_curTrackIndex + 1 < (int)pl->tracks.size())

@@ -30,6 +30,10 @@ class MainWindow : public QMainWindow {
 public:
     MainWindow(QWidget* parent = 0);
     virtual ~MainWindow();
+    /* 二期同步:argv 位置参数=多文件导入(优先于 QLVOTUBE_AUTOPLAY) */
+    void setAutoplayFiles(const QStringList& files);
+    /* 启动入口:有文件列表则起播首项(由 main() 在 show 后调用) */
+    void startAutoplayFiles();
 
 protected:
     virtual void closeEvent(QCloseEvent* event);
@@ -67,9 +71,19 @@ private slots:
     void switchToPlayerView(bool on);    /* M5-A 播放页切换 */
     void onVideoBackRequested();
     void onQaAutoplay();     /* QA 钩子:QLVOTUBE_AUTOPLAY=<url> 自动起播 */
+    void startQaTimeline();  /* 二期:QLVOTUBE_QA=1 六步自检调度 */
+    /* 二期同步:QLVOTUBE_QA=1 六步自检(与 qskvotube 同格式 qa: step=) */
+    void onQaStepPause();
+    void onQaStepPlay();
+    void onQaStepSeek();
+    void onQaStepRate();
+    void onQaStepCc();
+    void onQaStepEq();
+    void onQaStepShot();
     /* M5-A2:音量/倍速/EQ/截图/引擎切换 */
     void onVolumeChanged(int pct);
     void onRateChanged(double r);
+    void onMuteChanged(bool on);   /* 二期同步:静音切换 */
     void onOpenEqDialog();
     void onEqChanged();
     void onTakeScreenshot();
@@ -116,6 +130,7 @@ private:
     void showTrackStub(int playlistId, int trackIndex);
     void tryPlayTrack(const Track& t);
     void ensurePlayerReady();
+    void playArgvAt(int idx);   /* 二期:argv 列表切歌(回绕/播完停) */
 
     CXVideoPlayer* m_player;  /* 布局时段内建(CXVideoPlayer 见 cxvideo 说明) */
 
@@ -151,6 +166,8 @@ private:
     std::vector<Playlist> m_library;
     int m_curPlaylistId;
     int m_curTrackIndex;
+    QStringList m_argvUrls;  /* 二期同步:argv 多文件列表(不进 m_library) */
+    int m_argvIdx;           /* -1=argv 模式未起播 */
 
     // 演示用状态栏控件（演示菜单可反复增删）
     QLabel* demoLeftLabel;

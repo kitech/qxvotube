@@ -18,6 +18,8 @@ public:
     double rate() const { return m_rate; }
     void setVolume(int pct);
     void setRate(double r);
+    void setMuted(bool on);              /* 二期同步:静音状态 */
+    bool isMuted() const { return m_muted; }
     void retranslateUi();
 
 signals:
@@ -29,6 +31,7 @@ signals:
     /* M5-A2:音量/倍速/EQ/截图 */
     void volumeChanged(int pct);
     void rateChanged(double r);
+    void muteChanged(bool on);           /* 二期同步:静音切换(qskvotube 对齐) */
     void eqRequested();
     void shotRequested();
     void subtitleRequested();   /* M5-A3:字幕轨循环 */
@@ -42,7 +45,7 @@ protected:
 
 private:
     enum Hit { HitNone, HitPrev, HitPlay, HitNext, HitProgress,
-               HitVol, HitRate, HitEq, HitShot, HitSub };
+               HitVol, HitRate, HitEq, HitShot, HitSub, HitMute };
     void setProgressFromX(int x);
     void setVolumeFromX(int x);
     QRect playRect() const;
@@ -54,6 +57,7 @@ private:
     QRect eqRect() const;
     QRect shotRect() const;
     QRect ccRect() const;
+    QRect muteRect() const;
 
     Track m_track;
     bool m_hasTrack;
@@ -65,6 +69,7 @@ private:
     bool m_volDrag;
     int m_volume;
     double m_rate;
+    bool m_muted;
 };
 
 #endif // PLAYERBAR_H

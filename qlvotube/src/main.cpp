@@ -10,6 +10,8 @@
 #include "version.h"
 #include <stdio.h>
 #include <string.h>
+#include <qfile.h>
+#include <qstringlist.h>
 #ifdef __linux__
 #include <malloc.h>
 #endif
@@ -58,6 +60,15 @@ int main(int argc, char* argv[]) {
     app.setApplicationVersion(APP_VERSION);
 #endif
 
+    /* 二期同步:argv 位置参数=多文件导入(跳过选项;文件须存在) */
+    QStringList mediaFiles;
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] == '-' || argv[i][0] == '\0')
+            continue;
+        if (QFile::exists(QString::fromLocal8Bit(argv[i])))
+            mediaFiles << QString::fromLocal8Bit(argv[i]);
+    }
+
     if (showVersion) {
         printf("qlvotube %s\n", APP_VERSION);
         return 0;
@@ -78,10 +89,14 @@ int main(int argc, char* argv[]) {
     QtappSetup::setQuitOnExit(false);
 
     MainWindow window;
+    if (!mediaFiles.isEmpty())
+        window.setAutoplayFiles(mediaFiles);
     qSetAppIcon(app_icon);
     qSetWindowTitle(&window, _("app_title"));
     window.show();
     qSetAppIcon(app_icon);
+    if (!mediaFiles.isEmpty())
+        window.startAutoplayFiles();
 
     QtappSetup::setQuitOnExit(true);
 
