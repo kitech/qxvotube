@@ -5,6 +5,8 @@
 #include "hongguo/parse.h"
 #include "youtube/parse.h"
 #include "douyin/parse.h"
+#include "xiaohongshu/parse.h"
+#include "xiaohongshu/ssr.h"
 #include "common/qcjson.h"
 
 #include <QCoreApplication>
@@ -142,6 +144,75 @@ int main(int argc, char** argv) {
                   && items.first().extra.value(QString::fromUtf8("kind")).toString()
                          == QString::fromUtf8("hotword"),
               "douyin extra.kind=hotword");
+    }
+
+    // ── xiaohongshu ────────────────────────────────────────────
+    {
+        JRoot r(load(QString::fromUtf8("xhs_explore_state.json")));
+        const QList<VideoItem> items = xiaohongshu::parse::feedNotes(r.p);
+        check(items.size() >= 2, "xhs explore feeds>=2",
+              QString::number(items.size()));
+        check(!items.isEmpty()
+                  && !items.first().extra.value(QString::fromUtf8("xsecToken"))
+                          .toString().isEmpty(),
+              "xhs feed 带 xsecToken(详情必需)");
+        check(!items.isEmpty() && !items.first().uid.isEmpty(),
+              "xhs feed 带作者 uid(用于 userVideos)");
+    }
+    {
+        JRoot r(load(QString::fromUtf8("xhs_detail_state.json")));
+        // 从 fixture 里取一个 noteId
+        QString noteId;
+        if (cJSON* map = jobj(jobj(r.p, "note"), "noteDetailMap")) {
+            cJSON* it = nullptr;
+            cJSON_ArrayForEach(it, map) { noteId = QString::fromUtf8(it->string); break; }
+        }
+        VideoItem vi;
+        QList<Stream> streams;
+        const Result res =
+            xiaohongshu::parse::noteDetail(r.p, noteId, &vi, &streams);
+        check(res.code == Err::Ok && !streams.isEmpty(),
+              "xhs noteDetail 视频流", res.message);
+        check(!streams.isEmpty()
+                  && streams.first().url.startsWith(QString::fromUtf8("https://")),
+              "xhs 视频 URL 已 http→https");
+        check(!streams.isEmpty()
+                  && streams.first().extra.value(QString::fromUtf8("backupUrls"))
+                         .toString().contains(QString::fromUtf8("\n")),
+              "xhs backupUrls 备用直链");
+    }
+    {
+        JRoot r(load(QString::fromUtf8("xhs_user_state.json")));
+        const QList<VideoItem> items = xiaohongshu::parse::userNotes(r.p);
+        check(items.size() >= 2, "xhs userNotes>=2", QString::number(items.size()));
+        check(!items.isEmpty()
+                  && !items.first().extra.value(QString::fromUtf8("xsecToken"))
+                          .toString().isEmpty(),
+              "xhs userNotes 带 xsecToken");
+        // 实测:用户页 SSR 的 note id 常为空 → 条目标 playable=false
+        bool hasMeta = false;
+        for (const VideoItem& it : items)
+            if (!it.title.isEmpty()) hasMeta = true;
+        check(hasMeta, "xhs userNotes 元数据(标题)可读");
+    }
+    {
+        QString nid, tok;
+        const bool ok = xiaohongshu::parse::parseShareUrl(
+            QString::fromUtf8(
+                "https://www.xiaohongshu.com/explore/6a7016af0000000022011c6f"
+                "?xsec_token=ABC%3D&xsec_source=pc_share"),
+            &nid, &tok);
+        check(ok && nid.size() == 24 && tok == QString::fromUtf8("ABC%3D"),
+              "xhs parseShareUrl", nid + QString::fromUtf8(" / ") + tok);
+    }
+    {
+        const QByteArray html =
+            "<script>window.__INITIAL_STATE__ = {\"a\":undefined,\"b\":2};</script>";
+        JRoot r;
+        check(xiaohongshu::ssr::extractInitialState(html, r)
+                  && cJSON_GetObjectItemCaseSensitive(r.p, "a") != nullptr
+                  && cJSON_GetObjectItemCaseSensitive(r.p, "b") != nullptr,
+              "xhs ssr: undefined→null 可解析");
     }
 
     std::printf("parse: %s\n", g_fail ? "FAILED" : "all green");

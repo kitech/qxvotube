@@ -43,6 +43,9 @@ add_library(qxvproviders STATIC
     bilibili/parse.cpp
     douyin/douyinprovider.cpp
     douyin/parse.cpp
+    xiaohongshu/xiaohongshuprovider.cpp
+    xiaohongshu/ssr.cpp
+    xiaohongshu/parse.cpp
     youtube/parse.cpp
     common/hgcenc/spade.cpp
     common/hgcenc/mp4box.cpp

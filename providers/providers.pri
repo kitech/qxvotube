@@ -62,6 +62,9 @@ greaterThan(QT_MAJOR_VERSION, 4) {
         $$QXV_PROVIDERS_DIR/hongguo/parse.cpp \
         $$QXV_PROVIDERS_DIR/douyin/douyinprovider.cpp \
         $$QXV_PROVIDERS_DIR/douyin/parse.cpp \
+        $$QXV_PROVIDERS_DIR/xiaohongshu/xiaohongshuprovider.cpp \
+        $$QXV_PROVIDERS_DIR/xiaohongshu/parse.cpp \
+        $$QXV_PROVIDERS_DIR/xiaohongshu/ssr.cpp \
         $$QXV_PROVIDERS_DIR/factory.cpp
 
     HEADERS += \

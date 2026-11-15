@@ -37,6 +37,15 @@ static bool checkLang(const QString& dir, const QString& lang, int* missing) {
             ++(*missing);
         }
     }
+    // 认证维度键(与 Err 正交,需单独校验)
+    const char* authKeys[] = {
+        "auth_guest_need_login", "auth_cookie_missing", "auth_cookie_expired",
+        "auth_oauth_expired", "auth_password_failed", "auth_server" };
+    for (const char* k : authKeys)
+        if (jstr(eobj, k).isEmpty()) {
+            std::printf("[FAIL] %s: missing error.%s\n", qPrintable(lang), k);
+            ++(*missing);
+        }
     return true;
 }
 

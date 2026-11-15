@@ -44,7 +44,13 @@
   "authexpired": "登入已過期",
   "paywalled": "付費內容",
   "geoblocked": "地區限制",
-  "unsupported": "暫不支援該平台"
+  "unsupported": "暫不支援該平台",
+  "auth_guest_need_login": "此功能需要登入（目前為訪客）",
+  "auth_cookie_missing": "未設定 Cookie 或 Cookie 不完整",
+  "auth_cookie_expired": "Cookie 已失效，請更新",
+  "auth_oauth_expired": "授權已過期，請重新授權",
+  "auth_password_failed": "使用者名稱或密碼錯誤（或需二次驗證）",
+  "auth_server": "伺服器回傳錯誤"
  },
  "queue": {
   "title": "播放佇列"

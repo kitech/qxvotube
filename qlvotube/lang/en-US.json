@@ -44,7 +44,13 @@
   "authexpired": "Login expired",
   "paywalled": "Paid content",
   "geoblocked": "Region restricted",
-  "unsupported": "Platform not supported"
+  "unsupported": "Platform not supported",
+  "auth_guest_need_login": "This feature requires login (guest mode)",
+  "auth_cookie_missing": "Cookie not set or incomplete",
+  "auth_cookie_expired": "Cookie expired, please update it",
+  "auth_oauth_expired": "Authorization expired, please sign in again",
+  "auth_password_failed": "Invalid username or password (or 2FA required)",
+  "auth_server": "Server returned an error"
  },
  "queue": {
   "title": "Play Queue"

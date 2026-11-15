@@ -37,8 +37,8 @@ int main(int argc, char** argv) {
         p->search(qFromUtf8("travel"), 1,
             [p, wantQuality, &pending, &failures, &done, pid](
                 Result res, const QList<VideoItem>& items, bool) {
-            if (res.code == Err::Unsupported) {
-                // 能力不支持(如抖音仅热榜)= 跳过,不算失败
+            if (res.code == Err::Unsupported || res.code == Err::NeedAuth) {
+                // 能力不支持/需登录(抖音仅热榜、小红书搜索)= 跳过,不算失败
                 std::printf("[skip] %-9s search: %s\n", qPrintable(pid),
                             qPrintable(res.message));
                 done(); return;
@@ -130,7 +130,7 @@ int main(int argc, char** argv) {
         for (VideoProvider* p : provs) delete p;
         return failures == 0 ? 0 : 1;
     }
-    QTimer::singleShot(90000, &app, []() {
+    QTimer::singleShot(150000, &app, []() {
         std::printf("[TIMEOUT] 90s\n");
         QCoreApplication::exit(2);
     });

@@ -3,6 +3,28 @@
 
 namespace qxv {
 
+QString i18nKeyFor(const Result& r) {
+    if (r.code == Err::NeedAuth || r.code == Err::AuthExpired) {
+        const QString mode = r.detail.value(qFromUtf8("auth.mode")).toString();
+        const bool provided = r.detail.value(qFromUtf8("auth.provided")).toBool();
+        if (r.code == Err::AuthExpired) {
+            if (mode == qFromUtf8("oauth"))
+                return qFromUtf8("error.auth_oauth_expired");
+            if (mode == qFromUtf8("password"))
+                return qFromUtf8("error.auth_password_failed");
+            return qFromUtf8("error.auth_cookie_expired");
+        }
+        if (!provided) return qFromUtf8("error.auth_guest_need_login");
+        if (mode == qFromUtf8("cookie"))
+            return qFromUtf8("error.auth_cookie_missing");
+        if (mode == qFromUtf8("oauth"))
+            return qFromUtf8("error.auth_oauth_expired");
+        if (mode == qFromUtf8("password"))
+            return qFromUtf8("error.auth_password_failed");
+    }
+    return i18nKeyFor(r.code);
+}
+
 QString i18nKeyFor(Err code) {
     switch (code) {
     case Err::Ok:             return qFromUtf8("");

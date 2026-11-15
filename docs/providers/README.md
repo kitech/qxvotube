@@ -69,6 +69,7 @@ provs[0]->search("travel", 1, [](qxv::Result res,
 | hongguo | 官网公开口 + App 零签名链 | ✅ search(分页)/homeFeed(官网热播 4 类)/detail/resolve(1080p 本地解密) | DeviceAuth |
 | douyin | 热榜免签(49 条);search/resolve 需 a_bogus | 🟡 homeFeed 已落码,其余 Unsupported | DeviceAuth |
 | tiktok | 需 X-Bogus/msToken + 可达代理 | ⏸ 阻塞(当前代理不可达) | DeviceAuth |
+| xiaohongshu | 游客 SSR(explore/detail+token/user);搜索需登录 | 🟡 homeFeed/detail/resolve 已通;search=NeedAuth;userVideos 软风控时降级 | NoAuth |
 | xiaohongshu/kuaishou | | P3 | CookieAuth |
 | xigua/haokan/acfun/migu | | P4 | |
 
@@ -79,6 +80,25 @@ provs[0]->search("travel", 1, [](qxv::Result res,
 - **Qt3 构建整体排除 providers**,引用方走 stub;providers 库本体 Qt>=5。
 - **错误传导**:所有回调 `Result{Err 枚举, message, detail}`;UI 用 errortext 的
   `error.*` i18n key 显示;真人识别走 `CaptchaRequired`(detail.captchaUrl)弹框。
+
+## 调研文档(扁平,文件名带站点)
+
+- `xiaohongshu-research.md` —— 小红书免登录可行性/风控阈值/可实现范围
+- `debugging.md` —— 跨平台踩坑记录(httplib/线程/重试/缓存)
+- `design.md` —— 总体设计
+
+### 错误模型(认证感知,2026-11-15)
+
+| detail key | 含义 |
+|---|---|
+| `auth.mode` | `none` / `cookie` / `oauth` / `password` |
+| `auth.provided` | 是否已设置凭证 |
+| `auth.expired` | 服务端是否判失效 |
+| `http.status` / `server.code` / `server.message` | 原始响应(消息已脱敏) |
+
+`errortext::i18nKeyFor(Result)` 优先按认证维度选键:
+`error.auth_guest_need_login` / `auth_cookie_missing` / `auth_cookie_expired` /
+`auth_oauth_expired` / `auth_password_failed`；**凭证明文绝不进 message/detail**。
 
 ## 引用来源
 

@@ -62,3 +62,15 @@ add_test(NAME providers_localstream COMMAND localstream)
 # YouTube 高清晰度(HLS 合流;需外网+代理+yt-dlp+ffmpeg,手动运行)
 add_executable(ytdash ytdash.test.cpp)
 target_link_libraries(ytdash PRIVATE qxvproviders)
+
+# 小红书免登录链路(需外网;节流均值 6s,手动运行)
+add_executable(xhs xhs.test.cpp)
+target_link_libraries(xhs PRIVATE qxvproviders)
+# 直接 include httplib.h 的测试 TU 必须与库内同一份编译定义(否则 ODR → SSL 断言/异常)
+target_compile_definitions(xhs PRIVATE
+    CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
+
+# 认证错误模型(离线,进 ctest)
+add_executable(autherr autherror.test.cpp)
+target_link_libraries(autherr PRIVATE qxvproviders)
+add_test(NAME providers_autherror COMMAND autherr)
