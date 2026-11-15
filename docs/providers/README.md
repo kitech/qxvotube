@@ -96,6 +96,19 @@ provs[0]->search("travel", 1, [](qxv::Result res,
 | `auth.expired` | 服务端是否判失效 |
 | `http.status` / `server.code` / `server.message` | 原始响应(消息已脱敏) |
 
+非认证错误用 `withServer(Result, httpStatus, serverCode, serverMsg)` 附加原始信息
+(不写 `auth.*`)。
+
+**各源错误映射**
+
+| provider | 平台信号 → Err |
+|---|---|
+| bilibili | `-101`→`NeedAuth`(有凭证则 `AuthExpired`)、`-412`→`RateLimit`、`-404`→`NotFound` |
+| youtube | `LOGIN_REQUIRED`→`NeedAuth`/`AuthExpired`、`captcha/not a bot`→`CaptchaRequired`、`UNPLAYABLE`→`GeoBlocked` |
+| hongguo | web `403/400 public_fallback_unavailable`→`Paywalled`；App `code!=0`→`Parse` |
+| douyin | 未实现能力→`Unsupported`(附 `auth.mode`);热榜 `status_code!=0`→`Parse` |
+| xiaohongshu | 搜索→`NeedAuth`；`302→/login`→`CaptchaRequired`；`406/461`→`RateLimit` |
+
 `errortext::i18nKeyFor(Result)` 优先按认证维度选键:
 `error.auth_guest_need_login` / `auth_cookie_missing` / `auth_cookie_expired` /
 `auth_oauth_expired` / `auth_password_failed`；**凭证明文绝不进 message/detail**。

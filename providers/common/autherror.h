@@ -85,6 +85,18 @@ inline Result authFail(Err code, const AuthContext& ctx, const QString& devMsg,
     return r;
 }
 
+// 非认证类错误:只附加服务端原始信息(不写 auth.*)
+inline Result withServer(Result r, int httpStatus,
+                         const QString& serverCode = QString(),
+                         const QString& serverMsg = QString()) {
+    if (httpStatus > 0) r.detail.insert(qFromUtf8("http.status"), httpStatus);
+    if (!serverCode.isEmpty())
+        r.detail.insert(qFromUtf8("server.code"), serverCode);
+    if (!serverMsg.isEmpty())
+        r.detail.insert(qFromUtf8("server.message"), sanitizeServerMsg(serverMsg));
+    return r;
+}
+
 inline AuthMode authModeOf(const Result& r) {
     const QString m = r.detail.value(qFromUtf8("auth.mode")).toString();
     if (m == qFromUtf8("cookie")) return AuthMode::Cookie;

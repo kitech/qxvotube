@@ -6,6 +6,7 @@
 #include "common/qcjson.h"
 #include "parse.h"
 #include "common/quality.h"
+#include "common/autherror.h"
 #include "common/hgapp/hgapp.h"
 #include "common/hgstream/hgstream.h"
 
@@ -226,8 +227,11 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
             if (r.status == 400 || r.status == 403) {
                 // 403/400 public_fallback_unavailable = 试看集外(VIP/付费墙,
                 // 两者实测均为该错误体,39 字节);不重试
-                cb2(Result::fail(Err::Paywalled,
-                   qFromUtf8("hongguo: 试看集外(HTTP %1)").arg(r.status)), {});
+                cb2(withServer(
+                    Result::fail(Err::Paywalled,
+                        qFromUtf8("hongguo: 试看集外(HTTP %1)").arg(r.status)),
+                    r.status, QString::fromUtf8("public_fallback_unavailable"),
+                    QString::fromUtf8(r.body.left(200))), {});
                 return;
             }
             if (!r.ok()) { cb2(Result::fail(Err::Network, r.error), {}); return; }

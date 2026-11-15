@@ -2,6 +2,7 @@
 
 #include "common/debuglog.h"
 #include "common/qcjson.h"
+#include "common/autherror.h"
 
 #include <QDateTime>
 #include <QUrlQuery>
@@ -407,9 +408,11 @@ void videoModel(const QString& vid,
             if (!root.ok()) { cb(Result::fail(Err::Parse, "not json"), {}); return; }
             const long long code = jint(root.p, "code", -1);
             if (code != 0) {
-                cb(Result::fail(Err::Parse,
-                   qFromUtf8("hongguo-app: code=%1 %2")
-                       .arg(code).arg(jstr(root.p, "message"))), {});
+                cb(withServer(
+                    Result::fail(Err::Parse,
+                        qFromUtf8("hongguo-app: code=%1 %2")
+                            .arg(code).arg(jstr(root.p, "message"))),
+                    200, QString::number(code), jstr(root.p, "message")), {});
                 return;
             }
             const cJSON* vd = jobj(jobj(root.p, "data"), vid.toUtf8().constData());

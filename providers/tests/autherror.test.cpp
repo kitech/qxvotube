@@ -89,6 +89,20 @@ int main(int argc, char** argv) {
                   == QString::fromUtf8("error.network"), "key: network 不变");
     }
 
+    // ⑥ withServer:非认证错误只写 server.* 不写 auth.*
+    {
+        Result w = withServer(Result::fail(Err::RateLimit, QString::fromUtf8("x")),
+                              200, QString::fromUtf8("-412"),
+                              QString::fromUtf8("请求过于频繁"));
+        check(w.detail.contains(QString::fromUtf8("http.status"))
+                  && !w.detail.contains(QString::fromUtf8("auth.mode")),
+              "withServer: 不写 auth.*");
+        check(w.detail.value(QString::fromUtf8("server.code")).toString()
+                  == QString::fromUtf8("-412"), "withServer: server.code");
+        check(i18nKeyFor(w) == QString::fromUtf8("error.ratelimit"),
+              "withServer: i18n 仍按 Err");
+    }
+
     // ⑤ sanitize
     {
         QString longTail;

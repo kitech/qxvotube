@@ -194,3 +194,9 @@ ffprobe 校验 itag18 直链:`h264 640x360 + aac, duration 1953s` → 真可播�
 - **播放器必须自备代理**(分片直连 googlevideo);`Stream.extra.proxy` 已给出。
 - HLS master 只能按"≤请求高度"裁剪,不能精确锁单档(多码率自适应由播放器决定)。
 - 依赖 yt-dlp 的外部二进制(可选,缺失自动回落 360p)。
+## 错误映射(2026-11-15)
+
+- `LOGIN_REQUIRED`：无凭证 → `NeedAuth`；有凭证 → `AuthExpired`
+- `captcha/not a bot/unusual traffic` → `CaptchaRequired` + `captchaUrl`
+- `UNPLAYABLE` → `GeoBlocked`；其它 → `NotFound`
+- detail 带 `http.status=200`、`server.code=<playabilityStatus>`、`server.message=<reason>`

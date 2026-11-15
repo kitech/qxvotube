@@ -409,3 +409,9 @@ dong/xb 红果短剧.py 的 `_StreamSession` 正是 H2b 规划的本地流式解
   给 hasMore。
 - 首页 hasMore 现为 `true`;跨页与首页有重叠(首页是每类 top9),UI 按 id 去重。
 - 验收:`tests/homefeed hongguo` → p1 36 / p2 20(dup=9,容忍)。
+## 错误映射(2026-11-15)
+
+- 官网 `403/400 public_fallback_unavailable` → `Paywalled`
+  (detail: `http.status`, `server.code=public_fallback_unavailable`, `server.message`)
+- App 链 `code!=0` → `Parse`(detail: `server.code`, `server.message`)
+- douyin 未实现能力 → `Unsupported`(附 `auth.mode`);热榜 `status_code!=0` → `Parse`

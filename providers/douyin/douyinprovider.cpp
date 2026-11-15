@@ -1,5 +1,6 @@
 #include "douyinprovider.h"
 #include "common/qcjson.h"
+#include "common/autherror.h"
 #include "parse.h"
 #include "common/debuglog.h"
 #include "common/fingerprint.h"
@@ -59,8 +60,9 @@ void DouyinProvider::homeFeed(int page, SearchCb cb) {
         if (!root.ok()) { cb(Result::fail(Err::Parse, "not json"), {}, false); return; }
         const long long code = jint(root.p, "status_code", -1);
         if (code != 0) {
-            cb(Result::fail(Err::Parse,
-               qFromUtf8("douyin: status_code=%1").arg(code)), {}, false);
+            cb(withServer(Result::fail(Err::Parse,
+                   qFromUtf8("douyin: status_code=%1").arg(code)),
+                   200, QString::number(code), QString()), {}, false);
             return;
         }
         const QList<VideoItem> items = douyin::parse::hotWords(root.p);
@@ -77,17 +79,20 @@ void DouyinProvider::homeFeed(int page, SearchCb cb) {
 void DouyinProvider::search(const QString& kw, int page, SearchCb cb) {
     Q_UNUSED(kw);
     Q_UNUSED(page);
-    cb(Result::fail(Err::Unsupported, qFromUtf8(kDramaHint)), {}, false);
+    cb(authFail(Err::Unsupported, credContext(m_cred),
+                qFromUtf8(kDramaHint)), {}, false);
 }
 
 void DouyinProvider::detail(const QString& id, DetailCb cb) {
     Q_UNUSED(id);
-    cb(Result::fail(Err::Unsupported, qFromUtf8(kDramaHint)), {}, {});
+    cb(authFail(Err::Unsupported, credContext(m_cred),
+                qFromUtf8(kDramaHint)), {}, {});
 }
 
 void DouyinProvider::resolve(const QString& id, ResolveCb cb) {
     Q_UNUSED(id);
-    cb(Result::fail(Err::Unsupported, qFromUtf8(kDramaHint)), {});
+    cb(authFail(Err::Unsupported, credContext(m_cred),
+                qFromUtf8(kDramaHint)), {});
 }
 
 } // namespace qxv

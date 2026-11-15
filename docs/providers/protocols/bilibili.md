@@ -77,3 +77,8 @@
 - `pages` 缺失时用 `/x/player/pagelist?bvid=` 兜底。
 - 坑:resolve 内部取分P cid 必须读 `extra.cid`,不能用 `part.id`
   (复合形式会喂成非法 cid → `-400 请求错误`)。
+## 错误映射(2026-11-15)
+
+- `code=-101`(未登录)：无凭证 → `NeedAuth`；已设凭证 → `AuthExpired`
+- `code=-412`(风控)：`RateLimit`；`-404`：`NotFound`
+- 以上 detail 均带 `http.status=200`、`server.code`、`server.message`

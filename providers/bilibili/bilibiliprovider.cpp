@@ -7,6 +7,7 @@
 #include "common/qcjson.h"
 #include "parse.h"
 #include "common/quality.h"
+#include "common/autherror.h"
 
 #include <QUrlQuery>
 #include <functional>
@@ -30,19 +31,29 @@ void BilibiliProvider::cancel() {
 static const char* kMod = "bilibili";
 
 // 校验 REST 信封:code!=0 → 风控映射;root 在 root 输出(调用方持 JRoot)
-static Result checkApi(const QByteArray& body, JRoot& root) {
+// ctx:凭证状态(用于区分"游客需登录"与"凭证失效")
+static Result checkApi(const QByteArray& body, JRoot& root,
+                       const AuthContext& ctx = AuthContext()) {
     root.parse(body);
     if (!root.ok())
         return Result::fail(Err::Parse, qFromUtf8("bilibili: body not json"));
     const int code = static_cast<int>(jint(root.p, "code", -1));
     if (code != 0) {
+        const QString msg = jstr(root.p, "message");
+        const QString codeStr = QString::number(code);
         // -412 风控 / -101 未登录 / -404 不存在
+        if (code == -101) {
+            AuthContext c = ctx;
+            c.expired = ctx.provided;   // 有凭证仍 -101 = 失效
+            return authFail(c.provided ? Err::AuthExpired : Err::NeedAuth, c,
+                            qFromUtf8("bilibili code=%1 %2").arg(code).arg(msg),
+                            200, codeStr, msg);
+        }
         Err e = code == -412 ? Err::RateLimit
-              : code == -101 ? Err::NeedAuth
               : code == -404 ? Err::NotFound : Err::Parse;
-        return Result::fail(e,
-            qFromUtf8("bilibili code=%1 %2")
-                .arg(code).arg(jstr(root.p, "message")));
+        return withServer(
+            Result::fail(e, qFromUtf8("bilibili code=%1 %2").arg(code).arg(msg)),
+            200, codeStr, msg);
     }
     return Result::ok();
 }
@@ -85,15 +96,17 @@ void BilibiliProvider::search(const QString& kw, int page, SearchCb cb) {
     q.addQueryItem("page", QString::number(page));
     q.addQueryItem("page_size", "20");   // 实测:pagesize=20,numPages=50
     apiGet("/x/web-interface/search/all/v2", q.toString(QUrl::FullyEncoded),
-           [cb, page, kw](const NetResponse& r) {
+           [this, cb, page, kw](const NetResponse& r) {
         if (!r.ok()) {
-            cb(Result::fail(Err::Network, r.error.isEmpty()
-                   ? qFromUtf8("http %1").arg(r.status) : r.error), {}, false);
+            cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error),
+                   r.status, QString(), QString::fromUtf8(r.body.left(200))),
+               {}, false);
             return;
         }
         Result res;
         JRoot root;
-        res = checkApi(r.body, root);
+        res = checkApi(r.body, root, credContext(m_cred));
         if (res.code != Err::Ok) { cb(res, {}, false); return; }
         const cJSON* data = jobj(root.p, "data");
         const QList<VideoItem> items = bilibili::parse::searchResult(root.p);
@@ -115,14 +128,16 @@ void BilibiliProvider::homeFeed(int page, SearchCb cb) {
     q.addQueryItem("pn", QString::number(page));
     q.addQueryItem("ps", "20");
     apiGet("/x/web-interface/popular", q.toString(QUrl::FullyEncoded),
-           [cb, page](const NetResponse& r) {
+           [this, cb, page](const NetResponse& r) {
         if (!r.ok()) {
-            cb(Result::fail(Err::Network, r.error.isEmpty()
-                   ? qFromUtf8("http %1").arg(r.status) : r.error), {}, false);
+            cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error),
+                   r.status, QString(), QString::fromUtf8(r.body.left(200))),
+               {}, false);
             return;
         }
         JRoot root;
-        const Result res = checkApi(r.body, root);
+        const Result res = checkApi(r.body, root, credContext(m_cred));
         if (res.code != Err::Ok) { cb(res, {}, false); return; }
         bool hasMore = false;
         const QList<VideoItem> items = bilibili::parse::popular(root.p, &hasMore);
@@ -139,7 +154,7 @@ void BilibiliProvider::detail(const QString& id, DetailCb cb) {
            [this, cb, id](const NetResponse& r) {
         if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}, {}); return; }
         JRoot root;
-        const Result res = checkApi(r.body, root);
+        const Result res = checkApi(r.body, root, credContext(m_cred));
         if (res.code != Err::Ok) { cb(res, {}, {}); return; }
         VideoItem vi;
         QList<VideoItem> parts;
@@ -151,10 +166,15 @@ void BilibiliProvider::detail(const QString& id, DetailCb cb) {
         QUrlQuery q2;
         q2.addQueryItem("bvid", vi.id);
         apiGet("/x/player/pagelist", q2.toString(QUrl::FullyEncoded),
-               [cb, vi](const NetResponse& r2) {
-            if (!r2.ok()) { cb(Result::fail(Err::Network, r2.error), vi, {}); return; }
+               [this, cb, vi](const NetResponse& r2) {
+            if (!r2.ok()) {
+                cb(withServer(Result::fail(Err::Network, r2.error), r2.status,
+                              QString(), QString::fromUtf8(r2.body.left(200))),
+                   vi, {});
+                return;
+            }
             JRoot root2;
-            const Result res2 = checkApi(r2.body, root2);
+            const Result res2 = checkApi(r2.body, root2, credContext(m_cred));
             QList<VideoItem> parts2;
             if (res2.code == Err::Ok)
                 parts2 = bilibili::parse::pageList(root2.p, vi.id);
@@ -223,9 +243,13 @@ void BilibiliProvider::resolveQuality(const QString& id, const QString& quality,
         q.addQueryItem("platform", "html5");
         apiGet("/x/player/playurl", q.toString(QUrl::FullyEncoded),
                [this, cb, bvid2, quality, ckey](const NetResponse& r) {
-            if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}); return; }
+            if (!r.ok()) {
+                cb(withServer(Result::fail(Err::Network, r.error), r.status,
+                              QString(), QString::fromUtf8(r.body.left(200))), {});
+                return;
+            }
             JRoot root;
-            const Result res = checkApi(r.body, root);
+            const Result res = checkApi(r.body, root, credContext(m_cred));
             if (res.code != Err::Ok) { cb(res, {}); return; }
             const cJSON* data = jobj(root.p, "data");
             PlayResult pr;

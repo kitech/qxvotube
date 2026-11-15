@@ -9,6 +9,7 @@
 #include "parse.h"
 #include "common/quality.h"
 #include "common/ytdlp.h"
+#include "common/autherror.h"
 #include "common/localstream/localstream.h"
 
 #include <QUrlQuery>
@@ -228,29 +229,36 @@ static QByteArray continuationBody(const QString& token) {
 }
 
 // 解析 playabilityStatus:非 OK 转 Result
-static Result playability(const cJSON* root) {
+// ctx:凭证状态;解析结果附 server.code(=status)/server.message(=reason)
+static Result playability(const cJSON* root,
+                          const AuthContext& ctx = AuthContext()) {
     const cJSON* ps = jobj(root, "playabilityStatus");
     const QString st = jstr(ps, "status");
     if (st == qFromUtf8("OK")) return Result::ok();
     const QString reason = jstr(ps, "reason");
     const QString low = reason.toLower();
-    Err e = st.contains(qFromUtf8("LOGIN")) ? Err::NeedAuth
-          : st.contains(qFromUtf8("UNPLAYABLE")) ? Err::GeoBlocked
-          : Err::NotFound;
-    // 真人识别传导:bot 检查(登录可解)→ NeedAuth;
+    const QString devMsg =
+        qFromUtf8("youtube playability %1: %2").arg(st, reason);
+
+    // 真人识别传导:bot 检查(登录可解)→ NeedAuth/AuthExpired;
     // unusual traffic/captcha(需人机验证)→ CaptchaRequired,detail.captchaUrl
-    // 供 UI 弹对话框打开 challenge(§docs/protocols/youtube.md)
     if (low.contains(qFromUtf8("captcha")) ||
         low.contains(qFromUtf8("unusual traffic")) ||
         low.contains(qFromUtf8("not a bot"))) {
-        e = Err::CaptchaRequired;
-        Result r = Result::fail(e, qFromUtf8("youtube playability %1: %2")
-                                    .arg(st, reason));
-        r.detail.insert(qFromUtf8("captchaUrl"), qFromUtf8("https://www.youtube.com/"));
-        return r;
+        QVariantMap extra;
+        extra.insert(qFromUtf8("captchaUrl"),
+                     qFromUtf8("https://www.youtube.com/"));
+        return authFail(Err::CaptchaRequired, ctx, devMsg, 200, st, reason, extra);
     }
-    return Result::fail(e, qFromUtf8("youtube playability %1: %2")
-                            .arg(st, reason));
+    if (st.contains(qFromUtf8("LOGIN"))) {
+        AuthContext c = ctx;
+        c.expired = ctx.provided;
+        return authFail(c.provided ? Err::AuthExpired : Err::NeedAuth, c,
+                        devMsg, 200, st, reason);
+    }
+    const Err e = st.contains(qFromUtf8("UNPLAYABLE")) ? Err::GeoBlocked
+                                                    : Err::NotFound;
+    return withServer(Result::fail(e, devMsg), 200, st, reason);
 }
 
 void YoutubeProvider::search(const QString& kw, int page, SearchCb cb) {
@@ -360,7 +368,12 @@ void YoutubeProvider::detail(const QString& id, DetailCb cb) {
         const QByteArray body = dumpBody(root);
         innertube("browse", body, kDefaultClient.ua,
             [cb, id](const NetResponse& r) {
-            if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}, {}); return; }
+            if (!r.ok()) {
+                cb(withServer(Result::fail(Err::Network, r.error), r.status,
+                              QString(), QString::fromUtf8(r.body.left(200))),
+                   {}, {});
+                return;
+            }
             JRoot root2(r.body);
             if (!root2.ok()) { cb(Result::fail(Err::Parse, "not json"), {}, {}); return; }
             const QList<QString> ids = youtube::parse::playlistVideoIds(root2.p, 100);
@@ -392,11 +405,16 @@ void YoutubeProvider::detail(const QString& id, DetailCb cb) {
     PotokenSource::fetch([this, id, cb](const Potoken& p) {
         const char* ua = p.valid() ? kWebUa : kClients[0].ua;
         innertube("player", playerBody(id, p), ua,
-            [cb, id](const NetResponse& r) {
-            if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}, {}); return; }
+            [this, cb, id](const NetResponse& r) {
+            if (!r.ok()) {
+                cb(withServer(Result::fail(Err::Network, r.error), r.status,
+                              QString(), QString::fromUtf8(r.body.left(200))),
+                   {}, {});
+                return;
+            }
             JRoot root(r.body);
             if (!root.ok()) { cb(Result::fail(Err::Parse, "not json"), {}, {}); return; }
-            Result res = playability(root.p);
+            Result res = playability(root.p, credContext(m_cred));
             if (res.code != Err::Ok) { cb(res, {}, {}); return; }
             const cJSON* vd = jobj(root.p, "videoDetails");
             VideoItem vi;
@@ -578,7 +596,7 @@ void YoutubeProvider::resolveProgressive(const QString& id, const QString& quali
                 if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}); return; }
                 JRoot root(r.body);
                 if (!root.ok()) { cb(Result::fail(Err::Parse, "not json"), {}); return; }
-                Result res = playability(root.p);
+                Result res = playability(root.p, credContext(m_cred));
                 if (res.code != Err::Ok) { cb(res, {}); return; }
                 PlayResult pr;
                 pr.item.id = id;
