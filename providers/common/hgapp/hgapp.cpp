@@ -6,6 +6,8 @@
 #include <QDateTime>
 #include <QUrlQuery>
 
+#include <QMap>
+
 #include <random>
 
 // 口径见 hgapp.h 顶部注释 + docs/protocols/bytedance.md §6.1(2026-11-15 线上实测)。
@@ -25,6 +27,9 @@ const char* kUa =
     "QuicVersion:c67e9834 2025-09-08)";
 
 Device g_dev;
+// 注册合流:并发 ensureDevice 只真正注册一次,其余排队等结果
+bool g_registering = false;
+QList<std::function<void(const Result&, const Device&)>> g_waiters;
 
 std::mt19937& randGen() {
     static std::mt19937 g(static_cast<unsigned>(
@@ -138,6 +143,8 @@ void doRegister(std::function<void(const Result&, const Device&)> cb) {
     };
     req.body = body;
     req.timeoutSec = 20;
+    req.maxAttempts = 2;      // 注册失败(5xx/超时)重试一次
+    req.retryDelayMs = 400;
     DBG_P(kMod, Debug, "device_register (%d bytes)", body.size());
 
     net().send(req, [cb](const NetResponse& r) {
@@ -179,6 +186,14 @@ void doRegister(std::function<void(const Result&, const Device&)> cb) {
 Device cachedDevice() { return g_dev; }
 void setDevice(const Device& d) { g_dev = d; }
 
+static void finishRegister(const Result& r, const Device& d) {
+    g_registering = false;
+    const QList<std::function<void(const Result&, const Device&)>> waiters =
+        g_waiters;
+    g_waiters.clear();
+    for (int i = 0; i < waiters.size(); ++i) waiters[i](r, d);
+}
+
 void ensureDevice(std::function<void(const Result&, const Device&)> cb) {
     // env 覆盖优先(真机抓包可用)
     const QString envDid = QXV_ENV("QXVOTUBE_HG_DEVICE_ID");
@@ -193,11 +208,151 @@ void ensureDevice(std::function<void(const Result&, const Device&)> cb) {
         return;
     }
     if (g_dev.valid()) { cb(Result::ok(), g_dev); return; }
-    doRegister(std::move(cb));
+    if (g_registering) {   // 已有注册在途:排队,避免并发注册(服务端会给 0)
+        DBG_P(kMod, Debug, "device_register in-flight, queue waiter (%d)",
+              g_waiters.size() + 1);
+        g_waiters.append(std::move(cb));
+        return;
+    }
+    g_registering = true;
+    doRegister([cb](const Result& r, const Device& d) {
+        if (r.code == Err::Ok) {
+            g_dev = d;   // 只在成功时落缓存(失败不污染)
+        }
+        cb(r, d);
+        finishRegister(r, d);
+    });
+}
+
+namespace {
+
+// tracks 缓存:vid → (tracks, 过期时间);10 分钟(CDN 6h,取短更安全)
+struct TrackCacheEntry {
+    QList<Track> tracks;
+    qint64 expiresAt = 0;
+};
+QMap<QString, TrackCacheEntry>& trackCache() {
+    static QMap<QString, TrackCacheEntry> m;
+    return m;
+}
+const qint64 kTrackTtlMs = 10 * 60 * 1000;
+
+// 从 video_model JSON 字符串解析轨道列表
+bool parseTracks(const QString& vmStr, QList<Track>* out, QString* err) {
+    JRoot vm(vmStr.toUtf8());
+    if (!vm.ok()) { if (err) *err = qFromUtf8("video_model not json"); return false; }
+    const cJSON* list = jarr(vm.p, "video_list");
+    const long long expire = jint(vm.p, "url_expire");
+    QList<Track> tracks;
+    for (int i = 0; i < jsize(list); ++i) {
+        const cJSON* it = jat(list, i);
+        Track t;
+        const cJSON* meta = jobj(it, "video_meta");
+        t.definition = jstr(meta, "definition");
+        t.codecType = jstr(meta, "codec_type");
+        t.width = int(jint(meta, "width"));
+        t.height = int(jint(meta, "height"));
+        t.url = jstr(it, "main_url");
+        t.spadeA = jstr(jobj(it, "encrypt_info"), "spade_a");
+        t.urlExpire = expire;
+        if (!t.url.isEmpty() && !t.spadeA.isEmpty()) tracks.append(t);
+    }
+    if (tracks.isEmpty()) { if (err) *err = qFromUtf8("video_list 为空或缺 spade_a"); return false; }
+    *out = tracks;
+    return true;
+}
+
+} // namespace
+
+void videoModels(const QStringList& vids,
+                 std::function<void(const Result&,
+                                    const QMap<QString, QList<Track>>&)> cb) {
+    if (vids.isEmpty()) { cb(Result::ok(), QMap<QString, QList<Track>>()); return; }
+    ensureDevice([vids, cb](const Result& dr, const Device& d) {
+        if (dr.code != Err::Ok) { cb(dr, {}); return; }
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "dr_scene", "preload");
+        cJSON* bp = cJSON_CreateObject();
+        cJSON_AddNumberToObject(bp, "video_platform", 1024);
+        cJSON_AddBoolToObject(bp, "need_all_video_definition", 1);
+        cJSON_AddItemToObject(root, "biz_param", bp);
+        cJSON* map = cJSON_CreateObject();
+        cJSON* arr = cJSON_CreateArray();
+        for (int i = 0; i < vids.size(); ++i)
+            cJSON_AddItemToArray(arr, cJSON_CreateString(vids[i].toUtf8().constData()));
+        cJSON_AddItemToObject(map, "1", arr);
+        cJSON_AddItemToObject(root, "mixed_video_id_map", map);
+        char* s = cJSON_PrintUnformatted(root);
+        const QByteArray body(s);
+        cJSON_free(s);
+        cJSON_Delete(root);
+
+        NetRequest req;
+        req.method = qFromUtf8("POST");
+        req.url = qFromUtf8("%1/novel/player/multi_video_model/v1/?%2")
+                      .arg(qFromUtf8(kApiHost), commonQuery(d));
+        req.headers = {
+            { "Content-Type", "application/json; charset=UTF-8" },
+            { "User-Agent", QString::fromUtf8(kUa) },
+        };
+        req.body = body;
+        req.timeoutSec = 30;
+        req.maxAttempts = 2;
+        req.retryOnEmpty = true;
+        DBG_P(kMod, Debug, "video_models %d vids", vids.size());
+        net().send(req, [cb, vids](const NetResponse& r) {
+            if (r.status == 200 && r.body.isEmpty()) {
+                cb(Result::fail(Err::RateLimit,
+                   qFromUtf8("hongguo-app: 空响应(风控)")), {});
+                return;
+            }
+            if (!r.ok()) {
+                cb(Result::fail(Err::Network, r.error.isEmpty()
+                       ? qFromUtf8("video_models http %1").arg(r.status)
+                       : r.error), {});
+                return;
+            }
+            JRoot root(r.body);
+            if (!root.ok()) { cb(Result::fail(Err::Parse, "not json"), {}); return; }
+            if (jint(root.p, "code", -1) != 0) {
+                cb(Result::fail(Err::Parse,
+                   qFromUtf8("hongguo-app: code=%1").arg(jint(root.p, "code"))), {});
+                return;
+            }
+            QMap<QString, QList<Track>> out;
+            const cJSON* data = jobj(root.p, "data");
+            for (int i = 0; i < vids.size(); ++i) {
+                const cJSON* vd = jobj(data, vids[i].toUtf8().constData());
+                if (!vd) continue;
+                QList<Track> tracks;
+                QString err;
+                if (!parseTracks(jstr(vd, "video_model"), &tracks, &err)) continue;
+                out.insert(vids[i], tracks);
+                TrackCacheEntry e;
+                e.tracks = tracks;
+                e.expiresAt = nowMs() + kTrackTtlMs;
+                trackCache().insert(vids[i], e);
+            }
+            DBG_P(kMod, Info, "video_models -> %d/%d cached", out.size(), vids.size());
+            cb(Result::ok(), out);
+        });
+    });
 }
 
 void videoModel(const QString& vid,
                 std::function<void(const Result&, const QList<Track>&)> cb) {
+    {
+        QMap<QString, TrackCacheEntry>& c = trackCache();
+        auto it = c.find(vid);
+        if (it != c.end()) {
+            if (nowMs() < it->expiresAt) {
+                DBG_P(kMod, Debug, "video_model cache hit %s", qPrintable(vid));
+                cb(Result::ok(), it->tracks);
+                return;
+            }
+            c.erase(it);
+        }
+    }
     ensureDevice([vid, cb](const Result& dr, const Device& d) {
         if (dr.code != Err::Ok) { cb(dr, {}); return; }
 
@@ -230,6 +385,9 @@ void videoModel(const QString& vid,
         };
         req.body = body;
         req.timeoutSec = 25;
+        req.maxAttempts = 3;      // 200 空包=字节系风控,退避重试
+        req.retryDelayMs = 500;
+        req.retryOnEmpty = true;
         DBG_P(kMod, Debug, "video_model vid=%s", qPrintable(vid));
 
         net().send(req, [cb, vid](const NetResponse& r) {
@@ -260,39 +418,18 @@ void videoModel(const QString& vid,
                    qFromUtf8("hongguo-app: no data[%1]").arg(vid)), {});
                 return;
             }
-            // data[vid].video_model 是 JSON 字符串(嵌套;不是对象)
-            const QString vmStr = jstr(vd, "video_model");
-            if (vmStr.isEmpty()) {
-                cb(Result::fail(Err::Parse,
-                   qFromUtf8("hongguo-app: no video_model")), {});
-                return;
-            }
-            JRoot vm(vmStr.toUtf8());
-            if (!vm.ok()) {
-                cb(Result::fail(Err::Parse,
-                   qFromUtf8("hongguo-app: video_model not json")), {});
-                return;
-            }
-            const cJSON* list = jarr(vm.p, "video_list");
             QList<Track> out;
-            for (int i = 0; i < jsize(list); ++i) {
-                const cJSON* it = jat(list, i);
-                Track t;
-                const cJSON* meta = jobj(it, "video_meta");
-                t.definition = jstr(meta, "definition");
-                t.codecType = jstr(meta, "codec_type");
-                t.width = int(jint(meta, "width"));
-                t.height = int(jint(meta, "height"));
-                t.url = jstr(it, "main_url");
-                t.spadeA = jstr(jobj(it, "encrypt_info"), "spade_a");
-                t.urlExpire = jint(vm.p, "url_expire");
-                if (!t.url.isEmpty() && !t.spadeA.isEmpty())
-                    out.append(t);
-            }
-            if (out.isEmpty()) {
+            QString perr;
+            if (!parseTracks(jstr(vd, "video_model"), &out, &perr)) {
                 cb(Result::fail(Err::Parse,
-                   qFromUtf8("hongguo-app: video_list 为空或缺 spade_a")), {});
+                   qFromUtf8("hongguo-app: %1").arg(perr)), {});
                 return;
+            }
+            {
+                TrackCacheEntry e;
+                e.tracks = out;
+                e.expiresAt = nowMs() + kTrackTtlMs;
+                trackCache().insert(vid, e);
             }
             DBG_P(kMod, Info, "video_model %s -> %d tracks (first %s/%s)",
                   qPrintable(vid), out.size(), qPrintable(out[0].definition),

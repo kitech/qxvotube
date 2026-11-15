@@ -1,8 +1,15 @@
 #pragma once
 #include "compat.h"
+#ifdef QT3_BUILD
+#include <qstring.h>     // Qt3:头名小写
+#include <qlist.h>
+#include <qvariant.h>
+#include <qmap.h>        // + qt3shim 的 QVariantMap typedef
+#else
 #include <QString>
 #include <QVariantMap>
 #include <QList>
+#endif
 #include <functional>
 
 namespace qxv {

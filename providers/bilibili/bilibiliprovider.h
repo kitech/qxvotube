@@ -2,6 +2,8 @@
 #include "compat.h"
 #include "common/provider.h"
 #include "common/netclient.h"
+#include "common/cookiejar.h"
+#include "common/streamcache.h"
 
 namespace qxv {
 
@@ -13,18 +15,25 @@ public:
     QString id() const override { return qFromUtf8("bilibili"); }
 
     void search(const QString& kw, int page, SearchCb cb) override;
+    void homeFeed(int page, SearchCb cb) override;
     void detail(const QString& id, DetailCb cb) override;
     void resolve(const QString& id, ResolveCb cb) override;
+    void resolveQuality(const QString& id, const QString& quality,
+                        ResolveCb cb) override;
 
     void setProxy(const ProxyConfig& p) override { m_proxy = p; }
     void setCredentials(const QVariantMap& c) override { m_cred = c; }
-    void cancel() override {}
+    void cancel() override;
 
 private:
     void apiGet(const QString& path, const QString& query,
                 std::function<void(const NetResponse&)> cb);
     ProxyConfig m_proxy;
     QVariantMap m_cred;
+    NetClient m_net;
+    CookieJar m_jar;
+    bool m_jarInit = false;
+    streamcache::Cache m_cache;
 };
 
 } // namespace qxv

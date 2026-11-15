@@ -1,8 +1,13 @@
 #pragma once
 #include "compatcore34.h"   // qlcomp:qFromUtf8/qbaFromCharptr 等(字符串全 UTF-8 口径)
+#include "qt3shim.h"        // Qt3:QVariantMap 等缺失类型补齐(实现在 Qt>=5)
 // providers 跨 Qt 版本兼容宏(目标:Qt3/4/6 同一份源码语义;providers 库本身
 // 仅在 Qt>=5 构建编译,Qt3 引用方走 stub,见 qxv_compat_guard.h)
+#ifdef QT3_BUILD
+#include <qglobal.h>        // Qt3:QtGlobal 还没改名
+#else
 #include <QtGlobal>
+#endif
 
 // ── 字符串字面量 ──────────────────────────────────────────────
 // 项目口径:字符串全用 utf8。统一走 qlcomp 的 qFromUtf8("..."),

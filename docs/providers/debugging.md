@@ -103,3 +103,53 @@ httplib `Client::Post(path, headers, body, len, content_type)` 内部走
 详见 bytedance.md §7.4;`tests/CMakeLists.txt` 里对直接 include `httplib.h` 的
 测试目标补 `CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT`,否则 ODR 冲突
 导致运行时 `SSLClient::process_socket` 断言 `socket.ssl`。
+
+## 重试 / 取消 / 直链缓存(2026-11-15 A5)
+
+### 重试
+- 统一在 `NetClient`:`NetRequest.maxAttempts`(1=不重试)、`retryDelayMs`
+  (退避 = delay*2^(n-1),封顶 4s)、`retryOnEmpty`(200+空 body 也重试)。
+- 可重试:传输错误、HTTP 429、HTTP 5xx、(`retryOnEmpty`)空包。
+- 教训:**不要在各 provider 里各写一套**;YoutubeProvider 里原有的空包重试
+  可保留(语义更强:backendError 检测),但 HTTP 层重试已统一。
+
+### 取消
+- `NetClient::cancel()` 递增 `std::atomic<int> generation`;工作线程在
+  ①开始 ②每次重试前 ③退避 sleep 每 50ms ④投递前 ⑤UI 线程执行前 五处核对,
+  任一不匹配即丢弃。
+- 每个 provider 必须持有**自己的** `NetClient`(旧实现用 `static NetClient`,
+  一 cancel 会误伤所有实例)。
+- `Impl` 用 `shared_ptr` 跨线程保活:对象析构后在途线程仍能安全读 generation。
+- 未覆盖:`hgapp`(设备注册/取流)与 `hgstream`(同步 httplib)不走 NetClient,
+  cancel 不影响它们(它们本身短请求/本地服务)。
+
+### 直链缓存
+- `common/streamcache.h`:`put(key, pr, ttlMs)` / `get(key, &pr)`;过期自动删。
+- `ttlFromUrl(url, fallback)` 解析 `expire=<unix 秒>`,取 `min(fallback, expire-now-60s)`,
+  已过期返回 0(不缓存)。
+- key 必须含**清晰度**(`平台|id|quality`),否则切换清晰度会命中旧档。
+- 红果缓存的是**本地代理 URL**(10 分钟):会话 refs 在则有效;空闲回收后自动重开。
+
+## 单飞 / 限流(2026-11-15 Wave C)
+
+- **单飞**:键 = `method + url + hash(body) + jar 指针`;在途请求后到者挂入等待表,
+  响应后逐个校验 `generation` 再投递。**cancel 只丢自己的回调**,leader 被 cancel
+  也仍要完成扇出(所以 worker 里取消是 `break` 而非 `return`)。
+- **限流**:`RateLimiter::acquire(host)` 在 `doOnce` 建连前阻塞(工作线程内),
+  默认 12 QPS/域,`QXVOTUBE_QPS` 可调,0 关闭。
+- 坑:测试里 `QTimer::singleShot` 捕获局部 `std::atomic` 的引用会悬垂
+  (回调晚于作用域)→ 用 `shared_ptr` 捕获。
+
+## localstream 分层(2026-11-15)
+
+- 服务骨架在 `common/localstream`(与解密无关);`hgstream` 只是 CENC 适配。
+- 新代码接入请实现 `localstream::Source` 三个方法,不要复制服务线程/会话逻辑。
+- URL 前缀 `/s/<token>.mp4`;`QXVOTUBE_STREAM_*` 优先,`QXVOTUBE_HG_*` 兼容。
+
+## YouTube HLS 合流(2026-11-15)
+
+- yt-dlp 是**可选外部依赖**:`enabled()` 默认探测 PATH,`QXVOTUBE_YT_YTDLP` 覆盖。
+- 分片 URL 在 `manifest.googlevideo.com`/`rr*.googlevideo.com`,**播放器侧也要代理**
+  (我们只代理主播放列表,不代分片);`Stream.extra.proxy` 供 UI 传给播放器。
+- `trimHlsMaster()` 只过滤 `#EXT-X-STREAM-INF` 的 `RESOLUTION`,保留 `#EXT-X-MEDIA`;
+  低于所有档时取最低档(不要返回空列表,否则播放器报错)。

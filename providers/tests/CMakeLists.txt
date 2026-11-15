@@ -21,3 +21,44 @@ target_link_libraries(hgstream PRIVATE qxvproviders)
 # 测试 TU 直接 include httplib.h:必须与库内同一份编译定义(否则 ODR 冲突 → SSL 断言)
 target_compile_definitions(hgstream PRIVATE
     CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
+
+# 搜索分页验收(需外网;手动运行 ./paging)
+add_executable(paging paging.test.cpp)
+target_link_libraries(paging PRIVATE qxvproviders)
+
+# 清晰度选择验收(需外网;手动运行 ./quality)
+add_executable(quality quality.test.cpp)
+target_link_libraries(quality PRIVATE qxvproviders)
+
+# homeFeed 验收(需外网;手动运行 ./homefeed)
+add_executable(homefeed homefeed.test.cpp)
+target_link_libraries(homefeed PRIVATE qxvproviders)
+
+# detail 补全验收(需外网;手动运行 ./detail)
+add_executable(detail detail.test.cpp)
+target_link_libraries(detail PRIVATE qxvproviders)
+
+# 可靠性三件(重试/cancel/缓存;纯本地,可进 ctest)
+add_executable(reliability reliability.test.cpp)
+target_link_libraries(reliability PRIVATE qxvproviders)
+target_compile_definitions(reliability PRIVATE
+    CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
+add_test(NAME providers_reliability COMMAND reliability)
+
+# 离线解析单测(fixtures/ 真实响应回放,不联网,进 ctest)
+add_executable(parsetest parse.test.cpp)
+target_link_libraries(parsetest PRIVATE qxvproviders)
+target_compile_definitions(parsetest PRIVATE
+    FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+add_test(NAME providers_parse COMMAND parsetest)
+
+# localstream 通用性(内存源;离线,进 ctest)
+add_executable(localstream localstream.test.cpp)
+target_link_libraries(localstream PRIVATE qxvproviders)
+target_compile_definitions(localstream PRIVATE
+    CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
+add_test(NAME providers_localstream COMMAND localstream)
+
+# YouTube 高清晰度(HLS 合流;需外网+代理+yt-dlp+ffmpeg,手动运行)
+add_executable(ytdash ytdash.test.cpp)
+target_link_libraries(ytdash PRIVATE qxvproviders)

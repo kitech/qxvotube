@@ -56,6 +56,16 @@ inline long long jint(const cJSON* o, const char* key, long long def = 0) {
 inline int jsize(const cJSON* a) {
     return a ? cJSON_GetArraySize(const_cast<cJSON*>(a)) : 0;
 }
+
+// JSON bool / 数字兜底(红果搜索响应的 hasMore 是 true/false,不是 0/1)
+inline bool jbool(const cJSON* o, const char* key, bool def = false) {
+    const cJSON* it = o ? cJSON_GetObjectItemCaseSensitive(o, key) : nullptr;
+    if (!it) return def;
+    if (cJSON_IsBool(it)) return cJSON_IsTrue(it) != 0;
+    if (cJSON_IsNumber(it)) return it->valuedouble != 0;
+    return def;
+}
+
 inline cJSON* jat(const cJSON* a, int i) {
     return a ? cJSON_GetArrayItem(const_cast<cJSON*>(a), i) : nullptr;
 }

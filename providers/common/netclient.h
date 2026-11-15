@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QVector>
 #include <functional>
+#include <memory>
 
 // 统一 HTTP 客户端:cpp-httplib(vendored)+ QObject 薄封装
 // - 阻塞调用在 QThreadPool 里跑,回调经队列投递回调用方所在线程
@@ -20,6 +21,15 @@ struct NetRequest {
     QString proxy;                              // "http://host:port" 空=直连
     int timeoutSec = 15;
     bool autoCookie = true;                     // CookieJar 自动附带/回存
+    // 统一重试策略(2026-11-15):
+    //   可重试 = 传输错误 / HTTP 429 / 5xx / (retryOnEmpty 时 200+空 body)
+    //   退避 = retryDelayMs * 2^(attempt-1),封顶 4s;每次重试前检查 cancel()
+    // 单飞(去重):同 method+url+body+jar 的并发请求只真正发一次,
+    // 响应到达后扇出给所有等待者(各自 generation 校验,cancel 只丢自己)
+    bool singleFlight = true;
+    int maxAttempts = 1;                        // 1 = 不重试
+    int retryDelayMs = 250;
+    bool retryOnEmpty = false;                  // 字节系"200 空包"可开
 };
 
 struct NetResponse {
@@ -36,6 +46,8 @@ class NetClient : public QObject {
     Q_OBJECT
 public:
     using Callback = std::function<void(const NetResponse&)>;
+    // 实现细节(单飞等待者需要跨线程持有;不透明指针)
+    struct Impl;
 
     explicit NetClient(QObject* parent = nullptr);
     ~NetClient() override;
@@ -47,8 +59,7 @@ public:
     static QString cookieHeaderFrom(const NetResponse&);   // Set-Cookie 便捷取值
 
 private:
-    struct Impl;
-    Impl* d;
+    std::shared_ptr<Impl> d;
 };
 
 } // namespace qxv

@@ -29,6 +29,15 @@ public:
     // ── 详情与播放 ──
     virtual void detail(const QString& id, DetailCb) = 0;
     virtual void resolve(const QString& id, ResolveCb) = 0;
+    // 清晰度选择:quality 空 = provider 默认(等价 resolve)。
+    // 口径统一 "360p"/"480p"/"540p"/"720p"/"1080p"(大小写不敏感);
+    // 不可用档位:能降级则在 Stream.extra 标 requestedQuality+degraded=true;
+    // 完全不可播则 Err::Unsupported/NotFound(不静默给错档)。
+    virtual void resolveQuality(const QString& id, const QString& quality,
+                                ResolveCb cb) {
+        Q_UNUSED(quality);
+        resolve(id, std::move(cb));
+    }
 
     // ── 互动(缺省 Unsupported,返回 Result 不静默) ──
     virtual void comments(const QString& id, const QString& cursor, CommentsCb cb) {

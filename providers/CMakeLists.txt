@@ -39,10 +39,17 @@ add_library(qxvproviders STATIC
     bilibili/bilibiliprovider.cpp
     youtube/youtubeprovider.cpp
     hongguo/hongguoprovider.cpp
+    hongguo/parse.cpp
+    bilibili/parse.cpp
+    douyin/douyinprovider.cpp
+    douyin/parse.cpp
+    youtube/parse.cpp
     common/hgcenc/spade.cpp
     common/hgcenc/mp4box.cpp
     common/hgcenc/cenc.cpp
     common/hgapp/hgapp.cpp
+    common/ytdlp.cpp
+    common/localstream/localstream.cpp
     common/hgstream/hgstream.cpp
 )
 

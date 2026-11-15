@@ -58,7 +58,7 @@ HttpResult getRange(int port, const QString& path, quint64 off, quint64 len) {
 // 窗口内 NAL 自证:用代理会话的样本索引,取完整落在窗口内的视频样本
 int nalOkInWindow(hgstream::Server& srv, const QString& token,
                   const QByteArray& body, quint64 winOff, int want) {
-    const QList<hgstream::Server::SampleRef> ss = srv.samplesOf(token, 4096);
+    const QList<hgstream::SampleRef> ss = srv.samplesOf(token, 4096);
     int ok = 0, done = 0;
     for (int i = 0; i < ss.size() && done < want; ++i) {
         if (!ss[i].video) continue;

@@ -115,3 +115,82 @@ ffprobe 校验 itag18 直链:`h264 640x360 + aac, duration 1953s` → 真可播�
 - **实测局限**:该 IP 上 WEB+PO token 仍拿不到直链(YouTube 只给 SABR adaptive),
   所以 PO token 在当前阶段不是可播路径;ANDROID 裸通才是。保留代码以便:
   ① 换住宅 IP 后 WEB 可用 ② 后续做 DASH 合并时用 adaptive 直链。
+
+## 搜索分页(2026-11-15 实测)
+
+- ANDROID 客户端搜索响应的续页游标有两种历史口径,provider 均解析:
+  - 新式:`continuationCommand.token`
+  - 旧式:`nextContinuationData.continuation` / `reloadContinuationData.continuation`
+  (实测 "music" 走旧式)
+- 续页请求:`POST /youtubei/v1/search` body `{"context":{client},"continuation":"<游标>"}`。
+- **游标链只能按序取**:第 N 页游标由第 N-1 页响应给出;provider 内
+  `m_searchTokens[kw][page]` 缓存,未命中显式 `Err::Parse`(不静默回空);
+  缓存上限 16 个关键词。
+- 部分查询无续页(实测 "travel" hasMore=false),属正常。
+- 验收:`tests/paging` → page1 20 条 / page2 17 条 / 跨页重复 0。
+
+## 清晰度(resolveQuality,2026-11-15)
+
+- 当前仅 itag18(progressive 360p,h264+aac);请求更高档 → 回落 360p,
+  `Stream.extra.degraded=true` + `requestedQuality`,不伪报清晰度。
+- 1080p 需 DASH adaptive video+audio 合流(Wave D)+ localstream。
+- 验收:`tests/quality` → `1080p` 得 `640x360 degraded=1`。
+
+## 清晰度词汇(2026-11-15 补充)
+
+- 统一词汇 `144/160/240/360/480/540/720/1080`;当前所有请求都落 itag18(360p),
+  因此除 360p 外一律 `degraded=true`(含请求 160/240 这种"更低"的档)。
+- `Stream.quality` 为真实分辨率 `WxH`;`extra.actualQuality` 同值。
+- 若上游 OK 但 formats 为空(SABR 抖动)→ 自动重试一次,仍空才 `Err::Parse`。
+
+## homeFeed(2026-11-15 实测:不可用)
+
+- ANDROID `browse`:`FEwhat_to_watch` 返回 1MB 结构壳(0 个 video renderer);
+  `FEtrending`/`FEexplore` 直接 285B 错误(该 browseId 不支持)。
+- WEB `browse` 同空壳;`/feed/trending` 页面 SSR 也被风控。
+- 结论:provider 返回 `Err::Unsupported` 并提示改用 `search`,
+  **不返回假数据**;若后续换住宅 IP / 登录态可再评估。
+
+## detail(2026-11-15)
+
+- 单视频:`videoDetails` → title/author/channelId/lengthSeconds,
+  `extra` 带 `viewCount`/`shortDescription`。
+- **章节不支持**:ANDROID player 响应无 `chapterRenderer`/`macroMarkers`
+  (章节是 WEB 渲染器功能),实测 3 个视频均为 0。
+- **播放列表**:id 以 `PL/UU/OL/FL/RD` 开头且长度 >11 → `browse` `VL<id>`,
+  用 `watchEndpoint{videoId,playlistId}` 收集分集(ANDROID 无 `playlistVideoRenderer`)。
+  局限:browse 首屏只有 **10 条**(续页需 continuation,未实现);
+  条目标题不在该渲染层,`part.title` 留空(UI 可按需逐条 detail)。
+- 验收:`tests/detail` → 单视频 title 非空;官方示例 PL → 10 条。
+
+## 高清晰度:yt-dlp + HLS(2026-11-15 实测)
+
+### 为什么不是"纯客户端 DASH 直链"
+- TVHTML5 / WEB 全变体在本机出口 IP 均 `LOGIN_REQUIRED`/`UNPLAYABLE`;
+  ANDROID/IOS 的 `adaptiveFormats` **无 url(SABR)**。
+- 但 `yt-dlp -J` 能拿到完整 HLS 主播放列表(`manifest_url`,hls_variant),
+  其中 `#EXT-X-MEDIA`(音频)+ `#EXT-X-STREAM-INF` 到 2160p,且 variant 自带音频。
+
+### 实现
+1. `common/ytdlp.{h,cpp}`:异步 `yt-dlp -J --proxy ... --skip-download` → formats +
+   `hlsMaster`;`QXVOTUBE_YT_YTDLP=0/1` 可强制开关,默认探测 PATH。
+2. YouTube `resolveQuality`:`quality>360p` 且 yt-dlp 可用 → **HLS 路径**;
+   否则回落 itag18。
+3. HLS 路径:`GET hlsMaster`(经代理)→ `trimHlsMaster()` 按 `RESOLUTION`
+   裁剪到 ≤ 请求高度(保留 `EXT-X-MEDIA` 音频)→ `localstream::BufferSource`
+   以 `application/vnd.apple.mpegurl` 提供 → 本地 `kind=hls` URL。
+4. `Stream.extra`:`hlsMaster=true`、`proxy`(分片在 googlevideo,播放器需代理)、
+   `userAgent`、`requestedQuality`。
+
+### 验收(tests/ytdash,需外网+代理+yt-dlp+ffmpeg)
+```
+[ ok ] kind=hls / 本地 URL / extra.hlsMaster
+[ ok ] ffprobe 1080p        (1920,1080)
+[ ok ] ffmpeg 解码 30 帧
+```
+`tests/quality`:youtube 1080p → `1080P degraded=0`(≤360p 仍走 itag18 标降级)。
+
+### 局限
+- **播放器必须自备代理**(分片直连 googlevideo);`Stream.extra.proxy` 已给出。
+- HLS master 只能按"≤请求高度"裁剪,不能精确锁单档(多码率自适应由播放器决定)。
+- 依赖 yt-dlp 的外部二进制(可选,缺失自动回落 360p)。

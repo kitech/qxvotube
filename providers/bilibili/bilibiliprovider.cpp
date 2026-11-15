@@ -5,6 +5,8 @@
 #include "common/fingerprint.h"
 #include "common/debuglog.h"
 #include "common/qcjson.h"
+#include "parse.h"
+#include "common/quality.h"
 
 #include <QUrlQuery>
 #include <functional>
@@ -18,6 +20,12 @@
 // 解析:cJSON(qlcomp 同源份,Qt3 兼容);禁 QJson
 
 namespace qxv {
+
+void BilibiliProvider::cancel() {
+    m_net.cancel();      // 在途/重试/待投递回调全部作废
+    m_cache.clear();     // 直链缓存一并清(避免播到已取消请求对应的旧地址)
+}
+
 
 static const char* kMod = "bilibili";
 
@@ -39,27 +47,6 @@ static Result checkApi(const QByteArray& body, JRoot& root) {
     return Result::ok();
 }
 
-static QList<VideoItem> parseSearch(cJSON* results) {
-    QList<VideoItem> out;
-    if (!results) return out;
-    for (int i = 0; i < jsize(results); ++i) {
-        const cJSON* g = jat(results, i);          // result_type 分组
-        if (jstr(g, "result_type") != qFromUtf8("video")) continue;
-        cJSON* data = jarr(g, "data");
-        for (int k = 0; k < jsize(data); ++k) {
-            const cJSON* it = jat(data, k);
-            VideoItem vi;
-            vi.id     = jstr(it, "bvid");
-            vi.title  = jstr(it, "title");
-            vi.author = jstr(it, "author");
-            vi.uid    = QString::number(jint(it, "mid"));
-            vi.cover  = jstr(it, "pic");
-            vi.durationMs = jint(it, "duration") * 1000;
-            out.append(vi);
-        }
-    }
-    return out;
-}
 
 void BilibiliProvider::apiGet(const QString& path, const QString& query,
                               std::function<void(const NetResponse&)> cb) {
@@ -74,7 +61,8 @@ void BilibiliProvider::apiGet(const QString& path, const QString& query,
             warm.headers.append(h);
         warm.headers.append(qMakePair(qFromUtf8("Referer"),
             qFromUtf8("https://www.bilibili.com/")));
-        net.send(warm, [](const NetResponse&) {});
+        warm.maxAttempts = 2;
+        m_net.send(warm, [](const NetResponse&) {});
     }
 
     NetRequest req;
@@ -88,15 +76,16 @@ void BilibiliProvider::apiGet(const QString& path, const QString& query,
     if (!token.isEmpty())
         req.headers.append({ "Cookie", token });
     DBG_P(kMod, Debug, "GET %s", qPrintable(req.url));
-    net.send(req, std::move(cb));
+    m_net.send(req, std::move(cb));
 }
 
 void BilibiliProvider::search(const QString& kw, int page, SearchCb cb) {
     QUrlQuery q;
     q.addQueryItem("keyword", kw);
     q.addQueryItem("page", QString::number(page));
+    q.addQueryItem("page_size", "20");   // 实测:pagesize=20,numPages=50
     apiGet("/x/web-interface/search/all/v2", q.toString(QUrl::FullyEncoded),
-           [cb, page](const NetResponse& r) {
+           [cb, page, kw](const NetResponse& r) {
         if (!r.ok()) {
             cb(Result::fail(Err::Network, r.error.isEmpty()
                    ? qFromUtf8("http %1").arg(r.status) : r.error), {}, false);
@@ -106,9 +95,40 @@ void BilibiliProvider::search(const QString& kw, int page, SearchCb cb) {
         JRoot root;
         res = checkApi(r.body, root);
         if (res.code != Err::Ok) { cb(res, {}, false); return; }
-        const QList<VideoItem> items = parseSearch(
-            jarr(jobj(root.p, "data"), "result"));
-        cb(Result::ok(), items, !items.isEmpty());   // 分页 hasMore 粗判
+        const cJSON* data = jobj(root.p, "data");
+        const QList<VideoItem> items = bilibili::parse::searchResult(root.p);
+        // 服务端给总页数(实测 numPages=50);缺失时退化为"本页满 20 条即还有"
+        const long long numPages = jint(data, "numPages", 0);
+        const bool hasMore = numPages > 0 ? (page < numPages)
+                                          : items.size() >= 20;
+        DBG_P(kMod, Debug, "search '%s' p%d -> %d items (numPages=%lld)",
+              qPrintable(kw), page, items.size(), numPages);
+        cb(Result::ok(), items, hasMore);
+    });
+}
+
+// ── homeFeed(热门榜,游客口)─────────────────────────────────────────
+// GET /x/web-interface/popular?pn=&ps=20 → data.list[] + data.no_more
+void BilibiliProvider::homeFeed(int page, SearchCb cb) {
+    if (page < 1) page = 1;
+    QUrlQuery q;
+    q.addQueryItem("pn", QString::number(page));
+    q.addQueryItem("ps", "20");
+    apiGet("/x/web-interface/popular", q.toString(QUrl::FullyEncoded),
+           [cb, page](const NetResponse& r) {
+        if (!r.ok()) {
+            cb(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error), {}, false);
+            return;
+        }
+        JRoot root;
+        const Result res = checkApi(r.body, root);
+        if (res.code != Err::Ok) { cb(res, {}, false); return; }
+        bool hasMore = false;
+        const QList<VideoItem> items = bilibili::parse::popular(root.p, &hasMore);
+        DBG_P(kMod, Debug, "homeFeed p%d -> %d items (hasMore=%d)",
+              page, items.size(), int(hasMore));
+        cb(Result::ok(), items, hasMore);
     });
 }
 
@@ -116,70 +136,131 @@ void BilibiliProvider::detail(const QString& id, DetailCb cb) {
     QUrlQuery q;
     q.addQueryItem("bvid", id);
     apiGet("/x/web-interface/view", q.toString(QUrl::FullyEncoded),
-           [cb, id](const NetResponse& r) {
+           [this, cb, id](const NetResponse& r) {
         if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}, {}); return; }
         JRoot root;
         const Result res = checkApi(r.body, root);
         if (res.code != Err::Ok) { cb(res, {}, {}); return; }
-        const cJSON* data = jobj(root.p, "data");
         VideoItem vi;
-        vi.id     = jstr(data, "bvid");
-        vi.title  = jstr(data, "title");
-        vi.author = jstr(jobj(data, "owner"), "name");
-        vi.cover  = jstr(data, "pic");
-        vi.durationMs = jint(data, "duration") * 1000;
         QList<VideoItem> parts;
-        cJSON* pages = jarr(data, "pages");
-        for (int i = 0; i < jsize(pages); ++i) {
-            const cJSON* p = jat(pages, i);
-            VideoItem part;
-            part.id = QString::number(jint(p, "cid"));
-            part.title = jstr(p, "part");
-            part.durationMs = jint(p, "duration") * 1000;
-            part.extra = QVariantMap{ { "bvid", vi.id } };
-            parts.append(part);
-        }
-        if (parts.isEmpty())   // 单 P:直接用主项
-            parts.append(vi);
-        cb(Result::ok(), vi, parts);
+        const Result dres = bilibili::parse::detailFromView(root.p, &vi, &parts);
+        if (dres.code != Err::Ok) { cb(dres, {}, {}); return; }
+        if (!parts.isEmpty()) { cb(Result::ok(), vi, parts); return; }
+
+        // pages 缺失(部分老稿件/接口裁剪)→ 用 pagelist 兜底
+        QUrlQuery q2;
+        q2.addQueryItem("bvid", vi.id);
+        apiGet("/x/player/pagelist", q2.toString(QUrl::FullyEncoded),
+               [cb, vi](const NetResponse& r2) {
+            if (!r2.ok()) { cb(Result::fail(Err::Network, r2.error), vi, {}); return; }
+            JRoot root2;
+            const Result res2 = checkApi(r2.body, root2);
+            QList<VideoItem> parts2;
+            if (res2.code == Err::Ok)
+                parts2 = bilibili::parse::pageList(root2.p, vi.id);
+            if (parts2.isEmpty()) parts2.append(vi);   // 单 P:主项即唯一分集
+            cb(Result::ok(), vi, parts2);
+        });
     });
 }
 
+// 清晰度 → qn(html5 平台实测只支持 16=360P / 64=720P:
+// 请求 32 会回 16,请求 80/112 会回 64)。
+// 160/240/480 等低档 html5 无对应 qn → 就近取 16(360P)并标 degraded。
+static int qnForQuality(const QString& quality, bool* recognized) {
+    *recognized = true;
+    const int h = quality::heightOf(quality);
+    if (h == 0) return 64;          // 空/auto/best
+    if (h < 0) { *recognized = false; return 64; }
+    if (h <= 360) return 16;        // 160/240/360 → 360(html5 最低)
+    if (h <= 540) return 32;        // 480/540 → 服务端回 360
+    if (h <= 720) return 64;
+    return 80;                      // >720 → 服务端回 720(html5 上限)
+}
+
+// 服务端实际档位(quality 字段)→ 展示口径
+static QString labelForQn(long long qn) {
+    return qn >= 64 ? qFromUtf8("720P") : qFromUtf8("360P");
+}
+
 void BilibiliProvider::resolve(const QString& id, ResolveCb cb) {
+    resolveQuality(id, QString(), std::move(cb));
+}
+
+void BilibiliProvider::resolveQuality(const QString& id, const QString& quality,
+                                      ResolveCb cb) {
     // id 形如 "BV1xx411c7mD@cid123"(detail 出的分集)或纯 bvid(单P)
     QString bvid = id, cid;
     const int at = id.indexOf(qFromUtf8("."));
     if (at > 0) { bvid = id.left(at); cid = id.mid(at + 1); }
 
-    auto playUrl = [this, cb](const QString& bvid2, const QString& cid2) {
+    bool recognized = true;
+    const int qn = qnForQuality(quality, &recognized);
+    if (!recognized) {
+        cb(Result::fail(Err::Unsupported,
+           qFromUtf8("bilibili: 未知清晰度 '%1'(支持 360p/480p/720p)").arg(quality)),
+           {});
+        return;
+    }
+
+    // 直链缓存:CDN URL 约 2h 过期;命中直接返回,过期自动重解析
+    const QString ckey = qFromUtf8("bilibili|%1|%2").arg(id, quality);
+    {
+        PlayResult cached;
+        if (m_cache.get(ckey, &cached)) {
+            DBG_P(kMod, Debug, "resolve cache hit %s", qPrintable(id));
+            cb(Result::ok(), cached);
+            return;
+        }
+    }
+
+    auto playUrl = [this, cb, quality, qn, ckey](const QString& bvid2,
+                                           const QString& cid2) {
         QUrlQuery q;
         q.addQueryItem("bvid", bvid2);
         q.addQueryItem("cid", cid2);
-        q.addQueryItem("qn", "64");          // 高清 720P(html5 上限)
+        q.addQueryItem("qn", QString::number(qn));
         q.addQueryItem("platform", "html5");
         apiGet("/x/player/playurl", q.toString(QUrl::FullyEncoded),
-               [cb, bvid2](const NetResponse& r) {
+               [this, cb, bvid2, quality, ckey](const NetResponse& r) {
             if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}); return; }
             JRoot root;
             const Result res = checkApi(r.body, root);
             if (res.code != Err::Ok) { cb(res, {}); return; }
+            const cJSON* data = jobj(root.p, "data");
             PlayResult pr;
-            cJSON* durl = jarr(jobj(root.p, "data"), "durl");
-            for (int i = 0; i < jsize(durl); ++i) {
-                const cJSON* dv = jat(durl, i);
-                Stream s;
-                s.url = jstr(dv, "url");
-                s.quality = qFromUtf8("720P");
-                s.kind = qFromUtf8("mp4");
-                s.extra = QVariantMap{
-                    { "Referer", qFromUtf8("https://www.bilibili.com/") } };
-                pr.streams.append(s);
+            cJSON* durl = jarr(data, "durl");
+            if (durl && jsize(durl) > 0) {
+                const QString actual = labelForQn(jint(data, "quality", 0));
+                for (int i = 0; i < jsize(durl); ++i) {
+                    const cJSON* dv = jat(durl, i);
+                    Stream s;
+                    s.url = jstr(dv, "url");
+                    s.quality = actual;
+                    s.kind = qFromUtf8("mp4");
+                    s.extra = QVariantMap{
+                        { "Referer", qFromUtf8("https://www.bilibili.com/") } };
+                    if (!quality.isEmpty()) {
+                        s.extra.insert(qFromUtf8("requestedQuality"), quality);
+                        // 请求档与服务端实际档不一致(含"给高了")→ 标降级
+                        const int want = quality::heightOf(quality);
+                        const int got = quality::heightOf(actual);
+                        if (want > 0 && got > 0 && want != got) {
+                            s.extra.insert(qFromUtf8("degraded"), true);
+                            s.extra.insert(qFromUtf8("actualQuality"), actual);
+                        }
+                    }
+                    pr.streams.append(s);
+                }
             }
             if (pr.streams.isEmpty())
                 cb(Result::fail(Err::NeedAuth,
                    qFromUtf8("bilibili: no guest streams (dash only)")), {});
-            else
+            else {
+                m_cache.put(ckey, pr, streamcache::ttlFromUrl(
+                    pr.streams.first().url, 90 * 60 * 1000));
                 cb(Result::ok(), pr);
+            }
         });
     };
 
@@ -189,12 +270,14 @@ void BilibiliProvider::resolve(const QString& id, ResolveCb cb) {
             if (res.code != Err::Ok || parts.isEmpty()) {
                 cb(res, {}); return;
             }
-            playUrl(parts.first().extra.value("bvid").toString(),
-                    parts.first().id);
+            // 分P 的 part.id 是 "bvid.cid" 复合形式,这里必须取 extra.cid
+            QString cid = parts.first().extra.value(qFromUtf8("cid")).toString();
+            if (cid.isEmpty()) cid = parts.first().id;
+            playUrl(parts.first().extra.value(qFromUtf8("bvid")).toString(),
+                    cid);
         });
         return;
     }
     playUrl(bvid, cid);
 }
-
 } // namespace qxv

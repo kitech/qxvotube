@@ -282,3 +282,130 @@ dong/xb 红果短剧.py 的 `_StreamSession` 正是 H2b 规划的本地流式解
 1. **App 通道 1080p(bytevc1)**:`hgapp::videoModel` → `hgstream::open` → Stream{url=本地口播, quality="1080P", kind="mp4", extra.localProxy/cenc/source/codec};
 2. 失败/只有 bytevc2/代理起不来 → **web 360p 明文保底**(fallback-play-info);
 3. 切集时 release 上一集会话;provider 析构 release 当前会话。
+
+## 8. 官网搜索分页(2026-11-15 实测)
+
+- `GET https://hongguoduanju.com/api/search/result?query=<kw>&page=N`(`page` 1 起,每页 10 条)。
+- 响应自带分页元信息:`pageNum` / `totalPages` / `hasMore`(JSON bool) / `totalCount`;
+  hasMore = `hasMore==true || page < totalPages`。
+- 注意:服务端排序会漂移,跨页可出现极少量重复(实测 1/10),UI 侧按 id 去重。
+- 验收:`tests/paging hongguo` → page1 10 条 / page2 10 条。
+
+## 9. 清晰度选择(resolveQuality,2026-11-15)
+
+- `resolveQuality(id, "1080p")`:App 通道按 `video_list[].video_meta.definition`
+  精确选档(大小写不敏感),bytevc1 → 本地解密代理可播。
+- `<=720p` 全为 **bytevc2 私有编码**(标准播放器不可解)→ 返回
+  `Err::Unsupported` 并提示改选 1080p;不做静默错档。
+- 未指定 quality = `pickBest`(优先 bytevc1 最高档),与原 resolve 行为一致。
+- 验收:`tests/quality` → 1080p 得 `1080P/bytevc1`,720p 得 Unsupported。
+
+## 10. 清晰度词汇(2026-11-15 补充)
+
+- 统一词汇 `144/160/240/360/480/540/720/1080`(`common/quality.h`)。
+- 红果实测档位:`360p/480p/540p/720p` 全为 **bytevc2 私有编码**(不可播),
+  仅 `1080p` 为 bytevc1(HEVC)。因此 ≤720p 请求一律 `Err::Unsupported`
+  (文案提示改选 1080p),`160/240` 因不存在该档返回 `Err::NotFound`。
+- 低清真支持需自研 bytevc2 解码器,当前不做(见 §9)。
+
+## 11. homeFeed(官网首页热播,2026-11-15 实测)
+
+- `GET https://hongguoduanju.com/` 的 SSR 变量 `window._ROUTER_DATA` 里:
+  `loaderData.page.homeSections[]` = 4 个 tab:
+  `all`(热播短剧)/`human`(真人)/`comic`(漫剧)/`ai`(AI 剧),每类 **9 条**。
+- 条目字段:`series_id` / `series_title` / `series_cover` / `series_intro` /
+  `episode_cnt` / `pay_type` / `rank`(`extra.tab` 标记所属 tab)。
+- 站点无分页参数:只有第一屏 → `page>1` 返回空 + `hasMore=false`。
+- 注:页面里另一份 `window._SSR_DATA` 是空壳(mode=stream),**必须读 `_ROUTER_DATA`**。
+- 验收:`tests/homefeed` → 36 条(4×9)。
+
+## 12. detail(2026-11-15 复核)
+
+- `_ROUTER_DATA.loaderData.detail_page.seriesDetail`:
+  `series_id/series_name/series_cover/series_intro/episode_cnt/pay_type/
+   accessible_episode_cnt/vid_list[]/tags[]`。
+- `parts[]` = `vid_list` 全集,`part.id = vid`,`part.extra.seriesId` = 剧 id,
+  `part.extra.free` = 是否在试看范围内(accessible_episode_cnt)。
+- 验收:`tests/detail` → 100 集,seriesId 全一致。
+
+## 13. 抖音 / TikTok 侦察结论(2026-11-15,未落码)
+
+### 抖音(直连可达)
+| 口径 | 实测 |
+|---|---|
+| 热门搜索 `iesdouyin.com/web/api/v2/hotsearch/billboard/word/` | ✅ 免签,`word_list` 48 条(只有词+封面) |
+| 热榜 `douyin.com/aweme/v1/web/hot/search/list/` | ✅ 免签,`data.word_list` 48 条(`group_id/word/hot_value`) |
+| 分享页 `iesdouyin.com/share/video/<id>/` SSR | ⚠️ `_ROUTER_DATA` 里只有 `itemId/ua/commonContext`,**无 `play_addr`**(口径已变) |
+| 视频详情 `douyin.com/aweme/v1/web/aweme/detail/` | ❌ `Blocked by ArgusSecurityPlugin Uifid Not Found`(需 uifid cookie/Argus) |
+| web 搜索 `/aweme/v1/web/general/search/single/` | ❌ HTTP 200 + `data:[]`(需 a_bogus) |
+| 旧 `iesdouyin.com/web/api/v2/aweme/iteminfo/` | ❌ 0 字节(已下线) |
+
+→ **可免签的只有"话题榜/热词",拿不到可播地址**;要 `search/detail/resolve`
+必须 a_bogus(web)或 App 签名栈(X-Gorgon/X-Argus,与红果同源)。
+
+### TikTok
+| 口径 | 实测 |
+|---|---|
+| 代理 `127.0.0.1:10809` 访问 | ❌ CONNECT 成功但 TLS 无响应(timeout,经代理不可达) |
+| `oembed` / `/api/post/item_list/` | ❌ 0 字节(同上,且需 X-Bogus/msToken) |
+
+→ 前置条件:① 可用的境外代理 ② X-Bogus/msToken 签名。当前环境两条都不满足。
+
+### 结论
+- 抖音/TikTok **不落 provider 代码**;标 P2-blocked(需签名栈 + 可达代理)。
+- 签名栈可复用红果的 bytedance 设备注册骨架(`common/hgapp`),
+  但抖音/ TikTok 与红果不同:**没有零签名等价面**,必须实现 a_bogus/X-Bogus
+  或 App 六头(参考 dong/fun 2026-11 口径),并与版本强绑定维护。
+- 若后续要做:建议先只做"抖音热榜 provider"(免签、有真实内容),
+  search/resolve 等签名栈成熟再补。
+
+### 13.1 已落码:douyin provider(仅热榜)
+- `providers/douyin/douyinprovider.{h,cpp}`:id=`douyin`;
+  `homeFeed(page)` → 热榜 49 条(免签),`page>1` 返回空+`hasMore=false`;
+  `search/detail/resolve` → 显式 `Err::Unsupported`(文案指向本文档),
+  不返回假数据。
+- 条目口径:`id="hot:<group_id>"`、`title=word`、`extra`:
+  `hotValue/videoCount/discussCount/rank/kind=hotword/cover`。
+- 验收:`tests/homefeed douyin` → 49 条;`pvsmoke douyin` → `[skip]`(不是失败)。
+
+### 7.6 分层重构(2026-11-15 Wave C)
+
+- `common/localstream/`:通用本地流服务(HTTP Range + 会话引用计数 + 空闲关 +
+  线程 join 账本)。只依赖 `Source` 抽象:
+  `total()` / `read(off,len,*out)`(出明文)/ `contentType()`。
+  对外 URL:`http://127.0.0.1:<port>/s/<token>.mp4`(旧 `/hg/` 已弃用)。
+- `common/hgstream/`:降为**适配层**——`hgstream::Server::instance().open()`
+  内部构造 `CencSource`(moov 同长度改写 + 样本窗口解密)注册给 localstream;
+  公开 API 不变(provider 无需改动),`samplesOf()` 用 `dynamic_pointer_cast`
+  取回 CencSource。
+- env:新名 `QXVOTUBE_STREAM_IDLE_SEC/_SESS_TTL_SEC/_MAX_SESSIONS/_PORT`,
+  旧 `QXVOTUBE_HG_*` 仍兼容(优先新名)。
+- 目的:Wave D 的 YouTube DASH 合流只需新增一个 `DashMergeSource`,
+  复用同一套服务/回收/空闲关。
+
+## 14. 红果专项收口(2026-11-15)
+
+### 14.1 bytevc2 策略定稿
+- App 侧 ≤720p 全是 **bytevc2 私有编码**(标准播放器不可解)。
+- `resolveQuality(≤720p)`:**改走官网明文通道**(H1 `fallback-play-info`,360P,
+  仅免费集),`Stream.extra.source=web` + `requestedQuality` + 不相符时 `degraded=true`。
+- 官网也拿不到(付费墙)→ `Err::Unsupported`("≤720p 仅官网免费集可用…请选 1080p")。
+- `1080p` 仍走 App 链 + H2b 本地解密代理。
+
+### 14.2 多集批量预取
+- `hgapp::videoModels(vids)`:一次 `mixed_video_id_map` 请求多集(实测 3/3 命中);
+- `hgapp` 内 tracks 缓存(10 分钟,`videoModel` 命中即回调);
+- `detail` 后按 `QXVOTUBE_HG_PREFETCH=N`(默认 3,0=关)后台预热前 N 集。
+- **并发注册坑**:并发 `ensureDevice` 曾各自注册,服务端返回 `device_id=0`
+  并覆盖有效设备 → 后续请求 `device_id=0` 返回异常体。修复:
+  ① `Device::valid()` 拒绝 `"0"`;② 注册合流(在途时排队,只注册一次);
+  ③ 失败不写缓存。
+
+### 14.3 官网榜单分页(homeFeed page>=2)
+- 第 1 页:首页 SSR `homeSections`(4 tab × 9 = 36 条)。
+- 第 2 页起:`GET /rank/hot-drama?page=N`(20 条/页,
+  `loaderData["rank_hot-drama/page"].content.rankList[]`,字段
+  `seriesId/title/cover/rank/heatText/scoreText`),`pagination.totalPages`
+  给 hasMore。
+- 首页 hasMore 现为 `true`;跨页与首页有重叠(首页是每类 top9),UI 按 id 去重。
+- 验收:`tests/homefeed hongguo` → p1 36 / p2 20(dup=9,容忍)。
