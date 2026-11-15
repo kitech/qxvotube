@@ -86,6 +86,10 @@ endif()
 # qskcomp 自绘组件库（符号链接引用，不拷贝；CI 由 scripts/pollup_deps.sh 拉取）
 include(${CMAKE_CURRENT_SOURCE_DIR}/../qskcomp/qskcomp.cmake)
 
+# providers 视频源协议库(bilibili/youtube;自管 CMake,内部 vendored httplib/
+# 复用 qlcomp cJSON;测试用 -DQXV_PROVIDERS_TESTS=ON 单独开,本工程默认关)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../providers providers_build)
+
 # qt_add_executable:Android 上自动产出 lib<name>_arm64-v8a.so
 # (androiddeployqt 消费;桌面仍为普通可执行)
 qt_add_executable(qskvotube
@@ -117,6 +121,7 @@ target_include_directories(qskvotube PRIVATE
 target_link_libraries(qskvotube PRIVATE
     ${QT_LIBS}
     Qsk::QSkinny
+    qxvproviders          # providers 协议库(cJSON 经 qlcomp 同源份,无双份符号)
     Qt6::OpenGLWidgets
     Qt6::QuickPrivate     # qquicktaphandler_p.h 等私有头(qskmusic 同法,不写死 include 路径)
 )

@@ -13,7 +13,7 @@
 namespace qxv {
 
 struct NetRequest {
-    QString method = QXV_STR("GET");
+    QString method = qFromUtf8("GET");
     QString url;
     QVector<QPair<QString, QString>> headers;   // 不用 Qt6 QHttpHeaders(兼容低版)
     QByteArray body;

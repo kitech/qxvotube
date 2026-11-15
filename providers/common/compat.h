@@ -1,17 +1,12 @@
 #pragma once
+#include "compatcore34.h"   // qlcomp:qFromUtf8/qbaFromCharptr 等(字符串全 UTF-8 口径)
 // providers 跨 Qt 版本兼容宏(目标:Qt3/4/6 同一份源码语义;providers 库本身
 // 仅在 Qt>=5 构建编译,Qt3 引用方走 stub,见 qxv_compat_guard.h)
 #include <QtGlobal>
 
 // ── 字符串字面量 ──────────────────────────────────────────────
-// Qt>=5.2:QStringLiteral(编译期 UTF-16);更低:fromUtf8(带长度,免 strlen)
-// 注意:项目口径"字符串全用 utf8",禁用 QLatin1String/QLatin1Char
-#if QT_VERSION >= QT_VERSION_CHECK(5, 2, 0)
-#define QXV_STR(s) QStringLiteral(s)
-#else
-#define QXV_STR_QLEN(s) "" s "", sizeof(s) - 1
-#define QXV_STR(s) QString::fromUtf8("" s "", static_cast<int>(sizeof(s) - 1))
-#endif
+// 项目口径:字符串全用 utf8。统一走 qlcomp 的 qFromUtf8("..."),
+// 禁 QLatin1String/QLatin1Char/QStringLiteral/QXV_STR(已废弃)。
 
 // ── split 空段处理 ────────────────────────────────────────────
 // Qt<5.14 挂在 QString 命名空间下

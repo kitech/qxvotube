@@ -29,7 +29,22 @@
   "pause": "暂停",
   "next": "下一首",
   "no_media": "该曲目暂无本地音频文件",
-  "error": "播放错误"
+  "playback": "播放错误"
+ },
+ "error": {
+  "network": "网络错误",
+  "tls": "证书错误",
+  "http": "HTTP 错误",
+  "parse": "数据解析错误",
+  "ratelimit": "请求过于频繁，请稍后重试",
+  "captcha": "需要人机验证",
+  "risk": "风控提示",
+  "notfound": "内容不存在",
+  "needauth": "需要登录",
+  "authexpired": "登录已过期",
+  "paywalled": "付费内容",
+  "geoblocked": "地区限制",
+  "unsupported": "暂不支持该平台"
  },
  "queue": {
   "title": "播放队列"

@@ -1,0 +1,319 @@
+#include "hgapp.h"
+
+#include "common/debuglog.h"
+#include "common/qcjson.h"
+
+#include <QDateTime>
+#include <QUrlQuery>
+
+#include <random>
+
+// 口径见 hgapp.h 顶部注释 + docs/protocols/bytedance.md §6.1(2026-11-15 线上实测)。
+
+namespace qxv {
+namespace hgapp {
+
+namespace {
+
+const char* kMod = "hongguo-app";
+const char* kRegHost = "https://log.snssdk.com";
+const char* kApiHost = "https://api5-normal-sinfonlineb.fqnovel.com";
+// 真机口径 UA(com.phoenix.read 7.3.5.32;Cronet/TTNet 版本对齐 dong/fun 2026-11)
+const char* kUa =
+    "com.phoenix.read/73532 (Linux; U; Android 16; zh_CN; 25053RT47C; "
+    "Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 "
+    "QuicVersion:c67e9834 2025-09-08)";
+
+Device g_dev;
+
+std::mt19937& randGen() {
+    static std::mt19937 g(static_cast<unsigned>(
+        std::random_device{}() ^ static_cast<unsigned>(QDateTime::currentMSecsSinceEpoch())));
+    return g;
+}
+
+QString randHex(int n) {
+    static const char* kHex = "0123456789abcdef";
+    QByteArray s;
+    s.reserve(n);
+    for (int i = 0; i < n; ++i)
+        s.append(kHex[randGen()() % 16]);
+    return QString::fromLatin1(s);
+}
+
+qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
+
+// 公共 query(游客画像;device_id/install_id 来自 ensureDevice 缓存或 env)
+QString commonQuery(const Device& d) {
+    QUrlQuery q;
+    q.addQueryItem(qFromUtf8("aid"), qFromUtf8("8662"));
+    q.addQueryItem(qFromUtf8("app_name"), qFromUtf8("novelread"));
+    q.addQueryItem(qFromUtf8("version_code"), qFromUtf8("73532"));
+    q.addQueryItem(qFromUtf8("version_name"), qFromUtf8("7.3.5.32"));
+    q.addQueryItem(qFromUtf8("manifest_version_code"), qFromUtf8("73532"));
+    q.addQueryItem(qFromUtf8("update_version_code"), qFromUtf8("73532"));
+    q.addQueryItem(qFromUtf8("channel"), qFromUtf8("update_64"));
+    q.addQueryItem(qFromUtf8("device_platform"), qFromUtf8("android"));
+    q.addQueryItem(qFromUtf8("os"), qFromUtf8("android"));
+    q.addQueryItem(qFromUtf8("ssmix"), qFromUtf8("a"));
+    q.addQueryItem(qFromUtf8("device_type"), qFromUtf8("25053RT47C"));
+    q.addQueryItem(qFromUtf8("device_brand"), qFromUtf8("Redmi"));
+    q.addQueryItem(qFromUtf8("language"), qFromUtf8("zh"));
+    q.addQueryItem(qFromUtf8("os_api"), qFromUtf8("36"));
+    q.addQueryItem(qFromUtf8("os_version"), qFromUtf8("16"));
+    q.addQueryItem(qFromUtf8("resolution"), qFromUtf8("1280*2772"));
+    q.addQueryItem(qFromUtf8("dpi"), qFromUtf8("520"));
+    q.addQueryItem(qFromUtf8("device_id"), d.deviceId);
+    q.addQueryItem(qFromUtf8("install_id"), d.installId);
+    q.addQueryItem(qFromUtf8("ac"), qFromUtf8("wifi"));
+    q.addQueryItem(qFromUtf8("openudid"), qFromUtf8("hglive0000000001"));
+    q.addQueryItem(qFromUtf8("cdid"), qFromUtf8("hglivecdid0000000000000000000001"));
+    q.addQueryItem(qFromUtf8("_rticket"), QString::number(nowMs()));
+    return q.toString(QUrl::FullyEncoded);
+}
+
+NetClient& net() {
+    static NetClient c;
+    return c;
+}
+
+// ── device_register(信封格式,无签名)────────────────────────────────
+void doRegister(std::function<void(const Result&, const Device&)> cb) {
+    const QByteArray openudid = randHex(16).toUtf8();
+    const QByteArray clientudid = randHex(16).toUtf8();
+    const QByteArray cdid = randHex(32).toUtf8();
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON* hdr = cJSON_CreateObject();
+    cJSON_AddStringToObject(hdr, "device_id", "0");
+    cJSON_AddStringToObject(hdr, "server_id", "0");
+    cJSON_AddStringToObject(hdr, "os", "Android");
+    cJSON_AddStringToObject(hdr, "os_version", "16");
+    cJSON_AddStringToObject(hdr, "os_api", "36");
+    cJSON_AddStringToObject(hdr, "device_model", "25053RT47C");
+    cJSON_AddStringToObject(hdr, "device_brand", "Redmi");
+    cJSON_AddStringToObject(hdr, "device_type", "25053RT47C");
+    cJSON_AddStringToObject(hdr, "language", "zh");
+    cJSON_AddStringToObject(hdr, "region", "CN");
+    cJSON_AddStringToObject(hdr, "tz_name", "Asia/Shanghai");
+    cJSON_AddStringToObject(hdr, "tz_offset", "28800");
+    cJSON_AddStringToObject(hdr, "resolution", "1280*2772");
+    cJSON_AddStringToObject(hdr, "dpi", "520");
+    cJSON_AddStringToObject(hdr, "cpu_model", "SM8650");
+    cJSON_AddStringToObject(hdr, "cpu_arch", "arm64");
+    cJSON_AddStringToObject(hdr, "build_serial", "BP2A.250605.031.A3");
+    // 关键:display_name / app_name 必须是 phoenix_read(扁平 payload 会被拒)
+    cJSON_AddStringToObject(hdr, "display_name", "phoenix_read");
+    cJSON_AddStringToObject(hdr, "app_name", "phoenix_read");
+    cJSON_AddStringToObject(hdr, "version_code", "73532");
+    cJSON_AddStringToObject(hdr, "app_version", "7.3.5.32");
+    cJSON_AddStringToObject(hdr, "channel", "update_64");
+    cJSON_AddStringToObject(hdr, "aid", "8662");
+    cJSON_AddStringToObject(hdr, "device_platform", "android");
+    cJSON_AddStringToObject(hdr, "user_agent", kUa);
+    cJSON_AddStringToObject(hdr, "openudid", openudid.constData());
+    cJSON_AddStringToObject(hdr, "clientudid", clientudid.constData());
+    cJSON_AddStringToObject(hdr, "cdid", cdid.constData());
+    cJSON_AddItemToObject(root, "header", hdr);
+    cJSON_AddStringToObject(root, "magic_tag", "ss_app_log");
+    cJSON_AddNumberToObject(root, "_gen_time", static_cast<double>(nowMs()));
+    char* s = cJSON_PrintUnformatted(root);
+    const QByteArray body(s);
+    cJSON_free(s);
+    cJSON_Delete(root);
+
+    QUrlQuery q;
+    q.addQueryItem(qFromUtf8("aid"), qFromUtf8("8662"));
+    q.addQueryItem(qFromUtf8("app_name"), qFromUtf8("phoenix_read"));
+    q.addQueryItem(qFromUtf8("version_code"), qFromUtf8("73532"));
+    q.addQueryItem(qFromUtf8("device_platform"), qFromUtf8("android"));
+
+    NetRequest req;
+    req.method = qFromUtf8("POST");
+    req.url = qFromUtf8("%1/service/2/device_register/?%2")
+                  .arg(qFromUtf8(kRegHost), q.toString(QUrl::FullyEncoded));
+    req.headers = {
+        { "Content-Type", "application/json; charset=utf-8" },
+        { "User-Agent", kUa },
+    };
+    req.body = body;
+    req.timeoutSec = 20;
+    DBG_P(kMod, Debug, "device_register (%d bytes)", body.size());
+
+    net().send(req, [cb](const NetResponse& r) {
+        if (!r.ok()) {
+            cb(Result::fail(Err::Network, r.error.isEmpty()
+                    ? qFromUtf8("register http %1").arg(r.status) : r.error),
+               Device());
+            return;
+        }
+        if (r.body.isEmpty()) {
+            cb(Result::fail(Err::Parse,
+               qFromUtf8("register: empty body (风控或接口改版)")), Device());
+            return;
+        }
+        JRoot root(r.body);
+        Device d;
+        d.deviceId = jstr(root.p, "device_id_str");
+        if (d.deviceId.isEmpty())
+            d.deviceId = QString::number(jint(root.p, "device_id"));
+        d.installId = jstr(root.p, "install_id_str");
+        if (d.installId.isEmpty())
+            d.installId = QString::number(jint(root.p, "install_id"));
+        d.deviceToken = jstr(root.p, "device_token");
+        if (!d.valid()) {
+            cb(Result::fail(Err::Parse,
+               qFromUtf8("register: no device_id/install_id")), Device());
+            return;
+        }
+        g_dev = d;
+        DBG_P(kMod, Info, "device registered: did=%s iid=%s new_user=%lld",
+              qPrintable(d.deviceId), qPrintable(d.installId),
+              jint(root.p, "new_user"));
+        cb(Result::ok(), d);
+    });
+}
+
+} // namespace
+
+Device cachedDevice() { return g_dev; }
+void setDevice(const Device& d) { g_dev = d; }
+
+void ensureDevice(std::function<void(const Result&, const Device&)> cb) {
+    // env 覆盖优先(真机抓包可用)
+    const QString envDid = QXV_ENV("QXVOTUBE_HG_DEVICE_ID");
+    const QString envIid = QXV_ENV("QXVOTUBE_HG_INSTALL_ID");
+    if (!envDid.isEmpty() && !envIid.isEmpty()) {
+        if (g_dev.deviceId != envDid || g_dev.installId != envIid) {
+            g_dev.deviceId = envDid;
+            g_dev.installId = envIid;
+            DBG_P(kMod, Info, "device from env: did=%s", qPrintable(envDid));
+        }
+        cb(Result::ok(), g_dev);
+        return;
+    }
+    if (g_dev.valid()) { cb(Result::ok(), g_dev); return; }
+    doRegister(std::move(cb));
+}
+
+void videoModel(const QString& vid,
+                std::function<void(const Result&, const QList<Track>&)> cb) {
+    ensureDevice([vid, cb](const Result& dr, const Device& d) {
+        if (dr.code != Err::Ok) { cb(dr, {}); return; }
+
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "dr_scene", "preload");
+        cJSON* bp = cJSON_CreateObject();
+        cJSON_AddNumberToObject(bp, "video_platform", 1024);   // 唯一合法值
+        cJSON_AddBoolToObject(bp, "need_all_video_definition", 1);
+        cJSON_AddItemToObject(root, "biz_param", bp);
+        cJSON* map = cJSON_CreateObject();
+        cJSON* arr = cJSON_CreateArray();
+        cJSON_AddItemToArray(arr, cJSON_CreateString(vid.toUtf8().constData()));
+        cJSON_AddItemToObject(map, "1", arr);
+        cJSON_AddItemToObject(root, "mixed_video_id_map", map);
+        char* s = cJSON_PrintUnformatted(root);
+        const QByteArray body(s);
+        cJSON_free(s);
+        cJSON_Delete(root);
+
+        NetRequest req;
+        req.method = qFromUtf8("POST");
+        req.url = qFromUtf8("%1/novel/player/multi_video_model/v1/?%2")
+                      .arg(qFromUtf8(kApiHost), commonQuery(d));
+        req.headers = {
+            { "Content-Type", "application/json; charset=UTF-8" },
+            { "User-Agent", kUa },
+            { "Accept", "application/json; charset=utf-8,x-protobuf" },
+            { "x-xs-from-web", "0" },
+            { "sdk-version", "2" },
+        };
+        req.body = body;
+        req.timeoutSec = 25;
+        DBG_P(kMod, Debug, "video_model vid=%s", qPrintable(vid));
+
+        net().send(req, [cb, vid](const NetResponse& r) {
+            if (!r.ok()) {
+                cb(Result::fail(Err::Network, r.error.isEmpty()
+                       ? qFromUtf8("video_model http %1").arg(r.status)
+                       : r.error), {});
+                return;
+            }
+            if (r.body.isEmpty()) {
+                // 200 + 空 body = 风控/接口关闭(单集端点的现状)
+                cb(Result::fail(Err::RateLimit,
+                   qFromUtf8("hongguo-app: 空响应(风控或端点关闭)")), {});
+                return;
+            }
+            JRoot root(r.body);
+            if (!root.ok()) { cb(Result::fail(Err::Parse, "not json"), {}); return; }
+            const long long code = jint(root.p, "code", -1);
+            if (code != 0) {
+                cb(Result::fail(Err::Parse,
+                   qFromUtf8("hongguo-app: code=%1 %2")
+                       .arg(code).arg(jstr(root.p, "message"))), {});
+                return;
+            }
+            const cJSON* vd = jobj(jobj(root.p, "data"), vid.toUtf8().constData());
+            if (!vd) {
+                cb(Result::fail(Err::Parse,
+                   qFromUtf8("hongguo-app: no data[%1]").arg(vid)), {});
+                return;
+            }
+            // data[vid].video_model 是 JSON 字符串(嵌套;不是对象)
+            const QString vmStr = jstr(vd, "video_model");
+            if (vmStr.isEmpty()) {
+                cb(Result::fail(Err::Parse,
+                   qFromUtf8("hongguo-app: no video_model")), {});
+                return;
+            }
+            JRoot vm(vmStr.toUtf8());
+            if (!vm.ok()) {
+                cb(Result::fail(Err::Parse,
+                   qFromUtf8("hongguo-app: video_model not json")), {});
+                return;
+            }
+            const cJSON* list = jarr(vm.p, "video_list");
+            QList<Track> out;
+            for (int i = 0; i < jsize(list); ++i) {
+                const cJSON* it = jat(list, i);
+                Track t;
+                const cJSON* meta = jobj(it, "video_meta");
+                t.definition = jstr(meta, "definition");
+                t.codecType = jstr(meta, "codec_type");
+                t.width = int(jint(meta, "width"));
+                t.height = int(jint(meta, "height"));
+                t.url = jstr(it, "main_url");
+                t.spadeA = jstr(jobj(it, "encrypt_info"), "spade_a");
+                t.urlExpire = jint(vm.p, "url_expire");
+                if (!t.url.isEmpty() && !t.spadeA.isEmpty())
+                    out.append(t);
+            }
+            if (out.isEmpty()) {
+                cb(Result::fail(Err::Parse,
+                   qFromUtf8("hongguo-app: video_list 为空或缺 spade_a")), {});
+                return;
+            }
+            DBG_P(kMod, Info, "video_model %s -> %d tracks (first %s/%s)",
+                  qPrintable(vid), out.size(), qPrintable(out[0].definition),
+                  qPrintable(out[0].codecType));
+            cb(Result::ok(), out);
+        });
+    });
+}
+
+const Track* pickBest(const QList<Track>& tracks) {
+    const Track* best = nullptr;
+    for (int i = 0; i < tracks.size(); ++i) {
+        const Track& t = tracks[i];
+        if (!t.playable()) continue;      // bytevc2 私有编码,优先跳过
+        if (!best || t.width > best->width) best = &t;
+    }
+    if (best) return best;
+    for (int i = 0; i < tracks.size(); ++i)
+        if (!best || tracks[i].width > best->width) best = &tracks[i];
+    return best;
+}
+
+} // namespace hgapp
+} // namespace qxv

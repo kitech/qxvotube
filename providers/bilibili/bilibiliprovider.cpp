@@ -25,7 +25,7 @@ static const char* kMod = "bilibili";
 static Result checkApi(const QByteArray& body, JRoot& root) {
     root.parse(body);
     if (!root.ok())
-        return Result::fail(Err::Parse, QXV_STR("bilibili: body not json"));
+        return Result::fail(Err::Parse, qFromUtf8("bilibili: body not json"));
     const int code = static_cast<int>(jint(root.p, "code", -1));
     if (code != 0) {
         // -412 风控 / -101 未登录 / -404 不存在
@@ -33,7 +33,7 @@ static Result checkApi(const QByteArray& body, JRoot& root) {
               : code == -101 ? Err::NeedAuth
               : code == -404 ? Err::NotFound : Err::Parse;
         return Result::fail(e,
-            QXV_STR("bilibili code=%1 %2")
+            qFromUtf8("bilibili code=%1 %2")
                 .arg(code).arg(jstr(root.p, "message")));
     }
     return Result::ok();
@@ -44,7 +44,7 @@ static QList<VideoItem> parseSearch(cJSON* results) {
     if (!results) return out;
     for (int i = 0; i < jsize(results); ++i) {
         const cJSON* g = jat(results, i);          // result_type 分组
-        if (jstr(g, "result_type") != QXV_STR("video")) continue;
+        if (jstr(g, "result_type") != qFromUtf8("video")) continue;
         cJSON* data = jarr(g, "data");
         for (int k = 0; k < jsize(data); ++k) {
             const cJSON* it = jat(data, k);
@@ -65,25 +65,25 @@ void BilibiliProvider::apiGet(const QString& path, const QString& query,
                               std::function<void(const NetResponse&)> cb) {
     static NetClient net;           // 进程级共享(httplib 阻塞型,线程池在内部)
     static CookieJar jar;
-    if (jar.cookieForUrl(QXV_STR("https://www.bilibili.com")).isEmpty()) {
+    if (jar.cookieForUrl(qFromUtf8("https://www.bilibili.com")).isEmpty()) {
         // 首次:种 buvid3(风控要求)
         NetRequest warm;
-        warm.url = QXV_STR("https://www.bilibili.com/");
+        warm.url = qFromUtf8("https://www.bilibili.com/");
         for (const auto& h : Fingerprint::chromeWeb(
-                 QXV_STR("zh-CN,en-US")).headers)
+                 qFromUtf8("zh-CN,en-US")).headers)
             warm.headers.append(h);
-        warm.headers.append(qMakePair(QXV_STR("Referer"),
-            QXV_STR("https://www.bilibili.com/")));
+        warm.headers.append(qMakePair(qFromUtf8("Referer"),
+            qFromUtf8("https://www.bilibili.com/")));
         net.send(warm, [](const NetResponse&) {});
     }
 
     NetRequest req;
-    req.url = QXV_STR("https://api.bilibili.com%1?%2").arg(path, query);
+    req.url = qFromUtf8("https://api.bilibili.com%1?%2").arg(path, query);
     for (const auto& h : Fingerprint::chromeWeb(
-             QXV_STR("zh-CN,en-US")).headers)
+             qFromUtf8("zh-CN,en-US")).headers)
         req.headers.append(h);
-    req.headers.append(qMakePair(QXV_STR("Referer"),
-        QXV_STR("https://www.bilibili.com/")));
+    req.headers.append(qMakePair(qFromUtf8("Referer"),
+        qFromUtf8("https://www.bilibili.com/")));
     const QString token = m_cred.value("cookie").toString();
     if (!token.isEmpty())
         req.headers.append({ "Cookie", token });
@@ -99,7 +99,7 @@ void BilibiliProvider::search(const QString& kw, int page, SearchCb cb) {
            [cb, page](const NetResponse& r) {
         if (!r.ok()) {
             cb(Result::fail(Err::Network, r.error.isEmpty()
-                   ? QXV_STR("http %1").arg(r.status) : r.error), {}, false);
+                   ? qFromUtf8("http %1").arg(r.status) : r.error), {}, false);
             return;
         }
         Result res;
@@ -148,7 +148,7 @@ void BilibiliProvider::detail(const QString& id, DetailCb cb) {
 void BilibiliProvider::resolve(const QString& id, ResolveCb cb) {
     // id 形如 "BV1xx411c7mD@cid123"(detail 出的分集)或纯 bvid(单P)
     QString bvid = id, cid;
-    const int at = id.indexOf(QXV_STR("."));
+    const int at = id.indexOf(qFromUtf8("."));
     if (at > 0) { bvid = id.left(at); cid = id.mid(at + 1); }
 
     auto playUrl = [this, cb](const QString& bvid2, const QString& cid2) {
@@ -169,15 +169,15 @@ void BilibiliProvider::resolve(const QString& id, ResolveCb cb) {
                 const cJSON* dv = jat(durl, i);
                 Stream s;
                 s.url = jstr(dv, "url");
-                s.quality = QXV_STR("720P");
-                s.kind = QXV_STR("mp4");
+                s.quality = qFromUtf8("720P");
+                s.kind = qFromUtf8("mp4");
                 s.extra = QVariantMap{
-                    { "Referer", QXV_STR("https://www.bilibili.com/") } };
+                    { "Referer", qFromUtf8("https://www.bilibili.com/") } };
                 pr.streams.append(s);
             }
             if (pr.streams.isEmpty())
                 cb(Result::fail(Err::NeedAuth,
-                   QXV_STR("bilibili: no guest streams (dash only)")), {});
+                   qFromUtf8("bilibili: no guest streams (dash only)")), {});
             else
                 cb(Result::ok(), pr);
         });

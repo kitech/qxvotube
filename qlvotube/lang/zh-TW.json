@@ -29,7 +29,22 @@
   "pause": "暫停",
   "next": "下一首",
   "no_media": "此曲目尚無本機音訊檔案",
-  "error": "播放錯誤"
+  "playback": "播放錯誤"
+ },
+ "error": {
+  "network": "網路錯誤",
+  "tls": "憑證錯誤",
+  "http": "HTTP 錯誤",
+  "parse": "資料解析錯誤",
+  "ratelimit": "請求過於頻繁，請稍後再試",
+  "captcha": "需要人機驗證",
+  "risk": "風控提示",
+  "notfound": "內容不存在",
+  "needauth": "需要登入",
+  "authexpired": "登入已過期",
+  "paywalled": "付費內容",
+  "geoblocked": "地區限制",
+  "unsupported": "暫不支援該平台"
  },
  "queue": {
   "title": "播放佇列"

@@ -18,19 +18,19 @@ static bool s_fullMode = false;
 static Level parseLevel(const QString& s) {
     // Qt3 无 compare(QString,Qt::CaseInsensitive):转大写比较
     const QString t = s.toUpper();
-    if (t == QXV_STR("ERR"))   return Err;
-    if (t == QXV_STR("WARN"))  return Warn;
-    if (t == QXV_STR("INFO"))  return Info;
-    if (t == QXV_STR("DEBUG")) return Debug;
+    if (t == qFromUtf8("ERR"))   return Err;
+    if (t == qFromUtf8("WARN"))  return Warn;
+    if (t == qFromUtf8("INFO"))  return Info;
+    if (t == qFromUtf8("DEBUG")) return Debug;
     return Trace;
 }
 
 void loadFromEnv() {
     const QString d = QXV_ENV("QXVOTUBE_DEBUG");
     if (!d.isEmpty()) {
-        const QStringList segs = d.split(QXV_STR(","), QXV_SKIP_EMPTY);
+        const QStringList segs = d.split(qFromUtf8(","), QXV_SKIP_EMPTY);
         for (const QString& seg : segs) {
-            const int c = seg.indexOf(QXV_STR(":"));
+            const int c = seg.indexOf(qFromUtf8(":"));
             if (c < 0) { s_modLevel[QString()] = parseLevel(seg); continue; }
             s_modLevel[seg.left(c)] = parseLevel(seg.mid(c + 1));
         }
@@ -80,7 +80,7 @@ void vlog(Level lvl, const char* module, const char* file, int line,
 
 QString mask(const QString& v) {
     if (s_fullMode || v.size() <= 8) return v;
-    return v.left(8) + QXV_STR("...");
+    return v.left(8) + qFromUtf8("...");
 }
 
 } // namespace dbg

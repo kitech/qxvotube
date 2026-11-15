@@ -10,7 +10,7 @@ namespace qxv {
 // 认证:search/playurl 游客可用(低清晰度);高清/番剧需登录 → NeedAuth
 class BilibiliProvider : public VideoProvider {
 public:
-    QString id() const override { return QXV_STR("bilibili"); }
+    QString id() const override { return qFromUtf8("bilibili"); }
 
     void search(const QString& kw, int page, SearchCb cb) override;
     void detail(const QString& id, DetailCb cb) override;

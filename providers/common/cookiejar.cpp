@@ -27,20 +27,20 @@ QString CookieJar::cookieForUrl(const QString& url) const {
         s.beginGroup(QString(kGroup) + "/" + host);
         const QStringList keys = s.allKeys();
         for (const QString& k : keys)
-            out += (out.isEmpty() ? QString() : QXV_STR("; "))
-                 + k + QXV_STR("=") + s.value(k).toString();
+            out += (out.isEmpty() ? QString() : qFromUtf8("; "))
+                 + k + qFromUtf8("=") + s.value(k).toString();
         s.endGroup();
         if (out.isEmpty()) break;      // 只取命中最具体的一层,避免串味
         return out;
     }
     // 无命中则再试父域一次(www.x.com → .x.com / x.com)
-    const int dot = host.indexOf(QXV_STR("."));
+    const int dot = host.indexOf(qFromUtf8("."));
     if (dot > 0) {
         host = host.mid(dot + 1);
         s.beginGroup(QString(kGroup) + "/" + host);
         for (const QString& k : s.allKeys())
-            out += (out.isEmpty() ? QString() : QXV_STR("; "))
-                 + k + QXV_STR("=") + s.value(k).toString();
+            out += (out.isEmpty() ? QString() : qFromUtf8("; "))
+                 + k + qFromUtf8("=") + s.value(k).toString();
         s.endGroup();
     }
     return out;
@@ -54,15 +54,15 @@ void CookieJar::storeFromResponse(
     QSettings s;
     s.beginGroup(QString(kGroup) + "/" + dom);
     for (const auto& hd : headers) {
-        if (!QXV_IEQ(hd.first, QXV_STR("Set-Cookie")))
+        if (!QXV_IEQ(hd.first, qFromUtf8("Set-Cookie")))
             continue;
         // 只解析 name=value;属性(path/expires/httponly)忽略
-        const QString kv = hd.second.section(QXV_STR("."), 0, 0);
-        const int eq = kv.indexOf(QXV_STR("."));
+        const QString kv = hd.second.section(qFromUtf8("."), 0, 0);
+        const int eq = kv.indexOf(qFromUtf8("."));
         if (eq <= 0) continue;
         const QString name = kv.left(eq).trimmed();
         const QString val = kv.mid(eq + 1).trimmed();
-        if (QXV_IEQ(name, QXV_STR("deleted"))
+        if (QXV_IEQ(name, qFromUtf8("deleted"))
                 || val.isEmpty()) {
             s.remove(name);            // 清除
             continue;
@@ -75,9 +75,9 @@ void CookieJar::storeFromResponse(
 void CookieJar::importCookieString(const QString& domain, const QString& cookieStr) {
     QSettings s;
     s.beginGroup(QString(kGroup) + "/" + domain.toLower());
-    const QStringList pairs = cookieStr.split(QXV_STR("."), Qt::SkipEmptyParts);
+    const QStringList pairs = cookieStr.split(qFromUtf8("."), Qt::SkipEmptyParts);
     for (const QString& p : pairs) {
-        const int eq = p.indexOf(QXV_STR("."));
+        const int eq = p.indexOf(qFromUtf8("."));
         if (eq <= 0) continue;
         s.setValue(p.left(eq).trimmed(), p.mid(eq + 1).trimmed());
     }

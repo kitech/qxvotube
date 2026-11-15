@@ -3,6 +3,8 @@
 #include "compat.h"
 #include "common/errortext.h"
 #include "common/result.h"
+#include "common/qcjson.h"
+#include "common/debuglog.h"
 #include <QCoreApplication>
 #include <QFile>
 #include <cstdio>
@@ -18,17 +20,17 @@ static bool readJson(const QString& path, JRoot* out) {
 
 static bool checkLang(const QString& dir, const QString& lang, int* missing) {
     JRoot root;
-    if (!readJson(dir + QXV_STR("/%1.json").arg(lang), &root)) {
+    if (!readJson(dir + qFromUtf8("/%1.json").arg(lang), &root)) {
         std::printf("[FAIL] %s.json unreadable\n", qPrintable(lang));
         ++(*missing);
         return false;
     }
     cJSON* eobj = jobj(root.p, "error");
     if (!eobj) { std::printf("[FAIL] %s: no error object\n", qPrintable(lang)); ++(*missing); return false; }
-    for (int code = Err::Network; code <= Err::Unsupported; ++code) {
+    for (int code = (int)Err::Network; code <= (int)Err::Unsupported; ++code) {
         const QString key = i18nKeyFor(static_cast<Err>(code));
         if (key.isEmpty()) continue;   // Ok/Cancelled 不需要文案
-        const QString sub = key.mid(key.indexOf(QXV_STR(".")) + 1);
+        const QString sub = key.mid(key.indexOf(qFromUtf8(".")) + 1);
         const QString val = jstr(eobj, sub.toUtf8().constData());
         if (val.isEmpty()) {
             std::printf("[FAIL] %s: missing %s\n", qPrintable(lang), qPrintable(key));
@@ -42,11 +44,11 @@ int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     dbg::loadFromEnv();
     const QString dir = argc > 1 ? QString::fromUtf8(argv[1])
-                                 : QXV_STR("qlvotube/lang");
+                                 : qFromUtf8("qlvotube/lang");
     int missing = 0;
-    checkLang(dir, QXV_STR("zh-CN"), &missing);
-    checkLang(dir, QXV_STR("en-US"), &missing);
-    checkLang(dir, QXV_STR("zh-TW"), &missing);
+    checkLang(dir, qFromUtf8("zh-CN"), &missing);
+    checkLang(dir, qFromUtf8("en-US"), &missing);
+    checkLang(dir, qFromUtf8("zh-TW"), &missing);
     if (missing == 0) std::printf("[ ok ] errortext: all Err codes have i18n keys in 3 langs\n");
     return missing == 0 ? 0 : 1;
 }

@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
         if (only != QStringLiteral("all") && p->id() != only) continue;
         ++pending;
         const QString pid = p->id();
-        p->search(QXV_STR("travel"), 1,
+        p->search(qFromUtf8("travel"), 1,
             [p, &pending, &failures, &done, pid](Result res,
                                           const QList<VideoItem>& items, bool) {
             if (res.code != Err::Ok || items.isEmpty()) {
@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
                                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
                                       " AppleWebKit/537.36" },
                                 };
-                                if (pid == QXV_STR("youtube"))
+                                if (pid == qFromUtf8("youtube"))
                                     fr.proxy = QXV_ENV("QXVOTUBE_PROXY");
                                 fetch.send(fr, [pid, &done, &failures](
                                                    const NetResponse& nr) {

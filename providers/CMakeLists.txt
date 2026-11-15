@@ -11,7 +11,7 @@ set(CMAKE_AUTOMOC ON)
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(Qt6 COMPONENTS Core REQUIRED)
+find_package(Qt6 COMPONENTS Core Gui REQUIRED)
 
 # vendored cpp-httplib(gh-proxy 前缀下载;已存在则跳过)
 set(HTTPLIB_FILE "${CMAKE_CURRENT_SOURCE_DIR}/common/httplib.h")
@@ -27,15 +27,23 @@ endif()
 
 add_library(qxvproviders STATIC
     ../qlcomp/cJSON.c                # 全仓唯一份(qlvotube 同源,避免双份符号)
+    ../qlcomp/compatcore34.cpp       # qFromUtf8/qbaFromCharptr 等(Qt6 需 Qt6::Gui)
     common/debuglog.cpp
     common/result.cpp
     common/netclient.cpp
+    common/potoken.cpp
     common/cookiejar.cpp
     common/fingerprint.cpp
     common/errortext.cpp
     factory.cpp
     bilibili/bilibiliprovider.cpp
     youtube/youtubeprovider.cpp
+    hongguo/hongguoprovider.cpp
+    common/hgcenc/spade.cpp
+    common/hgcenc/mp4box.cpp
+    common/hgcenc/cenc.cpp
+    common/hgapp/hgapp.cpp
+    common/hgstream/hgstream.cpp
 )
 
 target_compile_definitions(qxvproviders PRIVATE
@@ -49,7 +57,7 @@ target_include_directories(qxvproviders PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)   # cJSON.h
 
 target_link_libraries(qxvproviders PUBLIC
-    Qt6::Core OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB)
+    Qt6::Core Qt6::Gui OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB)
 
 if(QXV_PROVIDERS_TESTS)
     enable_testing()

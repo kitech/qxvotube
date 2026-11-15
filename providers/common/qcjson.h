@@ -41,10 +41,13 @@ inline cJSON* jarr(const cJSON* o, const char* key) {
     cJSON* it = o ? cJSON_GetObjectItemCaseSensitive(o, key) : nullptr;
     return cJSON_IsArray(it) ? it : nullptr;
 }
-inline QString jstr(const cJSON* o, const char* key) {
-    const cJSON* it = o ? cJSON_GetObjectItemCaseSensitive(o, key) : nullptr;
+inline QString jstrVal(const cJSON* it) {
     return cJSON_IsString(it) && it->valuestring
         ? QString::fromUtf8(it->valuestring) : QString();
+}
+inline QString jstr(const cJSON* o, const char* key) {
+    const cJSON* it = o ? cJSON_GetObjectItemCaseSensitive(o, key) : nullptr;
+    return jstrVal(it);
 }
 inline long long jint(const cJSON* o, const char* key, long long def = 0) {
     const cJSON* it = o ? cJSON_GetObjectItemCaseSensitive(o, key) : nullptr;

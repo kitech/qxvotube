@@ -29,7 +29,22 @@
   "pause": "Pause",
   "next": "Next",
   "no_media": "No local audio file for this track",
-  "error": "Playback error"
+  "playback": "Playback error"
+ },
+ "error": {
+  "network": "Network error",
+  "tls": "Certificate error",
+  "http": "HTTP error",
+  "parse": "Data parse error",
+  "ratelimit": "Too many requests, please try again later",
+  "captcha": "Human verification required",
+  "risk": "Security check hint",
+  "notfound": "Content not found",
+  "needauth": "Sign-in required",
+  "authexpired": "Login expired",
+  "paywalled": "Paid content",
+  "geoblocked": "Region restricted",
+  "unsupported": "Platform not supported"
  },
  "queue": {
   "title": "Play Queue"

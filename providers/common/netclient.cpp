@@ -39,14 +39,14 @@ static bool splitUrl(const QString& url, QString* scheme, QString* host,
                      int* port, QString* path, QString* err) {
     const QUrl u(url);
     if (!u.isValid() || u.host().isEmpty()) {
-        *err = QXV_STR("invalid url: %1").arg(url);
+        *err = qFromUtf8("invalid url: %1").arg(url);
         return false;
     }
     *scheme = u.scheme().toLower();
     *host = u.host();
-    *port = u.port(*scheme == QXV_STR("https") ? 443 : 80);
+    *port = u.port(*scheme == qFromUtf8("https") ? 443 : 80);
     *path = u.path() + (u.query().isEmpty() ? QString()
-                                            : QXV_STR("?") + u.query());
+                                            : qFromUtf8("?") + u.query());
     return true;
 }
 
@@ -66,14 +66,14 @@ void NetClient::send(const NetRequest& req, Callback cb) {
             resp.error = err;
         } else {
             // 注意:Client(host, port) 恒为明文;TLS 必须走 scheme 形式(httplib v0.20)
-            httplib::Client cli(QXV_STR("%1://%2:%3")
+            httplib::Client cli(qFromUtf8("%1://%2:%3")
                                     .arg(scheme, host).arg(port)
                                     .toStdString());
             cli.set_connection_timeout(req.timeoutSec, 0);
             cli.set_read_timeout(req.timeoutSec, 0);
             cli.set_follow_location(true);
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-            if (scheme == QXV_STR("https"))
+            if (scheme == qFromUtf8("https"))
                 cli.enable_server_certificate_verification(true);
 #endif
             if (!req.proxy.isEmpty()) {
@@ -91,11 +91,18 @@ void NetClient::send(const NetRequest& req, Callback cb) {
             }
 
             httplib::Result r;
-            if (QXV_IEQ(req.method, QXV_STR("GET"))) {
+            // httplib 的 content_type 参数是 set_header 替换语义,headers
+            // 里已带 Content-Type 时必须传空串,否则会被盖成默认值
+            // (红果 fallback-play-info 400 public_fallback_unavailable 实测根因)
+            bool hasCt = false;
+            for (const auto& hd : req.headers)
+                if (QXV_IEQ(hd.first, qFromUtf8("Content-Type"))) hasCt = true;
+            const char* ctype = hasCt ? "" : "application/octet-stream";
+            if (QXV_IEQ(req.method, qFromUtf8("GET"))) {
                 r = cli.Get(path.toStdString(), h);
-            } else if (QXV_IEQ(req.method, QXV_STR("POST"))) {
+            } else if (QXV_IEQ(req.method, qFromUtf8("POST"))) {
                 r = cli.Post(path.toStdString(), h, req.body.constData(),
-                             req.body.size(), "application/octet-stream");
+                             req.body.size(), ctype);
             } else {
                 r = cli.Head(path.toStdString(), h);
             }
