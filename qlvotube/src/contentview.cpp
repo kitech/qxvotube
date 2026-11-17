@@ -8,8 +8,24 @@
 #include <qpainter.h>
 #include <qevent.h>
 #include <qfontmetrics.h>
+#if QT_VERSION >= 0x040000
+#include <QDebug>
+#endif
+
+#include "videothumbcache.h"
+#include "eventpoller.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
 
 namespace {
+const int kChipH = 40;
+const int kCardTextH = 46;
+const int kCardGap = 12;
+const int kMinCardW = 200;
+const int kFooterH = 56;
+
 QString fmtMs(int ms)
 {
     int total = ms / 1000;
@@ -18,6 +34,19 @@ QString fmtMs(int ms)
     QString ss = QString::number(s);
     if (s < 10) ss = QString("0") + ss;
     return QString::number(m) + ":" + ss;
+}
+
+/* 单行截断（Qt3 无 QFontMetrics::elidedText 的等价多行能力） */
+QString elideOneLine(QPainter& p, const QString& text, int maxW)
+{
+    if (text.isEmpty()) return text;
+    const QFontMetrics fm = p.fontMetrics();
+    if (qFontWidth(fm, text) <= maxW) return text;
+    const QString dots = qFromUtf8("…");
+    QString t = text;
+    while (!t.isEmpty() && qFontWidth(fm, t + dots) > maxW)
+        t.remove(t.length() - 1, 1);
+    return t + dots;
 }
 
 /* 播放次数：>=1e8 → x.x亿，>=1e4 → x.x万，其余原样 */
@@ -34,7 +63,8 @@ QString fmtCount(qint64 n)
 ContentView::ContentView(QWidget* parent)
     : QWidget(parent), m_pl(0), m_mode(TracksMode), m_scrollBar(0), m_scrollY(0),
       m_scrollDelta(0), m_hover(-1), m_current(-1), m_playlistId(-1),
-      m_headerH(64), m_rowH(48), m_hasMore(false), m_loadingNow(false)
+      m_headerH(64), m_rowH(48), m_lastMoreAt(0), m_hasMore(false),
+      m_loadingNow(false)
 {
     setMouseTracking(true);
     m_scrollBar = new LimeScrollBar(Qt::Vertical, this);
@@ -135,6 +165,93 @@ void ContentView::showCategoryGrid(const QStringList& cats)
     update();
 }
 
+void ContentView::showVideoGrid(const QString& title,
+                                const std::vector<CategoryChip>& chips,
+                                const QString& activeKey)
+{
+    m_mode = VideoGridMode;
+    m_pl = 0;
+    m_playlistId = -1;
+    m_listTitle = title;
+    m_chips = chips;
+    m_activeChip = activeKey;
+    m_scrollY = 0;
+    m_hover = -1;
+    m_current = -1;
+    m_gridErr = QString();
+    m_hasMore = true;
+    m_loadingNow = true;
+    rebuildRows();
+    updateScrollBar();
+    update();
+}
+
+void ContentView::setVideoChips(const std::vector<CategoryChip>& chips,
+                                const QString& activeKey)
+{
+    m_chips = chips;
+    m_activeChip = activeKey;
+    update();
+}
+
+void ContentView::setActiveChip(const QString& key)
+{
+    m_activeChip = key;
+    update();
+}
+
+void ContentView::clearVideoCards()
+{
+    m_videos.clear();
+    m_gridErr = QString();
+    m_scrollY = 0;
+    rebuildRows();
+    updateScrollBar();
+    update();
+}
+
+void ContentView::appendVideoCards(const std::vector<VideoCard>& cards, bool hasMore)
+{
+    for (size_t vi = 0; vi < cards.size(); ++vi) m_videos.push_back(cards[vi]);
+    m_hasMore = hasMore;
+    m_loadingNow = false;
+    m_gridErr = QString();
+    rebuildRows();
+    updateScrollBar();
+    update();
+}
+
+void ContentView::setVideoGridLoading(bool loading)
+{
+    if (m_mode != VideoGridMode) return;
+    m_loadingNow = loading;
+    rebuildRows();
+    updateScrollBar();
+    update();
+}
+
+void ContentView::setVideoGridError(const QString& text)
+{
+    if (m_mode != VideoGridMode) return;
+    m_gridErr = text;
+    m_loadingNow = false;
+    rebuildRows();
+    updateScrollBar();
+    update();
+}
+
+int ContentView::gridCols() const
+{
+    return qMax(1, (width() - 40 + kCardGap) / (kMinCardW + kCardGap));
+}
+
+int ContentView::gridCardH() const
+{
+    const int cols = gridCols();
+    const int cardW = (width() - 40 - (cols - 1) * kCardGap) / cols;
+    return cardW * 9 / 16 + kCardTextH;   /* 16:9 封面 + 文案区 */
+}
+
 void ContentView::rebuildRows()
 {
     m_rows.clear();
@@ -164,6 +281,16 @@ void ContentView::rebuildRows()
             r.h = 44;
             m_rows.push_back(r);
         }
+    } else if (m_mode == VideoGridMode) {
+        const int cols = gridCols();
+        const int step = gridCardH() + kCardGap;
+        for (int i = 0; i < (int)m_videos.size(); ++i) {
+            Row r;
+            r.index = i;
+            r.y = m_headerH + kChipH + (i / cols) * step;
+            r.h = gridCardH();
+            m_rows.push_back(r);
+        }
     }
 }
 
@@ -183,6 +310,18 @@ int ContentView::totalHeight() const
         const Row& last = m_rows.back();
         return last.y + last.h + 8;
     }
+    if (m_mode == VideoGridMode) {
+        int h = m_headerH + kChipH;
+        if (!m_rows.empty()) {
+            const int cols = gridCols();
+            const int rows = (int)((m_rows.size() + cols - 1) / cols);
+            h += rows * (gridCardH() + kCardGap);
+        }
+        if (m_loadingNow || m_hasMore || !m_gridErr.isEmpty()
+            || m_videos.empty())
+            h += kFooterH;
+        return h;
+    }
     return m_headerH;
 }
 
@@ -198,7 +337,45 @@ QRect ContentView::backRect() const
 
 QRect ContentView::loadMoreRect() const
 {
+    if (m_mode == VideoGridMode) {
+        const int cols = gridCols();
+        const int rows = (int)((m_rows.size() + cols - 1) / cols);
+        const int y = m_headerH + kChipH + rows * (gridCardH() + kCardGap) + 8;
+        return QRect(width() / 2 - 60, y, 120, 32);
+    }
     return QRect(width() / 2 - 90, m_headerH + (int)m_rows.size() * 56 + 6, 180, 36);
+}
+
+QRect ContentView::retryRect() const
+{
+    const int cols = gridCols();
+    const int rows = (int)((m_rows.size() + cols - 1) / cols);
+    const int y = m_headerH + kChipH + rows * (gridCardH() + kCardGap) + 30;
+    return QRect(width() / 2 - 50, y, 100, 28);
+}
+
+QRect ContentView::chipRect(int i) const
+{
+    QFontMetrics fm(font());
+    int x = 20;
+    for (int k = 0; k < i && k < (int)m_chips.size(); ++k) {
+        const QString nm = m_chips[k].name.isEmpty()
+                               ? _("content.cat_recommend") : m_chips[k].name;
+        x += qMax(56, qFontWidth(fm, nm) + 24) + 8;
+    }
+    const QString name = (i < (int)m_chips.size() && !m_chips[i].name.isEmpty())
+                             ? m_chips[i].name : _("content.cat_recommend");
+    const int w = qMax(56, qFontWidth(fm, name) + 24);
+    return QRect(x, m_headerH + 6, w, 28);
+}
+
+QRect ContentView::cardRect(int i) const
+{
+    const int cols = gridCols();
+    const int cardW = (width() - 40 - (cols - 1) * kCardGap) / cols;
+    const int x = 20 + (i % cols) * (cardW + kCardGap);
+    const int y = m_headerH + kChipH + (i / cols) * (gridCardH() + kCardGap);
+    return QRect(x, y, cardW, gridCardH());
 }
 
 int ContentView::rowAt(const QPoint& p) const
@@ -220,6 +397,14 @@ int ContentView::rowAt(const QPoint& p) const
             if (y >= m_rows[i].y && y < m_rows[i].y + m_rows[i].h)
                 return (int)i;
     }
+    if (m_mode == VideoGridMode) {
+        for (size_t i = 0; i < m_rows.size(); ++i) {
+            QRect r = cardRect((int)i);
+            r.moveTop(r.top() - m_scrollY);
+            if (r.contains(p)) return m_rows[i].index;
+        }
+        return -1;
+    }
     return -1;
 }
 
@@ -228,6 +413,35 @@ void ContentView::onScroll(int value)
     if (value == m_scrollY) return;
     m_scrollY = value;
     update();
+    if (m_mode == VideoGridMode && m_hasMore && !m_loadingNow
+        && m_gridErr.isEmpty()) {
+        const int viewH = height() - m_headerH;
+        const int totalH = totalHeight();
+        if (viewH > 0 && m_scrollY + viewH >= totalH - 120) {
+            const int now = (int)::time(0);
+            if (now != m_lastMoreAt) {   /* 1s 节流:一次滚动只发一次 */
+                m_lastMoreAt = now;
+                if (getenv("QLVOTUBE_DEBUG") != 0)
+#if QT_VERSION >= 0x060000
+                    qDebug() << "grid: near bottom -> loadMore";
+#else
+                    qDebug("grid: near bottom -> loadMore");
+#endif
+                emit loadMoreRequested();
+            }
+        }
+    }
+}
+
+void ContentView::customEvent(CustomEventBase* e)
+{
+    if (e->type() == ThumbReadyEventType) {
+        ThumbReadyEvent* te = static_cast<ThumbReadyEvent*>(e);
+        thumbcache::accept(te->url, te->image);
+        update();   /* 封面到货 → 重绘(事件循环负责 delete) */
+        return;
+    }
+    QWidget::customEvent(e);
 }
 
 void ContentView::updateScrollBar()
@@ -250,7 +464,7 @@ void ContentView::resizeEvent(QResizeEvent* e)
     QWidget::resizeEvent(e);
     if (m_scrollBar)
         m_scrollBar->setGeometry(width() - 12, m_headerH, 12, qMax(0, height() - m_headerH));
-    if (m_mode == CategoryGridMode)
+    if (m_mode == CategoryGridMode || m_mode == VideoGridMode)
         rebuildRows();
     updateScrollBar();
 }
@@ -317,6 +531,24 @@ void ContentView::paintEvent(QPaintEvent*)
     p.drawLine(0, m_headerH - 1, width(), m_headerH - 1);
 
     p.setClipRect(0, m_headerH, width(), height() - m_headerH);
+
+    if (m_mode == VideoGridMode) {
+        /* 分类 chips：站点动态提供（空 key = 推荐），吸顶不随滚动 */
+        for (int i = 0; i < (int)m_chips.size(); ++i) {
+            QRect cr = chipRect(i);
+            if (cr.left() > width() - 12) break;
+            const bool on = (m_chips[i].key == m_activeChip);
+            p.setPen(Qt::NoPen);
+            p.setBrush(on ? pal.accent : pal.hoverBg);
+            muiDrawRoundRect(p, cr, cr.height() / 2, cr.height() / 2);
+            p.setPen(on ? pal.accentText : pal.textPrimary);
+            p.setFont(small);
+            const QString name = m_chips[i].name.isEmpty()
+                                     ? _("content.cat_recommend")
+                                     : m_chips[i].name;
+            p.drawText(cr, Qt::AlignCenter, name);
+        }
+    }
 
     if (m_mode == TracksMode) {
         if (m_pl) {
@@ -429,16 +661,137 @@ void ContentView::paintEvent(QPaintEvent*)
             p.setFont(normal);
             p.drawText(cr, Qt::AlignCenter, m_gridCats[row.index]);
         }
+    } else if (m_mode == VideoGridMode) {
+        const int cols = gridCols();
+        for (size_t i = 0; i < m_rows.size(); ++i) {
+            const Row& row = m_rows[i];
+            int y = row.y - m_scrollY;
+            if (y + row.h < m_headerH + kChipH || y > height()) continue;
+            const VideoCard& c = m_videos[row.index];
+            QRect cr = cardRect((int)i);
+            cr.moveTop(y);
+            if ((int)i == m_hover)
+                p.fillRect(cr, pal.hoverBg);
+
+            /* 封面：异步缓存命中即画；未命中先用 identicon 占位并入队 */
+            const int coverH = cr.width() * 9 / 16;
+            QPixmap cover = thumbcache::pixmap(c.cover);
+            if (cover.isNull()) {
+                if (!c.cover.isEmpty()) thumbcache::request(c.cover, this);
+                cover = generateIdenticon(c.cover.isEmpty() ? c.id : c.cover,
+                                          qMin(coverH, 96));
+            }
+            if (cover.width() != cr.width() || cover.height() != coverH) {
+#ifdef QT3_BUILD
+#ifdef QT3_BUILD
+                cover.resize(cr.width(), coverH);
+#else
+                cover = cover.scaled(cr.width(), coverH,
+                                     Qt::IgnoreAspectRatio,
+                                     Qt::SmoothTransformation);
+#endif
+#else
+                cover = cover.scaled(cr.width(), coverH,
+                                     Qt::IgnoreAspectRatio,
+                                     Qt::SmoothTransformation);
+#endif
+            }
+            p.drawPixmap(cr.x(), cr.y(), cover);
+
+            p.setFont(bold);
+            p.setPen(pal.textPrimary);
+            p.drawText(QRect(cr.x(), cr.y() + coverH + 4, cr.width(), 18),
+                       Qt::AlignVCenter | Qt::AlignLeft,
+                       elideOneLine(p, c.title, cr.width()));
+            p.setFont(small);
+            p.setPen(pal.textMuted);
+            QString sub = c.author;
+            if (c.playCount > 0) {
+                if (!sub.isEmpty()) sub += QString::fromUtf8(" · ");
+                sub += fmtCount(c.playCount);
+            }
+            if (!sub.isEmpty())
+                p.drawText(QRect(cr.x(), cr.y() + coverH + 24,
+                                 cr.width(), 16),
+                           Qt::AlignVCenter | Qt::AlignLeft,
+                           elideOneLine(p, sub, cr.width()));
+        }
+
+        /* footer：错误+重试 / 加载中 / 加载更多 / 空态 */
+        const int rows = (int)((m_rows.size() + cols - 1) / cols);
+        QRect fr(0, m_headerH + kChipH
+                        + rows * (gridCardH() + kCardGap) - m_scrollY,
+                 width(), kFooterH);
+        p.setFont(small);
+        if (!m_gridErr.isEmpty()) {
+            p.setPen(pal.textMuted);
+            p.drawText(QRect(fr.x(), fr.y(), fr.width(), 24),
+                       Qt::AlignCenter, m_gridErr);
+            QRect rr = retryRect();
+            rr.moveTop(rr.top() - m_scrollY);
+            p.setPen(Qt::NoPen);
+            p.setBrush(pal.hoverBg);
+            muiDrawRoundRect(p, rr, rr.height() / 2, rr.height() / 2);
+            p.setPen(pal.textPrimary);
+            p.drawText(rr, Qt::AlignCenter, _("content.retry"));
+        } else if (m_loadingNow) {
+            p.setPen(pal.textMuted);
+            p.drawText(fr, Qt::AlignCenter, m_loading);
+        } else if (m_hasMore) {
+            QRect lr = loadMoreRect();
+            lr.moveTop(lr.top() - m_scrollY);
+            p.setPen(Qt::NoPen);
+            p.setBrush(pal.hoverBg);
+            muiDrawRoundRect(p, lr, lr.height() / 2, lr.height() / 2);
+            p.setPen(pal.textPrimary);
+            p.drawText(lr, Qt::AlignCenter, m_loadMore);
+        } else if (m_videos.empty()) {
+            p.setPen(pal.textMuted);
+            p.drawText(fr, Qt::AlignCenter, _("content.empty"));
+        }
     }
 }
 
 void ContentView::mousePressEvent(QMouseEvent* e)
 {
-    if (m_mode == PlaylistListMode || m_mode == CategoryGridMode) {
+    if (m_mode == PlaylistListMode || m_mode == CategoryGridMode
+        || m_mode == VideoGridMode) {
         if (backRect().contains(e->pos())) {
             emit backRequested();
             return;
         }
+    }
+    if (m_mode == VideoGridMode) {
+        for (int i = 0; i < (int)m_chips.size(); ++i) {
+            if (chipRect(i).contains(e->pos())) {
+                if (getenv("QLVOTUBE_DEBUG") != 0)
+#if QT_VERSION >= 0x060000
+                    qDebug() << "grid: chip" << m_chips[i].key;
+#else
+                    qDebug("grid: chip %s", qToUtf8(m_chips[i].key).data());
+#endif
+                emit chipActivated(m_chips[i].key);
+                return;
+            }
+        }
+        if (!m_gridErr.isEmpty() && retryRect().contains(e->pos())) {
+            emit loadMoreRequested();     /* 重试 = 重拉当前页 */
+            return;
+        }
+        if (m_hasMore && !m_loadingNow && loadMoreRect().contains(e->pos())) {
+            emit loadMoreRequested();
+            return;
+        }
+        const int idx = rowAt(e->pos());
+        if (idx < 0) return;
+        if (getenv("QLVOTUBE_DEBUG") != 0)
+#if QT_VERSION >= 0x060000
+            qDebug() << "grid: video" << m_videos[idx].id;
+#else
+            qDebug("grid: video %s", qToUtf8(m_videos[idx].id).data());
+#endif
+        emit videoActivated(m_videos[idx].id);
+        return;
     }
     if (m_mode == PlaylistListMode) {
         /* footer 劫持：load more */
@@ -480,6 +833,20 @@ void ContentView::mousePressEvent(QMouseEvent* e)
 
 void ContentView::mouseMoveEvent(QMouseEvent* e)
 {
+    if (m_mode == VideoGridMode) {
+        int h = rowAt(e->pos());
+        if (h < 0) {
+            for (int i = 0; i < (int)m_chips.size(); ++i)
+                if (chipRect(i).contains(e->pos())) { h = 2000000 + i; break; }
+        }
+        if (h < 0 && !m_gridErr.isEmpty() && retryRect().contains(e->pos()))
+            h = 3000000;
+        if (h < 0 && m_hasMore && !m_loadingNow
+            && loadMoreRect().contains(e->pos()))
+            h = 3000001;
+        if (h != m_hover) { m_hover = h; update(); }
+        return;
+    }
     if (m_mode == PlaylistListMode) {
         int hIdx = -1;
         if (m_hasMore && !m_loadingNow) {

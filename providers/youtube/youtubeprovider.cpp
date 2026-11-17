@@ -322,6 +322,123 @@ void YoutubeProvider::search(const QString& kw, int page, SearchCb cb) {
     ctx->go(1);
 }
 
+// ── 分类:首页 ytInitialData 里的 chip bar(动态,不硬编码分类名) ──
+// 现状:该出口 IP 的首页是空壳(无 ytInitialData/chips)→ Unsupported;
+//      换可达代理后同一段代码自动生效。
+static void walkChips(const cJSON* node, QList<CategoryItem>* out)
+{
+    if (!node) return;
+    if (cJSON_IsObject(node)) {
+        const cJSON* chip = cJSON_GetObjectItem(
+            const_cast<cJSON*>(node), "chipCloudChipRenderer");
+        if (chip) {
+            const QString text = jstr(jobj(chip, "text"), "simpleText");
+            const QString params =
+                jstr(jobj(jobj(chip, "navigationEndpoint"),
+                          "browseEndpoint"), "params");
+            if (!text.isEmpty() && !params.isEmpty())
+                out->append(CategoryItem(params, text));
+        }
+        for (const cJSON* c = node->child; c; c = c->next)
+            walkChips(c, out);
+    } else if (cJSON_IsArray(node)) {
+        for (const cJSON* c = node->child; c; c = c->next)
+            walkChips(c, out);
+    }
+}
+
+// 从 HTML 里取 var ytInitialData = {...};(花括号配平 + 字符串感知)
+static bool extractInitialData(const QByteArray& html, JRoot& out)
+{
+    const int at = html.indexOf("ytInitialData");
+    if (at < 0) return false;
+    const int brace = html.indexOf('{', at);
+    if (brace < 0) return false;
+    int depth = 0, end = -1;
+    bool inStr = false, esc = false;
+    for (int i = brace; i < html.size(); ++i) {
+        const char ch = html.at(i);
+        if (inStr) {
+            if (esc) esc = false;
+            else if (ch == '\\') esc = true;
+            else if (ch == '"') inStr = false;
+            continue;
+        }
+        if (ch == '"') { inStr = true; continue; }
+        if (ch == '{') ++depth;
+        else if (ch == '}') { if (--depth == 0) { end = i; break; } }
+    }
+    if (end < 0) return false;
+    out.p = cJSON_ParseWithLengthOpts(html.constData() + brace,
+                                      (size_t)(end - brace + 1), nullptr, 0);
+    return out.ok();
+}
+
+void YoutubeProvider::webGetHtml(
+    const QString& path,
+    std::function<void(const Result&, const QByteArray&)> cb)
+{
+    NetRequest req;
+    req.url = qFromUtf8("https://www.youtube.com%1").arg(path);
+    for (const auto& h : Fingerprint::chromeWeb(qFromUtf8("en-US,en")).headers)
+        req.headers.append(h);
+    req.headers.append(qMakePair(qFromUtf8("Referer"),
+                                 qFromUtf8("https://www.youtube.com/")));
+    req.timeoutSec = 30;
+    req.maxAttempts = 2;
+    if (m_proxy.enabled)
+        req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
+    DBG_P(kMod, Info, "GET %s", qPrintable(req.url));
+    m_net.send(req, [cb](const NetResponse& r) {
+        if (!r.ok()) {
+            DBG_P(kMod, Warn, "html http=%d err=%s", r.status,
+                  qPrintable(r.error));
+            cb(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error), {});
+            return;
+        }
+        cb(Result::ok(), r.body);
+    });
+}
+
+void YoutubeProvider::categories(
+    std::function<void(const Result&, const QList<CategoryItem>&)> cb)
+{
+    webGetHtml(qFromUtf8("/?hl=en&gl=US"),
+               [cb](const Result& r, const QByteArray& html) {
+        if (r.code != Err::Ok) { cb(r, {}); return; }
+        JRoot root;
+        if (!extractInitialData(html, root)) {
+            DBG_P(kMod, Warn, "categories: 无 ytInitialData (%d bytes)",
+                  html.size());
+            cb(Result::fail(Err::Unsupported,
+               qFromUtf8("youtube: 首页无初始数据(IP 被判空壳)")), {});
+            return;
+        }
+        QList<CategoryItem> chips;
+        walkChips(root.p, &chips);
+        DBG_P(kMod, Info, "categories: %d chips", chips.size());
+        if (chips.isEmpty()) {
+            DBG_P(kMod, Warn, "categories: 0 chips (空壳页/结构变更)");
+            cb(Result::fail(Err::Unsupported,
+               qFromUtf8("youtube: 首页无分类 chips")), {});
+            return;
+        }
+        cb(Result::ok(), chips);
+    });
+}
+
+void YoutubeProvider::categoryFeed(const QString& key, int page, SearchCb cb)
+{
+    if (key.isEmpty()) { homeFeed(page, cb); return; }
+    // 翻页需要 continuation,当前无任何 chip 样本可验证 → 不假翻页
+    DBG_P(kMod, Warn, "categoryFeed: 无 chips 样本/continuation,暂不支持"
+                      " (key=%s p%d)", qPrintable(key), page);
+    cb(Result::fail(Err::Unsupported,
+       qFromUtf8("youtube: 分类列表暂不可用(首页空壳,无 continuation 样本)")),
+       {}, false);
+}
+
 // ── homeFeed ────────────────────────────────────────────────────────
 // 2026-11-15 实测:该出口 IP + ANDROID/WEB 客户端下 browse(FEwhat_to_watch/
 // FEtrending) 只回结构壳(0 个 video renderer);/feed/trending 页面同样被风控。

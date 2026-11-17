@@ -8,31 +8,125 @@
 #include <qpainter.h>
 #include <qevent.h>
 #include <qfontmetrics.h>
+#if QT_VERSION >= 0x040000
+#include <QDebug>
+#endif
+#include <qcombobox.h>
+#include <qlabel.h>
+
+#include <cstdio>
+#include <cstdlib>
 
 namespace {
 const int kTop = 8;
 const int kUserH = 60;   /* 用户信息块（两行：昵称 + 副信息），搜索框上方 */
+const int kSiteH = 24;   /* 视频站点行（label + combo），搜索框上方 */
 const int kSearchH = 28;
 const int kItemH = 30;
 const int kGroupH = 26;
 /* 热门歌单视图的哨兵 key（与分类名不冲突） */
 const char* kHotViewKey = "__hot__";
+
+/* i18n 文本兜底：key 未命中返回中文原文，避免把翻译键画到界面上 */
+QString siteText(const char* key, const char* fallback)
+{
+    const QString v = _(key);
+    const QString k = qFromUtf8(key);
+    return (v.isEmpty() || v == k) ? qFromUtf8(fallback) : v;
+}
+
+/* Qt3 的 QComboBox 用 currentItem/insertItem/setCurrentItem，
+ * Qt4+ 用 currentIndex/addItem/setCurrentIndex（同名 API 在 Qt3 不存在） */
+int comboIndex(QComboBox* c)
+{
+#ifdef QT3_BUILD
+    return c->currentItem();
+#else
+    return c->currentIndex();
+#endif
+}
+
+void comboSetIndex(QComboBox* c, int i)
+{
+#ifdef QT3_BUILD
+    c->setCurrentItem(i);
+#else
+    c->setCurrentIndex(i);
+#endif
+}
+
+void comboAdd(QComboBox* c, const QString& text)
+{
+#ifdef QT3_BUILD
+    c->insertItem(text);
+#else
+    c->addItem(text);
+#endif
+}
 }
 
 SideNav::SideNav(QWidget* parent)
-    : QWidget(parent), m_search(0), m_user(0), m_scrollBar(0), m_scroll(0),
-      m_contentH(0), m_current(-1), m_hover(-1)
+    : QWidget(parent), m_search(0), m_user(0), m_siteLabel(0), m_site(0),
+      m_scrollBar(0), m_scroll(0), m_contentH(0), m_current(-1), m_hover(-1)
 {
     setMouseTracking(true);
     setMinimumWidth(170);
     setMaximumWidth(280);
     m_user = new UserInfoPanel(this);
     connect(m_user, SIGNAL(loginRequested()), this, SIGNAL(loginRequested()));
+    /* 视频站点 combo（参考 qxmusic/qlmusic/src/sidenav.cpp）：
+     * 只连 activated(int)（Qt3/Qt4+ 都有，程序填充不触发），
+     * 索引 → provider id 映射，不做显示文本匹配 */
+    m_siteLabel = new QLabel(siteText("nav.site", "视频站点"), this);
+    m_site = new QComboBox(this);
+    m_siteLabel->hide();
+    m_site->hide();
+    connect(m_site, SIGNAL(activated(int)), this, SLOT(onSiteChanged(int)));
     m_search = new SearchLineEdit(this);
     m_scrollBar = new LimeScrollBar(Qt::Vertical, this);
     m_scrollBar->hide();
     connect(m_scrollBar, SIGNAL(valueChanged(int)), this, SLOT(onNavScroll(int)));
     retranslateUi();
+}
+
+void SideNav::setVideoSites(const QStringList& ids)
+{
+    m_siteIds = ids;
+    if (!m_site || !m_siteLabel) return;
+    const bool show = !ids.isEmpty();
+    if (show) m_site->clear();
+    for (int i = 0; i < ids.size(); ++i) {
+        const QString key = QString::fromUtf8("site.") + ids[i];
+        QString label = _(qToUtf8(key).data());
+        if (label.isEmpty() || label == key) label = ids[i];   /* 缺译回退 id */
+        comboAdd(m_site, label);
+    }
+    comboSetIndex(m_site, 0);
+    if (show) { m_siteLabel->show(); m_site->show(); }
+    else { m_siteLabel->hide(); m_site->hide(); }
+    resizeEvent(0);
+    update();
+    if (show) emit siteChanged(ids[0]);
+}
+
+QString SideNav::currentSiteId() const
+{
+    if (!m_site || m_siteIds.isEmpty()) return QString();
+    const int i = comboIndex(m_site);
+    return (i >= 0 && i < m_siteIds.size()) ? m_siteIds[i] : QString();
+}
+
+void SideNav::onSiteChanged(int index)
+{
+    if (index < 0 || index >= m_siteIds.size()) return;
+    const QString id = m_siteIds[index];
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+#if QT_VERSION >= 0x060000
+        qDebug() << "sidenav: site index" << index << "->" << id;
+#else
+        qDebug("sidenav: site index %d -> %s", index, qToUtf8(id).data());
+#endif
+    emit siteChanged(id);
 }
 
 void SideNav::setUserLoggedIn(const QString& name, const QString& avatarSeed)
@@ -50,6 +144,18 @@ void SideNav::retranslateUi()
     m_groupCategories = _("nav.categories");
     if (m_search)
         m_search->setPlaceholders(_("nav.search"), _("nav.search"));
+    if (m_siteLabel) m_siteLabel->setText(siteText("nav.site", "视频站点"));
+    if (m_site && !m_siteIds.isEmpty()) {   /* 重建显示名，保持当前索引 */
+        const int cur = comboIndex(m_site);
+        m_site->clear();
+        for (int i = 0; i < m_siteIds.size(); ++i) {
+            const QString key = QString::fromUtf8("site.") + m_siteIds[i];
+            QString label = _(qToUtf8(key).data());
+            if (label.isEmpty() || label == key) label = m_siteIds[i];
+            comboAdd(m_site, label);
+        }
+        comboSetIndex(m_site, cur < 0 ? 0 : cur);
+    }
     relayout();
     update();
 }
@@ -214,8 +320,15 @@ void SideNav::resizeEvent(QResizeEvent* e)
     QWidget::resizeEvent(e);
     if (m_user)
         m_user->setGeometry(10, kTop, width() - 20, kUserH);
+    const bool hasSite = m_site && m_site->isVisible();
+    if (m_siteLabel && hasSite) {
+        m_siteLabel->setGeometry(10, kTop + kUserH + 6, 56, kSiteH);
+        m_site->setGeometry(68, kTop + kUserH + 4, width() - 78, kSiteH);
+    }
     if (m_search)
-        m_search->setGeometry(10, kTop + kUserH + 4, width() - 20, kSearchH);
+        m_search->setGeometry(10,
+            kTop + kUserH + (hasSite ? kSiteH + 4 : 4),
+            width() - 20, kSearchH);
     applyScrollBar();
     update();
 }
@@ -249,8 +362,9 @@ void SideNav::paintEvent(QPaintEvent*)
     QPainter p(this);
     p.fillRect(rect(), pal.baseBg);
 
-    p.setClipRect(QRect(0, kTop + kUserH + kSearchH + 4, width(),
-                        height() - kTop - kUserH - kSearchH - 4));
+    const int topH = kTop + kUserH
+        + ((m_site && m_site->isVisible()) ? kSiteH + 4 : 0) + kSearchH + 4;
+    p.setClipRect(QRect(0, topH, width(), height() - topH));
 
     QFont normal = font();
     QFont bold = font();

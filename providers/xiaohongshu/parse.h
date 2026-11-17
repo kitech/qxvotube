@@ -1,6 +1,7 @@
 #pragma once
 #include "common/compat.h"
 #include "common/result.h"
+#include "common/provider.h"
 #include "common/qcjson.h"
 
 #include <QList>
@@ -26,6 +27,10 @@ Result noteDetail(cJSON* root, const QString& noteId, VideoItem* vi,
 
 // 从分享链接(或任意 URL)中解出 noteId 与 xsec_token
 bool parseShareUrl(const QString& url, QString* noteId, QString* xsecToken);
+
+// SSR 里探测频道列表(候选键 channel_list/channels/channel/homefeedChannel;
+// 条目含 id|channel_id + name|channel_name)。探测不到 → 空,不猜。
+QList<CategoryItem> channelList(cJSON* root);
 
 } // namespace parse
 } // namespace xiaohongshu

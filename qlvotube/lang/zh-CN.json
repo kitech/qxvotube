@@ -10,14 +10,19 @@
   "created": "创建的歌单",
   "collected": "收藏的歌单",
   "categories": "分类",
-  "rank_coming": "排行榜即将支持"
+  "rank_coming": "排行榜即将支持",
+  "site": "视频站点"
  },
  "content": {
   "playall": "播放全部",
   "back": "返回",
   "load_more": "加载更多",
   "loading": "加载中…",
-  "categories": "分类"
+  "categories": "分类",
+  "cat_recommend": "推荐",
+  "retry": "重试",
+  "empty": "暂无内容",
+  "resolving": "正在解析播放地址…"
  },
  "num": {
   "wan": "万",
@@ -120,5 +125,12 @@
   "zh_CN": "简体中文",
   "zh_TW": "繁體中文",
   "en_US": "English"
+ },
+ "site": {
+  "bilibili": "B站",
+  "hongguo": "红果短剧",
+  "douyin": "抖音",
+  "xiaohongshu": "小红书",
+  "youtube": "YouTube"
  }
 }

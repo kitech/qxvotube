@@ -85,3 +85,9 @@ add_executable(xhsapi xhsapi.test.cpp)
 target_link_libraries(xhsapi PRIVATE qxvproviders)
 add_test(NAME providers_xhsapi COMMAND xhsapi
          ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/xhs_api)
+
+# 动态分类(需外网;bilibili/youtube 视网络,手动运行)
+add_executable(categories categories.test.cpp)
+target_link_libraries(categories PRIVATE qxvproviders)
+target_compile_definitions(categories PRIVATE
+    CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)

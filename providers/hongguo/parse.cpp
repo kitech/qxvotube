@@ -58,28 +58,61 @@ QList<VideoItem> searchList(cJSON* root, int page, bool* hasMore) {
     return items;
 }
 
+// 单个 section 的条目解析(homeSections / homeSection 共用)
+static void sectionItems(const cJSON* sec, QList<VideoItem>* out) {
+    cJSON* list = jarr(sec, "video_list");
+    const QString tab = jstr(sec, "tab_type");
+    for (int i = 0; i < jsize(list); ++i) {
+        const cJSON* it = jat(list, i);
+        VideoItem vi;
+        vi.id     = jstr(it, "series_id");
+        vi.title  = jstr(it, "series_title");
+        vi.cover  = jstr(it, "series_cover");
+        vi.extra.insert(qFromUtf8("intro"), jstr(it, "series_intro"));
+        vi.extra.insert(qFromUtf8("episodeCnt"),
+                        (long long)jint(it, "episode_cnt"));
+        vi.extra.insert(qFromUtf8("payType"),
+                        (long long)jint(it, "pay_type"));
+        vi.extra.insert(qFromUtf8("rank"), (long long)jint(it, "rank"));
+        vi.extra.insert(qFromUtf8("tab"), tab);
+        if (!vi.id.isEmpty()) out->append(vi);
+    }
+}
+
 QList<VideoItem> homeSections(cJSON* root) {
+    const cJSON* pageObj = jobj(jobj(root, "loaderData"), "page");
+    cJSON* sections = jarr(pageObj, "homeSections");
+    QList<VideoItem> items;
+    for (int s = 0; s < jsize(sections); ++s)
+        sectionItems(jat(sections, s), &items);
+    return items;
+}
+
+QList<CategoryItem> homeTabs(cJSON* root) {
+    const cJSON* pageObj = jobj(jobj(root, "loaderData"), "page");
+    cJSON* sections = jarr(pageObj, "homeSections");
+    QList<CategoryItem> out;
+    for (int s = 0; s < jsize(sections); ++s) {
+        const cJSON* sec = jat(sections, s);
+        const QString type = jstr(sec, "tab_type");
+        if (type.isEmpty()) continue;
+        QString name = jstr(sec, "tab_name");
+        if (name.isEmpty()) name = type;   // 兜底用原值,不自造文案
+        bool dup = false;
+        for (int i = 0; i < out.size(); ++i)
+            if (out[i].key == type) { dup = true; break; }
+        if (!dup) out.append(CategoryItem(type, name));
+    }
+    return out;
+}
+
+QList<VideoItem> homeSection(cJSON* root, const QString& tab) {
     const cJSON* pageObj = jobj(jobj(root, "loaderData"), "page");
     cJSON* sections = jarr(pageObj, "homeSections");
     QList<VideoItem> items;
     for (int s = 0; s < jsize(sections); ++s) {
         const cJSON* sec = jat(sections, s);
-        cJSON* list = jarr(sec, "video_list");
-        for (int i = 0; i < jsize(list); ++i) {
-            const cJSON* it = jat(list, i);
-            VideoItem vi;
-            vi.id     = jstr(it, "series_id");
-            vi.title  = jstr(it, "series_title");
-            vi.cover  = jstr(it, "series_cover");
-            vi.extra.insert(qFromUtf8("intro"), jstr(it, "series_intro"));
-            vi.extra.insert(qFromUtf8("episodeCnt"),
-                            (long long)jint(it, "episode_cnt"));
-            vi.extra.insert(qFromUtf8("payType"),
-                            (long long)jint(it, "pay_type"));
-            vi.extra.insert(qFromUtf8("rank"), (long long)jint(it, "rank"));
-            vi.extra.insert(qFromUtf8("tab"), jstr(sec, "tab_type"));
-            if (!vi.id.isEmpty()) items.append(vi);
-        }
+        if (jstr(sec, "tab_type") == tab) sectionItems(sec, &items);
     }
     return items;
 }

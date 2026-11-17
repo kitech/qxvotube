@@ -11,6 +11,7 @@
 
 #include <QUrlQuery>
 #include <functional>
+#include <ctime>
 
 // bilibili web REST(游客口径,bilibili-API-collect):
 //   搜索  GET https://api.bilibili.com/x/web-interface/search/all/v2?keyword=
@@ -116,6 +117,99 @@ void BilibiliProvider::search(const QString& kw, int page, SearchCb cb) {
                                           : items.size() >= 20;
         DBG_P(kMod, Debug, "search '%s' p%d -> %d items (numPages=%lld)",
               qPrintable(kw), page, items.size(), numPages);
+        cb(Result::ok(), items, hasMore);
+    });
+}
+
+// ── 分类:popular 条目自带 tid/tname(动态,无硬编码表) ─────────────
+// 缓存 30min(分区变化极慢;失败不缓存,下次重试)
+static QList<CategoryItem> g_regions;
+static long long g_regionsAt = 0;
+static const int kRegionsTtlSec = 30 * 60;
+
+void BilibiliProvider::categories(
+    std::function<void(const Result&, const QList<CategoryItem>&)> cb) {
+    const long long now = (long long)::time(0);
+    if (!g_regions.isEmpty() && now - g_regionsAt < kRegionsTtlSec) {
+        DBG_P(kMod, Debug, "categories: cache hit (%d)", g_regions.size());
+        cb(Result::ok(), g_regions);
+        return;
+    }
+    QUrlQuery q;
+    q.addQueryItem("pn", "1");
+    q.addQueryItem("ps", "20");
+    DBG_P(kMod, Info, "categories: GET popular (derive regions)");
+    apiGet("/x/web-interface/popular", q.toString(QUrl::FullyEncoded),
+           [this, cb](const NetResponse& r) {
+        if (!r.ok()) {
+            DBG_P(kMod, Warn, "categories: popular http=%d err=%s", r.status,
+                  qPrintable(r.error));
+            cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error),
+                   r.status, QString(), QString::fromUtf8(r.body.left(200))), {});
+            return;
+        }
+        JRoot root;
+        const Result res = checkApi(r.body, root, credContext(m_cred));
+        if (res.code != Err::Ok) {
+            DBG_P(kMod, Warn, "categories: checkApi code=%d %s",
+                  (int)res.code, qPrintable(res.message));
+            cb(res, {});
+            return;
+        }
+        QList<CategoryItem> regs = bilibili::parse::popularRegions(root.p);
+        DBG_P(kMod, Info, "categories: %d regions from popular", regs.size());
+        if (regs.isEmpty()) {
+            DBG_P(kMod, Warn, "categories: 0 regions (popular 结构可能变更)");
+            cb(Result::fail(Err::Parse, qFromUtf8("bilibili: 分区表为空")), {});
+            return;
+        }
+        regs.prepend(CategoryItem(QString(), QString()));   // 推荐
+        g_regions = regs;
+        g_regionsAt = (long long)::time(0);
+        cb(Result::ok(), regs);
+    });
+}
+
+void BilibiliProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
+    if (key.isEmpty()) {   // 推荐
+        DBG_P(kMod, Debug, "categoryFeed: 推荐 -> homeFeed p%d", page);
+        homeFeed(page, cb);
+        return;
+    }
+    if (page < 1) page = 1;
+    QUrlQuery q;
+    q.addQueryItem("rid", key);
+    q.addQueryItem("pn", QString::number(page));
+    q.addQueryItem("ps", "20");
+    DBG_P(kMod, Info, "categoryFeed: rid=%s p%d", qPrintable(key), page);
+    apiGet("/x/web-interface/newlist", q.toString(QUrl::FullyEncoded),
+           [this, cb, key, page](const NetResponse& r) {
+        if (!r.ok()) {
+            DBG_P(kMod, Warn, "categoryFeed rid=%s p%d http=%d err=%s",
+                  qPrintable(key), page, r.status, qPrintable(r.error));
+            cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error),
+                   r.status, QString(), QString::fromUtf8(r.body.left(200))),
+               {}, false);
+            return;
+        }
+        JRoot root;
+        const Result res = checkApi(r.body, root, credContext(m_cred));
+        if (res.code != Err::Ok) {
+            DBG_P(kMod, Warn, "categoryFeed rid=%s p%d code=%d",
+                  qPrintable(key), page, (int)res.code);
+            cb(res, {}, false);
+            return;
+        }
+        bool hasMore = false;
+        const QList<VideoItem> items =
+            bilibili::parse::newlist(root.p, page, &hasMore);
+        DBG_P(kMod, Debug, "categoryFeed rid=%s p%d -> %d items (hasMore=%d)",
+              qPrintable(key), page, items.size(), int(hasMore));
+        if (items.isEmpty())
+            DBG_P(kMod, Warn, "categoryFeed rid=%s p%d empty (无内容/rid 失效)",
+                  qPrintable(key), page);
         cb(Result::ok(), items, hasMore);
     });
 }

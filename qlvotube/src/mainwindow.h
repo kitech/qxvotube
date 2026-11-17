@@ -6,11 +6,15 @@
 #include "musicmodel.h"
 #include "contentview.h"
 #include "ConfigDialog.h"   /* SettingsChangedMap 类型随 Q_OBJECT 槽声明完整 */
+#include "providers/common/provider.h"
+#include "videoui.h"
 #include <qmainwindow.h>
 #include <qwidget.h>
 #include <qlabel.h>
 #include <qpushbutton.h>
 #include <vector>
+#include <qmap.h>
+#include <qlist.h>
 
 class FramelessHelper;
 class CustomTitleBar;
@@ -64,6 +68,11 @@ private slots:
     void onSettingsSaved(const SettingsChangedMap& changed);
     void onUserLoginPlaceholder();
     void onNavAction(int action);
+    /* 视频源(providers):切站点 / 切分类 / 点卡片 / 翻页 */
+    void onSiteChanged(const QString& providerId);
+    void onChipActivated(const QString& key);
+    void onVideoActivated(const QString& id);
+    void onGridLoadMore();
     void onPlayPause();
     void onPrev();
     void onNext();
@@ -129,6 +138,10 @@ private:
     void buildAppearanceMenus();
     void buildTray();
 
+    void setupVideoProviders();
+    void loadVideoPage(int page);
+    void showVideoError(const QString& where, const QString& serverMsg,
+                        qxv::Err code);
     void showTrackStub(int playlistId, int trackIndex);
     void tryPlayTrack(const Track& t);
     void ensurePlayerReady();
@@ -164,6 +177,16 @@ private:
     CXRendererGl* m_glRenderer;
     CXVideoEqDialog* m_eqDialog;
     QString m_curUrl;        /* 当前播放源(引擎切换后重开) */
+    /* 视频源网格状态 */
+#if QT_VERSION >= 0x050000
+    QList<qxv::VideoProvider*> m_providers;
+    qxv::VideoProvider* m_curProv;
+#endif
+    int m_gridPage;
+    bool m_gridHasMore;
+    bool m_gridLoading;
+    QString m_gridChip;                    /* 当前分类 key(空=推荐) */
+    QMap<QString, QString> m_videoTitles;  /* 点播时补标题(不额外请求 detail) */
     int m_subIdx;            /* 当前字幕轨枚举序(-1=关) */
     std::vector<Playlist> m_library;
     int m_curPlaylistId;

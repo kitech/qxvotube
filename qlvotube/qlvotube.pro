@@ -25,6 +25,7 @@ SOURCES = src/main.cpp src/mainwindow.cpp src/appearance.cpp src/config.cpp \
           src/videopane.cpp \
           src/eqdialog.cpp \
           src/userinfopanel.cpp \
+          src/videothumbcache.cpp \
           ../qlappcom/eventpoller.cpp
 
 HEADERS = src/mainwindow.h src/appearance.h src/config.h src/globaluiutil.h \
@@ -36,11 +37,18 @@ HEADERS = src/mainwindow.h src/appearance.h src/config.h src/globaluiutil.h \
           src/videopane.h \
           src/eqdialog.h \
           src/userinfopanel.h \
+          src/videoui.h \
+          src/videothumbcache.h \
           ../qlappcom/eventpoller.h
 
 include(../qlcomp/qlite.pri)
 # 播放引擎:cmdmpv → libmpv 探测顺序(见 docs/cxvideo-detail.md)
 include(../cxvideo/qtav34/cxvideo.pri)
+# 视频源库(Qt3/Qt4 = stub → 0 源；Qt>=5 = 真实实现)。
+# 宿主已编 cJSON/compatcore34/md5(cxvideo.pri + qlite.pri),故跳过 pri 内的重复件。
+DEFINES += QXV_PROVIDERS_NO_QLCOMP
+include(../providers/providers.pri)
+INCLUDEPATH += $$PWD/..   # 让 "providers/common/provider.h" 这类路径可解析
 INCLUDEPATH += ../qlcomp
 INCLUDEPATH += ../qlappcom
 INCLUDEPATH += src
@@ -68,13 +76,15 @@ contains(CONFIG, asan) {
         QMAKE_CXXFLAGS += -std=c++17
         QMAKE_CFLAGS += -std=c11
     } else {
-        QMAKE_CXXFLAGS += -std=c++11
+        # Qt4:providers 头文件(Result 聚合初始化含 NSDMI)需 C++14
+        QMAKE_CXXFLAGS += -std=c++14
         QMAKE_CFLAGS += -std=c11
     }
 } else {
     message("qlvotube: Building for Qt3 - adding QT3_BUILD")
     DEFINES += QT3_BUILD
-    QMAKE_CXXFLAGS += -std=c++11
+    # providers Result 聚合初始化含 NSDMI,需 C++14(与其他 Qt3 宿主工程同口径)
+    QMAKE_CXXFLAGS += -std=c++14
     QMAKE_CFLAGS += -std=c11
     QMAKE_EXE = $$system(ps -p $PPID -o args= | head -1 | awk '{print $1}')
     QTDIR_AUTO = $$system(dirname $(dirname $$QMAKE_EXE))

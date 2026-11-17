@@ -1,6 +1,7 @@
 #pragma once
 #include "common/compat.h"
 #include "common/result.h"
+#include "common/provider.h"
 #include "common/qcjson.h"
 
 #include <QList>
@@ -19,6 +20,14 @@ Result detailFromView(cJSON* root, VideoItem* vi, QList<VideoItem>* parts);
 
 // /x/web-interface/popular → data.list[];hasMore = !data.no_more
 QList<VideoItem> popular(cJSON* root, bool* hasMore);
+
+// /x/web-interface/popular → 条目自带的 (tid,tname) 去重 → 动态分区表
+// (按出现频次降序;不含「推荐」项,由 provider 补)
+QList<CategoryItem> popularRegions(cJSON* root);
+
+// /x/web-interface/newlist?rid=&pn=&ps= → data.archives[]
+// hasMore = data.page.count > 0 && page.num*page.size < page.count
+QList<VideoItem> newlist(cJSON* root, int page, bool* hasMore);
 
 // /x/player/pagelist → parts(用于 pages 缺失兜底)
 QList<VideoItem> pageList(cJSON* root, const QString& bvid);

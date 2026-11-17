@@ -1,5 +1,7 @@
 #include "parse.h"
 
+#include <QMap>
+
 namespace qxv {
 namespace bilibili {
 namespace parse {
@@ -84,6 +86,63 @@ QList<VideoItem> popular(cJSON* root, bool* hasMore) {
     }
     if (hasMore) *hasMore = !jbool(data, "no_more");
     return items;
+}
+
+QList<VideoItem> newlist(cJSON* root, int page, bool* hasMore) {
+    const cJSON* data = jobj(root, "data");
+    cJSON* arr = jarr(data, "archives");
+    QList<VideoItem> items;
+    for (int i = 0; i < jsize(arr); ++i) {
+        const cJSON* it = jat(arr, i);
+        VideoItem vi;
+        vi.id     = jstr(it, "bvid");
+        vi.title  = jstr(it, "title");
+        vi.author = jstr(jobj(it, "owner"), "name");
+        vi.uid    = QString::number(jint(jobj(it, "owner"), "mid"));
+        vi.cover  = jstr(it, "pic");
+        vi.durationMs = jint(it, "duration") * 1000;
+        // 播放量:stat.view(部分响应为 0,UI 侧按 0 隐藏,不自造数据)
+        vi.extra.insert(qFromUtf8("view"),
+                        (long long)jint(jobj(it, "stat"), "view"));
+        vi.extra.insert(qFromUtf8("aid"), (long long)jint(it, "aid"));
+        vi.extra.insert(qFromUtf8("tname"), jstr(it, "tname"));
+        if (!vi.id.isEmpty()) items.append(vi);
+    }
+    if (hasMore) {
+        const cJSON* pg = jobj(data, "page");
+        const int count = jint(pg, "count", 0);
+        const int num   = jint(pg, "num", page);
+        const int size  = jint(pg, "size", 20);
+        *hasMore = count > 0 && num * size < count;
+    }
+    return items;
+}
+
+QList<CategoryItem> popularRegions(cJSON* root) {
+    const cJSON* data = jobj(root, "data");
+    cJSON* list = jarr(data, "list");
+    QMap<QString, int> hits;       // tid -> 出现次数
+    QMap<QString, QString> names;  // tid -> tname
+    QList<QString> order;          // 首次出现顺序(同频次时保持稳定)
+    for (int i = 0; i < jsize(list); ++i) {
+        const cJSON* it = jat(list, i);
+        const long long tid = jint(it, "tid", 0);
+        const QString tname = jstr(it, "tname");
+        if (tid <= 0 || tname.isEmpty()) continue;
+        const QString k = QString::number(tid);
+        if (!hits.contains(k)) order.append(k);
+        hits[k] += 1;
+        names[k] = tname;
+    }
+    QList<CategoryItem> out;
+    while (!order.isEmpty()) {     // 频次降序(同频次保持首次出现顺序)
+        int best = 0;
+        for (int i = 1; i < order.size(); ++i)
+            if (hits[order[i]] > hits[order[best]]) best = i;
+        const QString k = order.takeAt(best);
+        out.append(CategoryItem(k, names.value(k)));
+    }
+    return out;
 }
 
 QList<VideoItem> pageList(cJSON* root, const QString& bvid) {

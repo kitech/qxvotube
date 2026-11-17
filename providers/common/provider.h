@@ -12,6 +12,14 @@ struct ProxyConfig {
     bool stickySession = false;   // TikTok/抖音:注册与请求同 IP
 };
 
+// 站点分类(UI chips)。key 原样回传 categoryFeed(),UI 不解释语义。
+// 空 key 约定为「推荐」(走 homeFeed)。
+struct CategoryItem {
+    QString key, name;
+    CategoryItem() {}
+    CategoryItem(const QString& k, const QString& n) : key(k), name(n) {}
+};
+
 // 认证级别(文档 providers/docs/protocols/*.md 与接口一一对应)
 enum AuthLevel { NoAuth, DeviceAuth, CookieAuth, FullLogin };
 
@@ -24,6 +32,18 @@ public:
     virtual void search(const QString& kw, int page, SearchCb) = 0;
     virtual void homeFeed(int page, SearchCb cb) {
         cb(Result::fail(Err::Unsupported, "homeFeed not implemented"), {}, false);
+    }
+
+    // 本站分类列表。动态拉取(从站点真实数据派生),不返回硬编码分类表;
+    // 无此能力/拉取失败 → Unsupported,UI 自动退化为仅「推荐」一个 chip。
+    virtual void categories(
+        std::function<void(const Result&, const QList<CategoryItem>&)> cb) {
+        cb(Result::fail(Err::Unsupported, "categories not implemented"), {});
+    }
+    // 按分类取列表(key 来自 categories();空 key = 推荐)
+    virtual void categoryFeed(const QString& key, int page, SearchCb cb) {
+        Q_UNUSED(key);
+        homeFeed(page, cb);
     }
 
     // ── 详情与播放 ──

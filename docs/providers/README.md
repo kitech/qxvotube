@@ -86,6 +86,7 @@ provs[0]->search("travel", 1, [](qxv::Result res,
 - `xiaohongshu-research.md` —— 小红书免登录可行性/风控阈值/可实现范围
 - `debugging.md` —— 跨平台踩坑记录(httplib/线程/重试/缓存)
 - `design.md` —— 总体设计
+- `ui-integration.md` —— qlvotube 接入:站点 combo / 动态分类 / 网格翻页 / 封面缓存
 
 ### 错误模型(认证感知,2026-11-15)
 

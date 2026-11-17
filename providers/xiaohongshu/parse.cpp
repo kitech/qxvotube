@@ -46,8 +46,35 @@ VideoItem fromNoteCard(const cJSON* card, const QString& noteId,
 
 } // namespace
 
-QList<VideoItem> feedNotes(cJSON* root) {
-    QList<VideoItem> out;
+// SSR 频道列表探测(多候选键,命中即返回;条目需 id+name 齐全)
+static QString chField(const cJSON* o, const char* a, const char* b) {
+    QString v = jstr(o, a);
+    if (v.isEmpty()) v = jstr(o, b);
+    return v;
+}
+
+QList<CategoryItem> channelList(cJSON* root) {
+    static const char* kKeys[] = { "channel_list", "channels", "channel",
+                                   "homefeedChannel" };
+    for (size_t k = 0; k < sizeof(kKeys) / sizeof(kKeys[0]); ++k) {
+        cJSON* arr = jarr(root, kKeys[k]);
+        QList<CategoryItem> out;
+        for (int i = 0; i < jsize(arr); ++i) {
+            const cJSON* it = jat(arr, i);
+            const QString id   = chField(it, "id", "channel_id");
+            const QString name = chField(it, "name", "channel_name");
+            if (id.isEmpty() || name.isEmpty()) continue;
+            bool dup = false;
+            for (int j = 0; j < out.size(); ++j)
+                if (out[j].key == id) { dup = true; break; }
+            if (!dup) out.append(CategoryItem(id, name));
+        }
+        if (!out.isEmpty()) return out;   // 命中即用,不再试其它键
+    }
+    return QList<CategoryItem>();
+}
+
+QList<VideoItem> feedNotes(cJSON* root) {    QList<VideoItem> out;
     const cJSON* feed = jobj(root, "feed");
     cJSON* feeds = jarr(feed, "feeds");
     for (int i = 0; i < jsize(feeds); ++i) {

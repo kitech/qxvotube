@@ -1,6 +1,7 @@
 #pragma once
 #include "common/compat.h"
 #include "common/result.h"
+#include "common/provider.h"
 #include "common/qcjson.h"
 
 #include <QList>
@@ -18,6 +19,12 @@ QList<VideoItem> searchList(cJSON* root, int page, bool* hasMore);
 
 // 首页 SSR loaderData.page.homeSections[].video_list[](4 类 tab 汇总)
 QList<VideoItem> homeSections(cJSON* root);
+
+// 首页 SSR homeSections[] → 分类(tab_type/tab_name,实时数据派生,不硬编码)
+QList<CategoryItem> homeTabs(cJSON* root);
+
+// 首页 SSR 按 tab_type 过滤(分类列表;无该 tab → 空)
+QList<VideoItem> homeSection(cJSON* root, const QString& tab);
 
 // /rank/hot-drama?page=N → loaderData["rank_hot-drama/page"].content.rankList[]
 QList<VideoItem> rankList(cJSON* root, int page, bool* hasMore);

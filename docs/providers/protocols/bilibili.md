@@ -68,6 +68,16 @@
 - hasMore = `!no_more`;`extra` 带 `aid`/`tname`。
 - 验收:`tests/homefeed` → page1 20 条、page2 20 条(dup=0)。
 
+## 分类(动态,2026-11-17 实测)
+
+- 分类表**不硬编码**:`GET /x/web-interface/popular?pn=1&ps=20` 的条目自带
+  `tid`/`tname`,去重后按出现频次排序即当前分区(实测 12 项,30min 缓存)。
+- 分类列表:`GET /x/web-interface/newlist?rid=<tid>&pn=<page>&ps=20`
+  → `data.archives[]`(bvid/title/pic/duration/owner/stat.view/tname/aid);
+  `hasMore = data.page.count > 0 && num*size < count`
+  (注意:`page.count=0` 表示无总数,按 false 处理,不无限翻页)。
+- UI 首项恒为「推荐」(`key=""` → `homeFeed`);`categories()` 失败时 UI 只显推荐。
+
 ## detail 补全(2026-11-15)
 
 - 主项:`bvid/title/owner.name/owner.mid/pic/duration`,`extra`:

@@ -10,14 +10,19 @@
   "created": "Created Playlists",
   "collected": "Collected Playlists",
   "categories": "Categories",
-  "rank_coming": "Rankings coming soon"
+  "rank_coming": "Rankings coming soon",
+  "site": "Video site"
  },
  "content": {
   "playall": "Play All",
   "back": "Back",
   "load_more": "Load more",
   "loading": "Loading…",
-  "categories": "Categories"
+  "categories": "Categories",
+  "cat_recommend": "Recommended",
+  "retry": "Retry",
+  "empty": "No content",
+  "resolving": "Resolving stream…"
  },
  "num": {
   "wan": "W",
@@ -120,5 +125,12 @@
   "zh_CN": "简体中文",
   "zh_TW": "繁體中文",
   "en_US": "English"
+ },
+ "site": {
+  "bilibili": "Bilibili",
+  "hongguo": "Hongguo",
+  "douyin": "Douyin",
+  "xiaohongshu": "Xiaohongshu",
+  "youtube": "YouTube"
  }
 }

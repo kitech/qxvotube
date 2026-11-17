@@ -108,6 +108,74 @@ void HongguoProvider::search(const QString& kw, int page, SearchCb cb) {
 // GET / → window._ROUTER_DATA.loaderData.page.homeSections[]
 //   [{tab_type:"all"/"human"/"comic"/"ai", tab_name, video_list[]}]
 // 每类 9 条;只有第 1 页(站点无分页参数)→ page>1 返回空 + hasMore=false。
+// ── 分类:首页 SSR homeSections 的 tab(动态) ──────────────────────
+void HongguoProvider::categories(
+    std::function<void(const Result&, const QList<CategoryItem>&)> cb) {
+    DBG_P(kMod, Info, "categories: GET / (read homeSections tabs)");
+    webGet("/", QString(), [cb](const NetResponse& r) {
+        if (!r.ok()) {
+            DBG_P(kMod, Warn, "categories: GET / http=%d err=%s", r.status,
+                  qPrintable(r.error));
+            cb(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error), {});
+            return;
+        }
+        JRoot root;
+        if (!hongguo::parse::extractRouterData(r.body, root)) {
+            DBG_P(kMod, Err, "categories: / 无 _ROUTER_DATA (%d bytes)",
+                  r.body.size());
+            cb(Result::fail(Err::Parse,
+               qFromUtf8("hongguo: 首页无 _ROUTER_DATA")), {});
+            return;
+        }
+        QList<CategoryItem> tabs = hongguo::parse::homeTabs(root.p);
+        DBG_P(kMod, Info, "categories: %d tabs", tabs.size());
+        if (tabs.isEmpty()) {
+            DBG_P(kMod, Warn, "categories: 0 tabs (homeSections 结构可能变更)");
+            cb(Result::fail(Err::Parse, qFromUtf8("hongguo: 首页无分类 tab")), {});
+            return;
+        }
+        tabs.prepend(CategoryItem(QString(), QString()));   // 推荐 = 汇总
+        cb(Result::ok(), tabs);
+    });
+}
+
+void HongguoProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
+    if (key.isEmpty()) { homeFeed(page, cb); return; }
+    if (page > 1) {   // tab 过滤仅首屏(SSR 单页,无分页参数)
+        DBG_P(kMod, Debug, "categoryFeed tab=%s p%d: 无更多分页",
+              qPrintable(key), page);
+        cb(Result::ok(), {}, false);
+        return;
+    }
+    DBG_P(kMod, Info, "categoryFeed: GET / tab=%s", qPrintable(key));
+    webGet("/", QString(), [cb, key](const NetResponse& r) {
+        if (!r.ok()) {
+            DBG_P(kMod, Warn, "categoryFeed tab=%s http=%d", qPrintable(key),
+                  r.status);
+            cb(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error), {}, false);
+            return;
+        }
+        JRoot root;
+        if (!hongguo::parse::extractRouterData(r.body, root)) {
+            DBG_P(kMod, Err, "categoryFeed tab=%s 无 _ROUTER_DATA",
+                  qPrintable(key));
+            cb(Result::fail(Err::Parse,
+               qFromUtf8("hongguo: 首页无 _ROUTER_DATA")), {}, false);
+            return;
+        }
+        const QList<VideoItem> items =
+            hongguo::parse::homeSection(root.p, key);
+        DBG_P(kMod, Debug, "categoryFeed tab=%s -> %d items",
+              qPrintable(key), items.size());
+        if (items.isEmpty())
+            DBG_P(kMod, Warn, "categoryFeed tab=%s empty (tab_type 变更?)",
+                  qPrintable(key));
+        cb(Result::ok(), items, false);
+    });
+}
+
 void HongguoProvider::homeFeed(int page, SearchCb cb) {
     if (page > 1) {   // 第 2 页起走热播榜(/rank/hot-drama?page=N,20 条/页)
         webGet(qFromUtf8("/rank/hot-drama"),

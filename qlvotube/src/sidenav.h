@@ -9,6 +9,8 @@
 
 class SearchLineEdit;
 class UserInfoPanel;
+class QComboBox;
+class QLabel;
 
 class SideNav : public QWidget {
     Q_OBJECT
@@ -26,14 +28,21 @@ public:
     void setUserLoggedIn(const QString& name, const QString& avatarSeed);
     UserInfoPanel* userPanel() { return m_user; }
 
+    /* 视频站点（用户区下、搜索框上）。ids 为空 → 整行隐藏（Qt3/Qt4 stub）。
+     * 显示名走 i18n "site.<id>"；缺译回退 id 原文。 */
+    void setVideoSites(const QStringList& ids);
+    QString currentSiteId() const;
+
 public slots:
     void onNavScroll(int v);
+    void onSiteChanged(int index);
 
 signals:
     void playlistSelected(int playlistId);
     void categorySelected(const QString& cat);
     void actionTriggered(int actionId);
     void loginRequested();
+    void siteChanged(const QString& providerId);
 
 protected:
     void paintEvent(QPaintEvent* e);
@@ -68,6 +77,9 @@ private:
 
     SearchLineEdit* m_search;
     UserInfoPanel* m_user;
+    QLabel* m_siteLabel;      /* "视频站点" */
+    QComboBox* m_site;
+    QStringList m_siteIds;    /* 索引 → provider id（不按文本匹配） */
     LimeScrollBar* m_scrollBar;
     int m_scroll;
     int m_contentH;

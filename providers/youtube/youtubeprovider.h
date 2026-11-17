@@ -20,6 +20,9 @@ public:
 
     void search(const QString& kw, int page, SearchCb cb) override;
     void homeFeed(int page, SearchCb cb) override;
+    void categories(std::function<void(const Result&,
+                                       const QList<CategoryItem>&)>) override;
+    void categoryFeed(const QString& key, int page, SearchCb cb) override;
     void detail(const QString& id, DetailCb cb) override;
     void resolve(const QString& id, ResolveCb cb) override;
     void resolveQuality(const QString& id, const QString& quality,
@@ -30,6 +33,8 @@ public:
     void cancel() override;
 
 private:
+    void webGetHtml(const QString& path,
+                    std::function<void(const Result&, const QByteArray&)> cb);
     // 搜索分页(ANDROID 客户端):continuation token 只能由上一页响应给出,
     // 因此必须按序翻页。key=关键词;value: page → 取该页所需 token。
     // 上限 16 个关键词(超出清空,防长跑泄漏)。

@@ -14,6 +14,7 @@
 #include <QFile>
 #include <QTimer>
 #include <QUrlQuery>
+#include <QUrl>
 
 #include <cmath>
 #include <random>
@@ -445,6 +446,73 @@ void XiaohongshuProvider::search(const QString& kw, int page, SearchCb cb) {
                 out.append(toVideoItem(p.items[i]));
             cb(Result::ok(), out, p.hasMore);
         });
+    });
+}
+
+// ── 分类:从 explore SSR 动态探测(无硬编码频道表) ────────────────
+// 现状:游客 explore 常被风控(无 __INITIAL_STATE__)→ Unsupported;
+//      拿到登录态/cookie 后同一段代码自动生效,UI 无需改动。
+void XiaohongshuProvider::categories(
+    std::function<void(const Result&, const QList<CategoryItem>&)> cb) {
+    DBG_P(kMod, Info, "categories: GET /explore (probe SSR channels)");
+    fetchPage(qFromUtf8("/explore"),
+              [cb](const Result& r, const QByteArray& body) {
+        if (r.code != Err::Ok) {
+            DBG_P(kMod, Warn, "categories: explore failed code=%d (%d bytes)",
+                  (int)r.code, body.size());
+            cb(r, {});
+            return;
+        }
+        JRoot root;
+        if (!xiaohongshu::ssr::extractInitialState(body, root)) {
+            DBG_P(kMod, Warn, "categories: 无 __INITIAL_STATE__(风控,%d bytes)",
+                  body.size());
+            cb(Result::fail(Err::Unsupported,
+               qFromUtf8("xiaohongshu: 游客无法读取频道(风控)")), {});
+            return;
+        }
+        QList<CategoryItem> cs = xiaohongshu::parse::channelList(root.p);
+        DBG_P(kMod, Info, "categories: %d channels from SSR", cs.size());
+        if (cs.isEmpty()) {
+            DBG_P(kMod, Warn, "categories: SSR 无频道字段(候选键均未命中)");
+            cb(Result::fail(Err::Unsupported,
+               qFromUtf8("xiaohongshu: SSR 未暴露频道列表")), {});
+            return;
+        }
+        cs.prepend(CategoryItem(QString(), QString()));   // 推荐
+        cb(Result::ok(), cs);
+    });
+}
+
+void XiaohongshuProvider::categoryFeed(const QString& key, int page,
+                                       SearchCb cb) {
+    if (key.isEmpty()) { homeFeed(page, cb); return; }
+    // 频道 = /explore?channel_id=<key>(复用 homeFeed 的 SSR 解析链路)
+    const QString path = qFromUtf8("/explore?channel_id=%1")
+                             .arg(QString(QUrl::toPercentEncoding(key)));
+    DBG_P(kMod, Info, "categoryFeed: channel=%s p%d", qPrintable(key), page);
+    fetchPage(path, [this, cb, key](const Result& r, const QByteArray& body) {
+        if (r.code != Err::Ok) {
+            DBG_P(kMod, Warn, "categoryFeed channel=%s failed code=%d",
+                  qPrintable(key), (int)r.code);
+            cb(r, {}, false);
+            return;
+        }
+        JRoot root;
+        if (!xiaohongshu::ssr::extractInitialState(body, root)) {
+            onSoftBlock();
+            DBG_P(kMod, Warn, "categoryFeed channel=%s 无 SSR(风控)",
+                  qPrintable(key));
+            cb(authFail(Err::RateLimit, credContext(m_cred),
+                        qFromUtf8("xiaohongshu: 频道页无 SSR(风控)")), {}, false);
+            return;
+        }
+        const QList<VideoItem> items = xiaohongshu::parse::feedNotes(root.p);
+        DBG_P(kMod, Debug, "categoryFeed channel=%s -> %d items",
+              qPrintable(key), items.size());
+        if (items.isEmpty())
+            DBG_P(kMod, Warn, "categoryFeed channel=%s empty", qPrintable(key));
+        cb(Result::ok(), items, false);   // SSR 单屏
     });
 }
 

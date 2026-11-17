@@ -67,6 +67,30 @@ int main(int argc, char** argv) {
                          == parts.first().id.section(QLatin1Char('.'), 1),
               "bilibili part.extra.cid 与复合 id 一致");
     }
+    {
+        // 分类动态派生:popular 条目自带 (tid,tname),不依赖硬编码表
+        JRoot r(load(QString::fromUtf8("bilibili_popular.json")));
+        const QList<CategoryItem> regs = bilibili::parse::popularRegions(r.p);
+        check(regs.size() >= 3, "bilibili popularRegions>=3",
+              QString::number(regs.size()));
+        bool allOk = true;
+        for (const CategoryItem& c : regs)
+            if (c.key.isEmpty() || c.name.isEmpty()
+                || c.key.toLongLong() <= 0) allOk = false;
+        check(allOk, "bilibili regions key=numeric tid & name 非空");
+    }
+    {
+        JRoot r(load(QString::fromUtf8("bilibili_newlist.json")));
+        bool hasMore = true;
+        const QList<VideoItem> items =
+            bilibili::parse::newlist(r.p, 1, &hasMore);
+        check(items.size() == 5, "bilibili newlist items==5",
+              QString::number(items.size()));
+        check(!items.isEmpty() && !items.first().id.isEmpty()
+                  && items.first().durationMs > 0,
+              "bilibili newlist 条目字段(bvid/duration)");
+        check(!hasMore, "bilibili newlist page.count=0 → hasMore=false");
+    }
 
     // ── hongguo ────────────────────────────────────────────────
     {
@@ -89,6 +113,31 @@ int main(int argc, char** argv) {
                   && !items.first().extra.value(QString::fromUtf8("tab")).toString()
                           .isEmpty(),
               "hongguo home extra.tab 存在");
+    }
+    {
+        // 分类 = 首页 SSR homeSections 的 tab(动态,不硬编码)
+        JRoot r(load(QString::fromUtf8("hongguo_home.json")));
+        const QList<CategoryItem> tabs = hongguo::parse::homeTabs(r.p);
+        check(tabs.size() == 3, "hongguo homeTabs == 3",
+              QString::number(tabs.size()));
+        check(!tabs.isEmpty() && tabs.first().key == QString::fromUtf8("all")
+                  && !tabs.first().name.isEmpty(),
+              "hongguo tab key=all & name 非空");
+        bool namesOk = true;
+        for (const CategoryItem& c : tabs)
+            if (c.key.isEmpty() || c.name.isEmpty()) namesOk = false;
+        check(namesOk, "hongguo tab key/name 均非空");
+        const QList<VideoItem> sec =
+            hongguo::parse::homeSection(r.p, QString::fromUtf8("human"));
+        check(sec.size() >= 1, "hongguo homeSection(human) 非空",
+              QString::number(sec.size()));
+        bool tabOk = true;
+        for (const VideoItem& it : sec)
+            if (it.extra.value(QString::fromUtf8("tab")).toString()
+                != QString::fromUtf8("human")) tabOk = false;
+        check(tabOk, "hongguo homeSection 过滤只含目标 tab");
+        check(hongguo::parse::homeSection(r.p, QString::fromUtf8("nope")).isEmpty(),
+              "hongguo homeSection(未知 tab) 为空");
     }
     {
         JRoot r(load(QString::fromUtf8("hongguo_detail.json")));
@@ -147,6 +196,23 @@ int main(int argc, char** argv) {
     }
 
     // ── xiaohongshu ────────────────────────────────────────────
+    {
+        // 频道列表:多候选键探测;字段齐全才收(不猜结构)
+        const char* kJson =
+            "{\"channel_list\":[{\"id\":\"homefeed.food_v3\",\"name\":\"美食\"},"
+            "{\"channel_id\":\"homefeed.fashion_v3\",\"channel_name\":\"穿搭\"},"
+            "{\"id\":\"\",\"name\":\"坏数据\"}]}";
+        JRoot r((QByteArray(kJson)));
+        const QList<CategoryItem> ch = xiaohongshu::parse::channelList(r.p);
+        check(ch.size() == 2, "xhs channelList 过滤缺字段条目",
+              QString::number(ch.size()));
+        check(!ch.isEmpty() && ch.first().key == QString::fromUtf8("homefeed.food_v3")
+                  && ch.first().name == QString::fromUtf8("美食"),
+              "xhs channelList id/name 映射");
+        JRoot empty(QByteArray("{}"));
+        check(xiaohongshu::parse::channelList(empty.p).isEmpty(),
+              "xhs channelList 无频道字段 → 空(不猜)");
+    }
     {
         JRoot r(load(QString::fromUtf8("xhs_explore_state.json")));
         const QList<VideoItem> items = xiaohongshu::parse::feedNotes(r.p);

@@ -9,6 +9,21 @@
 
 class LimeScrollBar;
 
+/* 视频网格卡片(providers VideoItem 的 UI 投影;空字段 UI 侧不绘制) */
+struct VideoCard {
+    QString id, title, author, cover;
+    qint64 durationMs;
+    qint64 playCount;
+    VideoCard() : durationMs(0), playCount(0) {}
+};
+
+/* 分类 chip(key 由站点动态提供;空 key = 推荐) */
+struct CategoryChip {
+    QString key, name;
+    CategoryChip() {}
+    CategoryChip(const QString& k, const QString& n) : key(k), name(n) {}
+};
+
 /* 远端歌单卡片，PlaylistListMode 数据 */
 struct RemotePlaylistCard {
     qint64 id;
@@ -35,6 +50,17 @@ public:
     /* CategoryGridMode：远端分类宫格 */
     void showCategoryGrid(const QStringList& cats);
 
+    /* VideoGridMode：分类 chips + 封面网格 + 加载更多/触底翻页 + 错误条 */
+    void showVideoGrid(const QString& title, const std::vector<CategoryChip>& chips,
+                       const QString& activeKey);
+    void setVideoChips(const std::vector<CategoryChip>& chips,
+                       const QString& activeKey);
+    void setActiveChip(const QString& key);   /* 仅切高亮，不动列表 */
+    void appendVideoCards(const std::vector<VideoCard>& cards, bool hasMore);
+    void clearVideoCards();
+    void setVideoGridLoading(bool loading);
+    void setVideoGridError(const QString& text);   // 空=清错
+
 public slots:
     /* TracksMode：本地库歌单（SideNav::playlistSelected 连接目标） */
     void showPlaylist(int playlistId);
@@ -47,6 +73,8 @@ signals:
     void categoryActivated(const QString& cat);
     void loadMoreRequested();
     void backRequested();
+    void chipActivated(const QString& key);
+    void videoActivated(const QString& id);
 
 protected:
     void paintEvent(QPaintEvent* e);
@@ -55,9 +83,10 @@ protected:
     void wheelEvent(QWheelEvent* e);
     void resizeEvent(QResizeEvent* e);
     void leaveEvent(QEvent* e);
+    void customEvent(CustomEventBase* e);   // 封面解码完成(泵线程 → GUI)
 
 private:
-    enum ViewMode { TracksMode, PlaylistListMode, CategoryGridMode };
+    enum ViewMode { TracksMode, PlaylistListMode, CategoryGridMode, VideoGridMode };
 
     struct Row {
         int index;      /* TracksMode: trackIndex; List/Grid: 卡片/分类下标 */
@@ -72,12 +101,22 @@ private:
     QRect playAllRect() const;
     QRect backRect() const;
     QRect loadMoreRect() const;
+    QRect retryRect() const;
+    QRect chipRect(int i) const;
+    QRect cardRect(int i) const;
+    int    gridCols() const;
+    int    gridCardH() const;
 
     std::vector<Playlist> m_lib;
     const Playlist* m_pl;
     ViewMode m_mode;
     std::vector<Row> m_rows;
     std::vector<RemotePlaylistCard> m_cards;
+    std::vector<VideoCard> m_videos;
+    std::vector<CategoryChip> m_chips;
+    QString m_activeChip;
+    QString m_gridErr;
+    int m_lastMoreAt;      /* 触底翻页节流(time(0),1s) */
     QStringList m_gridCats;
     LimeScrollBar* m_scrollBar;
     int m_scrollY;
