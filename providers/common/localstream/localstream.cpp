@@ -4,7 +4,7 @@
 
 #include "httplib.h"
 
-#include <QDateTime>
+#include <qdatetime.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -41,8 +41,8 @@ QString randHex(int n) {
 
 // 新变量名优先,兼容旧 QXVOTUBE_HG_* 口径
 QString envFirst(const char* a, const char* b) {
-    QString v = QXV_ENV(a);
-    if (v.isEmpty() && b) v = QXV_ENV(b);
+    QString v = qenv(a);
+    if (v.isEmpty() && b) v = qenv(b);
     return v;
 }
 
@@ -112,7 +112,7 @@ struct Server::Impl {
         const qint64 up = startedAt ? (nowMs() - startedAt) : 0;
         DBG_P(kMod, Info,
               "stream server stop (reason=%s, sessions=%d, uptime=%llds)",
-              qPrintable(reason), nsess, (long long)(up / 1000));
+              qToUtf8(reason).data(), nsess, (long long)(up / 1000));
         DBG_P(kMod, Debug, "listen/watchdog threads joined");
     }
 
@@ -132,7 +132,7 @@ struct Server::Impl {
                         && now - it->second->lastAccess
                                > qint64(opt.sessionIdleSec) * 1000) {
                         DBG_P(kMod, Info, "session evict key=%s (idle)",
-                              qPrintable(it->second->key));
+                              qToUtf8(it->second->key).data());
                         it = byToken.erase(it);
                     } else {
                         ++it;
@@ -225,22 +225,22 @@ struct Server::Impl {
 };
 
 Server::Server() : d(std::make_shared<Impl>()) {
-    if (!QXV_ENV_EMPTY("QXVOTUBE_STREAM_IDLE_SEC"))
-        d->opt.idleSec = QXV_ENV("QXVOTUBE_STREAM_IDLE_SEC").toInt();
-    else if (!QXV_ENV_EMPTY("QXVOTUBE_HG_IDLE_SEC"))
-        d->opt.idleSec = QXV_ENV("QXVOTUBE_HG_IDLE_SEC").toInt();
-    if (!QXV_ENV_EMPTY("QXVOTUBE_STREAM_SESS_TTL_SEC"))
-        d->opt.sessionIdleSec = QXV_ENV("QXVOTUBE_STREAM_SESS_TTL_SEC").toInt();
-    else if (!QXV_ENV_EMPTY("QXVOTUBE_HG_SESS_TTL_SEC"))
-        d->opt.sessionIdleSec = QXV_ENV("QXVOTUBE_HG_SESS_TTL_SEC").toInt();
-    if (!QXV_ENV_EMPTY("QXVOTUBE_STREAM_MAX_SESSIONS"))
-        d->opt.maxSessions = QXV_ENV("QXVOTUBE_STREAM_MAX_SESSIONS").toInt();
-    else if (!QXV_ENV_EMPTY("QXVOTUBE_HG_MAX_SESSIONS"))
-        d->opt.maxSessions = QXV_ENV("QXVOTUBE_HG_MAX_SESSIONS").toInt();
-    if (!QXV_ENV_EMPTY("QXVOTUBE_STREAM_PORT"))
-        d->opt.fixedPort = QXV_ENV("QXVOTUBE_STREAM_PORT").toInt();
-    else if (!QXV_ENV_EMPTY("QXVOTUBE_HG_STREAM_PORT"))
-        d->opt.fixedPort = QXV_ENV("QXVOTUBE_HG_STREAM_PORT").toInt();
+    if (!qenv_empty("QXVOTUBE_STREAM_IDLE_SEC"))
+        d->opt.idleSec = qenv("QXVOTUBE_STREAM_IDLE_SEC").toInt();
+    else if (!qenv_empty("QXVOTUBE_HG_IDLE_SEC"))
+        d->opt.idleSec = qenv("QXVOTUBE_HG_IDLE_SEC").toInt();
+    if (!qenv_empty("QXVOTUBE_STREAM_SESS_TTL_SEC"))
+        d->opt.sessionIdleSec = qenv("QXVOTUBE_STREAM_SESS_TTL_SEC").toInt();
+    else if (!qenv_empty("QXVOTUBE_HG_SESS_TTL_SEC"))
+        d->opt.sessionIdleSec = qenv("QXVOTUBE_HG_SESS_TTL_SEC").toInt();
+    if (!qenv_empty("QXVOTUBE_STREAM_MAX_SESSIONS"))
+        d->opt.maxSessions = qenv("QXVOTUBE_STREAM_MAX_SESSIONS").toInt();
+    else if (!qenv_empty("QXVOTUBE_HG_MAX_SESSIONS"))
+        d->opt.maxSessions = qenv("QXVOTUBE_HG_MAX_SESSIONS").toInt();
+    if (!qenv_empty("QXVOTUBE_STREAM_PORT"))
+        d->opt.fixedPort = qenv("QXVOTUBE_STREAM_PORT").toInt();
+    else if (!qenv_empty("QXVOTUBE_HG_STREAM_PORT"))
+        d->opt.fixedPort = qenv("QXVOTUBE_HG_STREAM_PORT").toInt();
 }
 
 Server::~Server() { stop(qFromUtf8("shutdown")); }
@@ -313,7 +313,7 @@ Result Server::open(const QString& key, std::shared_ptr<Source> src,
                 *outUrl = qFromUtf8("http://127.0.0.1:%1/s/%2.mp4")
                               .arg(d->port).arg(kv.second->token);
                 DBG_P(kMod, Debug, "session reuse key=%s (refs=%d)",
-                      qPrintable(key), kv.second->refs);
+                      qToUtf8(key).data(), kv.second->refs);
                 return Result::ok();
             }
         }
@@ -341,7 +341,7 @@ Result Server::open(const QString& key, std::shared_ptr<Source> src,
             }
             if (victim == d->byToken.end()) break;   // 全在用
             DBG_P(kMod, Info, "session evict key=%s (lru)",
-                  qPrintable(victim->second->key));
+                  qToUtf8(victim->second->key).data());
             d->byToken.erase(victim);
         }
         d->byToken[s->token] = s;
@@ -350,7 +350,7 @@ Result Server::open(const QString& key, std::shared_ptr<Source> src,
                       .arg(d->port).arg(s->token);
     }
     DBG_P(kMod, Info, "session open key=%s (refs=1, cache=%d, total=%llu)",
-          qPrintable(key), nsess,
+          qToUtf8(key).data(), nsess,
           (unsigned long long)s->src->total());
     return Result::ok();
 }
@@ -362,7 +362,7 @@ void Server::release(const QString& key) {
         if (s.key != key) continue;
         if (s.refs > 0) --s.refs;
         s.lastAccess = nowMs();
-        DBG_P(kMod, Debug, "session release key=%s (refs=%d)", qPrintable(key),
+        DBG_P(kMod, Debug, "session release key=%s (refs=%d)", qToUtf8(key).data(),
               s.refs);
         break;
     }

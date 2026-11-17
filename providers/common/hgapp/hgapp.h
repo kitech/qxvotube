@@ -50,15 +50,15 @@ void ensureDevice(std::function<void(const Result&, const Device&)> cb);
 // 取某集全部清晰度轨道(已解出 video_model JSON 字符串嵌套)。
 // 内置 10 分钟 tracks 缓存(命中即时回调)。
 void videoModel(const QString& vid,
-                std::function<void(const Result&, const QList<Track>&)> cb);
+                std::function<void(const Result&, const QList36<Track>&)> cb);
 
 // 多集批量(一次请求 mixed_video_id_map);用于详情后预热前 N 集
 void videoModels(const QStringList& vids,
                  std::function<void(const Result&,
-                                    const QMap<QString, QList<Track>>&)> cb);
+                                    const QMap<QString, QList36<Track>>&)> cb);
 
 // 便捷:挑最高可播档(bytevc1 优先,否则最高分辨率)。
-const Track* pickBest(const QList<Track>& tracks);
+const Track* pickBest(const QList36<Track>& tracks);
 
 // 进程内缓存(测试/多 provider 共享)
 Device cachedDevice();

@@ -7,9 +7,17 @@
 
 #include "httplib.h"
 
+#ifdef QT3_BUILD
+#ifdef QT3_BUILD
+#include <qcstring.h>
+#else
 #include <QByteArray>
-#include <QDateTime>
-#include <QMap>
+#endif
+#else
+#include <QByteArray>
+#endif
+#include <qdatetime.h>
+#include <qmap.h>
 
 #include <memory>
 
@@ -50,10 +58,10 @@ struct Fetched {
 Fetched fetchRange(const QString& url, quint64 off, quint64 len,
                    const QString& proxy) {
     Fetched f;
-    const int sp = url.indexOf(qFromUtf8("://"));
+    const int sp = qIndexOf(url, qFromUtf8("://"));
     if (sp < 0) { f.err = qFromUtf8("bad url"); return f; }
     const QString scheme = url.left(sp);
-    const int slash = url.indexOf('/', sp + 3);
+    const int slash = qIndexOf(url, qFromUtf8("/"), sp + 3);
     const QString hostPort = slash < 0 ? url.mid(sp + 3)
                                        : url.mid(sp + 3, slash - sp - 3);
     const QString path = slash < 0 ? QString() : url.mid(slash);
@@ -69,7 +77,7 @@ Fetched fetchRange(const QString& url, quint64 off, quint64 len,
         cli.set_read_timeout(30, 0);
         cli.set_write_timeout(10, 0);
         if (!proxy.isEmpty()) {
-            const int ps = proxy.indexOf(qFromUtf8("://"));
+            const int ps = qIndexOf(proxy, qFromUtf8("://"));
             const QString hp = ps >= 0 ? proxy.mid(ps + 3) : proxy;
             const int c = hp.lastIndexOf(':');
             cli.set_proxy(hp.left(c).toStdString(), hp.mid(c + 1).toInt());
@@ -79,7 +87,7 @@ Fetched fetchRange(const QString& url, quint64 off, quint64 len,
                           .toUtf8().constData() },
             { "User-Agent", kUa },
         };
-        auto r = cli.Get(path.toStdString(), h);
+        auto r = cli.Get(std::string(qToUtf8(path).data()), h);
         if (!r) { f.err = qFromUtf8("connect failed"); return f; }
         f.status = r->status;
         f.data = QByteArray(r->body.data(), int(r->body.size()));
@@ -105,15 +113,15 @@ Fetched fetchRange(const QString& url, quint64 off, quint64 len,
 bool renameTag(QByteArray& moov, const char* from, const char* to) {
     const QByteArray pat(from, 4);
     int hits = 0;
-    int i = int(moov.indexOf(pat, 0));
+    int i = int(qIndexOf(moov, pat, 0));
     while (i >= 8) {
         const quint32 sz = rd32(moov, quint64(i) - 4);
         if (sz >= 8 && quint64(sz) <= quint64(moov.size())) {
             moov.replace(i, 4, QByteArray(to, 4));
             ++hits;
-            i = int(moov.indexOf(pat, i + 4));
+            i = int(qIndexOf(moov, pat, i + 4));
         } else {
-            i = int(moov.indexOf(pat, i + 1));
+            i = int(qIndexOf(moov, pat, i + 1));
         }
     }
     return hits > 0;
@@ -140,7 +148,7 @@ public:
     quint64 total_ = 0;
     quint64 moovOff = 0;
     QByteArray moovPatched;
-    QList<hgcenc::TrackInfo> tracks;
+    QList36<hgcenc::TrackInfo> tracks;
 
     quint64 total() const override { return total_; }
 
@@ -149,7 +157,7 @@ public:
         if (!f.ok) {
             DBG_P(kMod, Warn, "read failed off=%llu len=%llu: %s",
                   (unsigned long long)off, (unsigned long long)len,
-                  qPrintable(f.err));
+                  qToUtf8(f.err).data());
             return false;
         }
         *out = f.data;
@@ -174,8 +182,8 @@ public:
                 if (so + quint64(sz) <= off) continue;
                 if (so >= off && so + quint64(sz) <= outEnd) {
                     hgcenc::TrackInfo one = t;
-                    one.sampleOffsets = QList<quint64>() << (so - off);
-                    one.sampleSizes = QList<quint32>() << quint32(sz);
+                    one.sampleOffsets = QList36<quint64>() << (so - off);
+                    one.sampleSizes = QList36<quint32>() << quint32(sz);
                     one.baseIv = t.baseIv + quint64(i);
                     if (hgcenc::Cenc::decryptTrack(*out, one, key) != 1)
                         return false;
@@ -184,8 +192,8 @@ public:
                     if (!sf.ok || sf.data.size() != sz) return false;
                     QByteArray one = sf.data;
                     hgcenc::TrackInfo tt = t;
-                    tt.sampleOffsets = QList<quint64>() << 0;
-                    tt.sampleSizes = QList<quint32>() << quint32(sz);
+                    tt.sampleOffsets = QList36<quint64>() << 0;
+                    tt.sampleSizes = QList36<quint32>() << quint32(sz);
                     tt.baseIv = t.baseIv + quint64(i);
                     if (hgcenc::Cenc::decryptTrack(one, tt, key) != 1)
                         return false;
@@ -242,7 +250,7 @@ Result Server::open(const QString& vid, const QString& quality,
                     const QString& remoteUrl, const QString& spadeA,
                     QString* outUrl) {
     const QByteArray key = QByteArray::fromHex(
-        hgcenc::Spade::unwrapV1(QByteArray::fromBase64(spadeA.toUtf8()), 0)
+        hgcenc::Spade::unwrapV1(QByteArray::fromBase64(qToUtf8(spadeA)), 0)
             .toUtf8());
     if (key.size() != 16)
         return Result::fail(Err::Parse, qFromUtf8("hgstream: spade unwrap 失败"));
@@ -281,7 +289,7 @@ Result Server::open(const QString& vid, const QString& quality,
         moov = mf.data.left(int(moovSize));
     }
 
-    QList<hgcenc::TrackInfo> tracks;
+    QList36<hgcenc::TrackInfo> tracks;
     if (hgcenc::findTracks(moov, tracks) != 0)
         return Result::fail(Err::Parse, qFromUtf8("hgstream: 加密轨解析失败"));
     patchMoov(moov);
@@ -305,8 +313,8 @@ void Server::release(const QString& vid, const QString& quality) {
     localstream::Server::instance().release(sessionKey(vid, quality));
 }
 
-QList<SampleRef> Server::samplesOf(const QString& token, int n) const {
-    QList<SampleRef> out;
+QList36<SampleRef> Server::samplesOf(const QString& token, int n) const {
+    QList36<SampleRef> out;
     auto base = localstream::Server::instance().sourceOf(token);
     auto src = std::dynamic_pointer_cast<CencSource>(base);
     if (!src) return out;

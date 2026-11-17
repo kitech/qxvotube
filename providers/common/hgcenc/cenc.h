@@ -1,6 +1,5 @@
 #pragma once
-#include <QByteArray>
-
+#include "compat.h"
 #include "mp4box.h"
 
 namespace qxv {

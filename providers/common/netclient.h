@@ -1,42 +1,35 @@
 #pragma once
 #include "compat.h"
-#include <QObject>
-#include <QVector>
+#include <qobject.h>
 #include <functional>
 #include <memory>
 
-// 统一 HTTP 客户端:cpp-httplib(vendored)+ QObject 薄封装
-// - 阻塞调用在 QThreadPool 里跑,回调经队列投递回调用方所在线程
-// - 所有 Qt 版本共用同一实现(不依赖 QNetworkAccessManager)
-// - 自管 CookieJar,不依赖 QNetworkCookieJar
-// 调试:dumpHttp 开 Info 时请求/响应脱敏写日志
-
+// 统一 HTTP 客户端 —— 传输层 = qlappcom EventPoller(curl multi,自带泵线程)
+// - 不新增线程:请求交给泵线程,响应经 qAppPostEvent 回到发起线程
+// - 保留:Cookie / 重试退避 / 限流 / 单飞(请求去重) / cancel 代际
+// - Qt3/Qt4/Qt6 同码;不再依赖 httplib
 namespace qxv {
 
 struct NetRequest {
     QString method = qFromUtf8("GET");
     QString url;
-    QVector<QPair<QString, QString>> headers;   // 不用 Qt6 QHttpHeaders(兼容低版)
+    NetHeaders headers;                 // 值容器别名(Qt3: QValueVector)
     QByteArray body;
-    QString proxy;                              // "http://host:port" 空=直连
+    QString proxy;                      // "http://host:port" / "socks5://..."
     int timeoutSec = 15;
-    bool autoCookie = true;                     // CookieJar 自动附带/回存
-    // 统一重试策略(2026-11-15):
-    //   可重试 = 传输错误 / HTTP 429 / 5xx / (retryOnEmpty 时 200+空 body)
-    //   退避 = retryDelayMs * 2^(attempt-1),封顶 4s;每次重试前检查 cancel()
-    // 单飞(去重):同 method+url+body+jar 的并发请求只真正发一次,
-    // 响应到达后扇出给所有等待者(各自 generation 校验,cancel 只丢自己)
+    int stallSec = 45;                  // 无进展看门狗
+    bool autoCookie = true;
     bool singleFlight = true;
-    int maxAttempts = 1;                        // 1 = 不重试
+    int maxAttempts = 1;                // 1 = 不重试
     int retryDelayMs = 250;
-    bool retryOnEmpty = false;                  // 字节系"200 空包"可开
+    bool retryOnEmpty = false;          // 字节系"200 空包"可开
 };
 
 struct NetResponse {
     int status = 0;
-    QVector<QPair<QString, QString>> headers;
+    NetHeaders headers;                 // 多值已由引擎按 '\n' 拼接
     QByteArray body;
-    QString error;                              // httplib 侧错误(空=成功)
+    QString error;                      // curl 侧错误(空=成功)
     bool ok() const { return error.isEmpty() && status >= 200 && status < 300; }
 };
 
@@ -46,19 +39,22 @@ class NetClient : public QObject {
     Q_OBJECT
 public:
     using Callback = std::function<void(const NetResponse&)>;
-    // 实现细节(单飞等待者需要跨线程持有;不透明指针)
     struct Impl;
 
-    explicit NetClient(QObject* parent = nullptr);
+    explicit NetClient(QObject* parent = 0);
     ~NetClient() override;
 
     void setCookieJar(CookieJar* jar);          // 所有权留在调用方(可共享)
     void send(const NetRequest& req, Callback cb);   // 立即返回;回调在发起线程
-    void cancel();                              // 作废在途结果(P2 扩展标记丢弃)
+    void cancel();                              // 本客户端在途结果作废
 
-    static QString cookieHeaderFrom(const NetResponse&);   // Set-Cookie 便捷取值
+    static QString cookieHeaderFrom(const NetResponse& r);
+
+protected:
+    void customEvent(CustomEventBase* e) override;   // 泵线程事件落地
 
 private:
+    void dispatch(const NetRequest& req, int gen, const QString& key, int attempt);
     std::shared_ptr<Impl> d;
 };
 

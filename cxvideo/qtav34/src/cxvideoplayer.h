@@ -4,6 +4,7 @@
 #include "cxvideo_global.h"
 #include <qobject.h>
 #include <qstring.h>
+#include "cxengine.h"
 
 class CXEngine;
 class CXVideoRenderer;
@@ -20,6 +21,11 @@ public:
     // 引擎选择;auto = 工厂探测(mpv→ffmpeg)
     bool setEngine(CxEngineType type);
     CXEngine* engine() const { return m_engine; }
+
+    // 直链网络选项(代理/防盗链头):setEngine 之后、open 之前调用;
+    // 引擎已存在时立即透传
+    void setNetOptions(const CxNetOptions& o);
+    const CxNetOptions& netOptions() const { return m_net; }
 
     void setRenderer(CXVideoRenderer* r);
     void setHostWidget(QWidget* w);
@@ -79,6 +85,7 @@ private:
     void unwireEngine();
 
     CXEngine* m_engine;
+    CxNetOptions m_net;
     CXVideoState m_state;
     double m_rate;
     int m_volume;

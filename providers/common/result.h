@@ -6,9 +6,9 @@
 #include <qvariant.h>
 #include <qmap.h>        // + qt3shim 的 QVariantMap typedef
 #else
-#include <QString>
-#include <QVariantMap>
-#include <QList>
+#include <qstring.h>
+#include <qvariant.h>
+#include <qlist.h>
 #endif
 #include <functional>
 
@@ -28,7 +28,7 @@ struct VideoItem {
 };
 
 struct PlayResult {
-    QList<Stream> streams;
+    QList36<Stream> streams;
     VideoItem item;
 };
 
@@ -69,10 +69,10 @@ struct Result {
     bool retriable() const;   // Network/RateLimit/Http(5xx) = true
 };
 
-using SearchCb   = std::function<void(Result, const QList<VideoItem>&, bool hasMore)>;
-using DetailCb   = std::function<void(Result, const VideoItem&, const QList<VideoItem>&)>;
+using SearchCb   = std::function<void(Result, const QList36<VideoItem>&, bool hasMore)>;
+using DetailCb   = std::function<void(Result, const VideoItem&, const QList36<VideoItem>&)>;
 using ResolveCb  = std::function<void(Result, const PlayResult&)>;
-using CommentsCb = std::function<void(Result, const QList<CommentItem>&,
+using CommentsCb = std::function<void(Result, const QList36<CommentItem>&,
                                       const QString& nextCursor)>;
 using ActionCb   = std::function<void(Result)>;
 

@@ -441,35 +441,7 @@ void ContentView::onScroll(int value)
     if (value == m_scrollY) return;
     m_scrollY = value;
     update();
-    if (m_mode == VideoGridMode && m_hasMore && !m_loadingNow
-        && m_gridErr.isEmpty()) {
-        const int viewH = height() - m_headerH;
-        const int totalH = totalHeight();
-        if (viewH > 0 && m_scrollY + viewH >= totalH - 120) {
-            const int now = (int)::time(0);
-            if (now != m_lastMoreAt) {   /* 1s 节流:一次滚动只发一次 */
-                m_lastMoreAt = now;
-                if (getenv("QLVOTUBE_DEBUG") != 0)
-#if QT_VERSION >= 0x060000
-                    qDebug() << "grid: near bottom -> loadMore";
-#else
-                    qDebug("grid: near bottom -> loadMore");
-#endif
-                emit loadMoreRequested();
-            }
-        }
-    }
-}
-
-void ContentView::customEvent(CustomEventBase* e)
-{
-    if (e->type() == ThumbReadyEventType) {
-        ThumbReadyEvent* te = static_cast<ThumbReadyEvent*>(e);
-        thumbcache::accept(te->url, te->image);
-        update();   /* 封面到货 → 重绘(事件循环负责 delete) */
-        return;
-    }
-    QWidget::customEvent(e);
+    maybeLoadMore();
 }
 
 void ContentView::updateScrollBar()
@@ -525,7 +497,35 @@ void ContentView::wheelEvent(QWheelEvent* e)
     int maxScroll = qMax(0, totalHeight() - viewH);
     m_scrollY = qBound(0, newY, maxScroll);
     updateScrollBar();
+    maybeLoadMore();
     update();
+}
+
+void ContentView::maybeLoadMore()
+{
+    if (m_mode != VideoGridMode || !m_hasMore || m_loadingNow
+        || !m_gridErr.isEmpty())
+        return;
+    const int viewH = height() - m_headerH;
+    const int totalH = totalHeight();
+    if (viewH <= 0 || m_scrollY + viewH < totalH - 120) return;
+    const int now = (int)::time(0);
+    if (now == m_lastMoreAt) return;   /* 1s 节流 */
+    m_lastMoreAt = now;
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+        qDebug("grid: near bottom -> loadMore");
+    emit loadMoreRequested();
+}
+
+void ContentView::customEvent(CustomEventBase* e)
+{
+    if (e->type() == ThumbReadyEventType) {
+        ThumbReadyEvent* te = static_cast<ThumbReadyEvent*>(e);
+        thumbcache::accept(te->url, te->image);
+        update();   /* 封面到货 → 重绘(事件循环负责 delete) */
+        return;
+    }
+    QWidget::customEvent(e);
 }
 
 void ContentView::paintEvent(QPaintEvent*)

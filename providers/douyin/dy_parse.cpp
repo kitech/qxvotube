@@ -4,8 +4,8 @@ namespace qxv {
 namespace douyin {
 namespace parse {
 
-QList<VideoItem> hotWords(cJSON* root) {
-    QList<VideoItem> items;
+QList36<VideoItem> hotWords(cJSON* root) {
+    QList36<VideoItem> items;
     cJSON* list = jarr(jobj(root, "data"), "word_list");
     for (int i = 0; i < jsize(list); ++i) {
         const cJSON* it = jat(list, i);

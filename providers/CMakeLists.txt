@@ -1,4 +1,4 @@
-# providers/ —— 视频源协议库(QtCore + cpp-httplib vendored + OpenSSL)
+# providers/ —— 视频源协议库(QtCore + qlappcom curl 引擎 + OpenSSL)
 # 顶层构建接入:qskvotube CMakeLists 中 add_subdirectory(providers)
 # 单独构建:cmake -B build -DCMAKE_PREFIX_PATH=/opt/qt/6.7.3/gcc_64 && cmake --build build
 cmake_minimum_required(VERSION 3.16)
@@ -11,24 +11,15 @@ set(CMAKE_AUTOMOC ON)
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(CURL REQUIRED)
 find_package(Qt6 COMPONENTS Core Gui REQUIRED)
-
-# vendored cpp-httplib(gh-proxy 前缀下载;已存在则跳过)
-set(HTTPLIB_FILE "${CMAKE_CURRENT_SOURCE_DIR}/common/httplib.h")
-if(NOT EXISTS "${HTTPLIB_FILE}")
-    file(DOWNLOAD
-        "https://gh-proxy.com/https://raw.githubusercontent.com/yhirose/cpp-httplib/v0.20.0/httplib.h"
-        "${HTTPLIB_FILE}"
-        STATUS _dl)
-    if(NOT _dl STREQUAL "0;OK" AND NOT _dl STREQUAL "0;No error")
-        message(FATAL_ERROR "download httplib.h failed: ${_dl}")
-    endif()
-endif()
 
 add_library(qxvproviders STATIC
     ../qlcomp/cJSON.c                # 全仓唯一份(qlvotube 同源,避免双份符号)
     ../qlcomp/compatcore34.cpp       # qFromUtf8/qbaFromCharptr 等(Qt6 需 Qt6::Gui)
+    ../qlappcom/eventpoller.cpp      # curl multi 传输引擎(NetClient 依赖)
     ../qlcomp/md5.c                  # xhs 签名器 MD5(纯 C,qlcomp 复用)
+    ../qlcomp/limelog.cpp            # EventPoller 的日志实现(apiLogImpl)
     ../vendor/wjcryptlib/WjCryptLib_Rc4.c  # xhs 签名器 RC4(公有领域)
     common/debuglog.cpp
     common/result.cpp
@@ -41,16 +32,16 @@ add_library(qxvproviders STATIC
     bilibili/bilibiliprovider.cpp
     youtube/youtubeprovider.cpp
     hongguo/hongguoprovider.cpp
-    hongguo/parse.cpp
-    bilibili/parse.cpp
+    hongguo/hg_parse.cpp
+    bilibili/bili_parse.cpp
     douyin/douyinprovider.cpp
-    douyin/parse.cpp
+    douyin/dy_parse.cpp
     xiaohongshu/xiaohongshuprovider.cpp
     xiaohongshu/ssr.cpp
-    xiaohongshu/parse.cpp
+    xiaohongshu/xhs_parse.cpp
     xiaohongshu/sign.cpp
-    xiaohongshu/api.cpp
-    youtube/parse.cpp
+    xiaohongshu/xhs_api.cpp
+    youtube/yt_parse.cpp
     common/hgcenc/spade.cpp
     common/hgcenc/mp4box.cpp
     common/hgcenc/cenc.cpp
@@ -61,17 +52,17 @@ add_library(qxvproviders STATIC
 )
 
 target_compile_definitions(qxvproviders PRIVATE
-    CPPHTTPLIB_OPENSSL_SUPPORT
-    CPPHTTPLIB_ZLIB_SUPPORT
     QT_NO_KEYWORDS)
 
 target_include_directories(qxvproviders PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/common
-    ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)   # cJSON.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp    # cJSON.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../qlappcom) # eventpoller.h
 
 target_link_libraries(qxvproviders PUBLIC
-    Qt6::Core Qt6::Gui OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB)
+    Qt6::Core Qt6::Gui OpenSSL::SSL OpenSSL::Crypto Threads::Threads
+    ZLIB::ZLIB CURL::libcurl)
 
 if(QXV_PROVIDERS_TESTS)
     enable_testing()

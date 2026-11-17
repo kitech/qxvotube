@@ -169,7 +169,9 @@ include(../providers/providers.pri)
   不分目录会互相覆盖(实测 undefined reference)。
 - 宿主已编过 qlcomp 公共件时:`DEFINES += QXV_PROVIDERS_NO_QLCOMP` 可跳过
   `compatcore34.cpp` / `cJSON.c`(qlvotube 已自带 cJSON.c)。
-- **Qt3/Qt4 能力为 0**:UI 应据 `createProviders().isEmpty()` 隐藏视频源入口,
-  不显示"空源"。
-- 接入验证工程:`providers/tests/qt3stub/`(同一份 .pro 分别用
-  3.5.0 / 4.8.7 / 6.7.3 qmake 构建,实测 providers=0/0/4)。
+- **Qt3/Qt4/Qt6 均编译真实源**(2026-11-17 起):传输层换成
+  `qlappcom/EventPoller`(libcurl),不再依赖 cpp-httplib。
+  容器用 `QList36`(Qt3=QValueList) / `NetHeaders`,Qt5+ 专有 API 由 qlcomp 垫片补齐。
+- 能力边界:Qt3/Qt4 不编 `hgcenc/hgapp/hgstream/localstream/ytdlp`
+  (红果走 web 360p、YouTube 走 progressive);Qt5+ 为全能力。
+- 接入验证:`providers/tests/`(CMake/ctest) + `qlvotube/buildqt3.sh` 真机运行。

@@ -2,8 +2,6 @@
 #include "common/compat.h"
 #include "common/qcjson.h"
 
-#include <QByteArray>
-
 // 小红书 SSR 解析:window.__INITIAL_STATE__ = {...}
 // 与红果 _ROUTER_DATA 的差异:
 //   - 变量名是 __INITIAL_STATE__(不是 _ROUTER_DATA)

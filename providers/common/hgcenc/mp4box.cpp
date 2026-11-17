@@ -1,7 +1,7 @@
 #include "mp4box.h"
 
 #include <cstdio>
-#include <QVector>
+#include <qvector.h>
 
 #define HGDBG(...) do { if (getenv("HGDBG")) { fprintf(stderr, "[hgdbg] "); \
     fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } } while (0)
@@ -270,7 +270,7 @@ bool parseTrack(const QByteArray& buf, quint64 trakOff, quint64 trakSize,
 
 } // namespace
 
-int findTracks(const QByteArray& buf, QList<TrackInfo>& out) {
+int findTracks(const QByteArray& buf, QList36<TrackInfo>& out) {
     const quint32 p[] = { T_trak };
     // 遍历 moov 下全部 trak
     quint64 moovOff = 0, moovSize = 0;

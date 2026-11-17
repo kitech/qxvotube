@@ -2,9 +2,6 @@
 #include "common/compat.h"
 #include "common/result.h"
 
-#include <QByteArray>
-#include <QString>
-
 #include <functional>
 #include <memory>
 

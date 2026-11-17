@@ -308,6 +308,7 @@ bool CXEngineMpv::cxOpenCore(const QString& url, bool glRoute)
         m_quickUrl = m_url;
         return true;
     }
+    applyNetOptions();
     QByteArray ba = qToUtf8(m_url);
     if (!cxMpvRunCmd2(api, mpv, "loadfile", ba.data())) {
         emit noticedError((int)CxErrOpenFail, m_url);
@@ -315,6 +316,26 @@ bool CXEngineMpv::cxOpenCore(const QString& url, bool glRoute)
         return false;
     }
     return true;
+}
+
+// loadfile 之前设置网络选项(mpv: http-proxy / http-header-fields)
+void CXEngineMpv::applyNetOptions()
+{
+    if (h_mpv == 0 || m_net.isEmpty()) return;
+    CxMpvApi& api = CxMpvApi::instance();
+    if (!m_net.proxy.isEmpty())
+        api.mpv_set_option_string(h_mpv, "http-proxy",
+                                  qToUtf8(m_net.proxy).data());
+    QString hf;
+    if (!m_net.referer.isEmpty())
+        hf += qFromUtf8("Referer: ") + m_net.referer;
+    if (!m_net.userAgent.isEmpty()) {
+        if (!hf.isEmpty()) hf += qFromUtf8(",");
+        hf += qFromUtf8("User-Agent: ") + m_net.userAgent;
+    }
+    if (!hf.isEmpty())
+        api.mpv_set_option_string(h_mpv, "http-header-fields",
+                                  qToUtf8(hf).data());
 }
 
 // M5-B:Quick 路二段起播入口(render_context 挂成后由宿主调)
@@ -325,6 +346,7 @@ bool CXEngineMpv::quickGo()
         return false;
     const QString u = m_quickUrl;
     m_quickUrl = QString(); // Qt3 无 QString::clear
+    applyNetOptions();
     QByteArray ba = qToUtf8(u);
     if (!cxMpvRunCmd2(api, h_mpv, "loadfile", ba.data())) {
         emit noticedError((int)CxErrOpenFail, u);

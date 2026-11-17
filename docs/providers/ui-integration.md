@@ -9,8 +9,9 @@
   （`lang/{zh-CN,zh-TW,en-US}.json`），缺译回退 id 原文。
 - 交互：只连 `activated(int)`（Qt3/Qt4 都有，程序填充不触发），
   **索引 → provider id 映射**，不做显示文本匹配。
-- Qt3/Qt4：`providers.pri` 走 stub，`createProviders()` 返回空 →
-  `setVideoSites({})` 整行隐藏，不显示死入口。
+- Qt3/Qt4/Qt6 同码：`providers.pri` 三档均编译真实源（依赖
+  `qlappcom/EventPoller` + libcurl）；`createProviders()` 返回 5 源。
+  仅当宿主未接入 providers（空表）时整行隐藏。
 
 ## 2. 分类 chips 一律动态拉取
 
@@ -39,7 +40,8 @@ UI 层零站点分类硬编码；无能力时退化为单个「推荐」chip（`
 
 `videothumbcache`（`EventPoller`/curl）：同一 URL 只请求一次，失败记账不重试；
 Referer 按图床域名推导（B站/小红书/YouTube/字节）；代理沿用 `QXVOTUBE_PROXY`。
-Qt3 构建为**空实现**（视频源 UI 不启用），ContentView 自动回落 identicon。
+Qt3/Qt4/Qt6 同一实现（Qt3 用 `QImage::loadFromData` + `QPixmap::convertFromImage`）；
+静态对象改为函数内静态，避免 Qt3 在 QApplication 之前构造 QPixmap。
 
 ## 5. 日志
 
@@ -89,3 +91,32 @@ QLVOTUBE_DEBUG=1 QXVOTUBE_PROXY=http://127.0.0.1:10809 xvfb-run -a ./qlvotube/bu
 - 抖音分类榜需 `a_bogus/Argus` 签名（见 `protocols/bytedance.md` §13）。
 - 小红书频道字段名需登录态真实 SSR 才能确认；当前探测不到即不显示。
 - YouTube 分类需可达代理（当前出口为空壳页），翻页还需 continuation 样本。
+
+## 8. 2026-11-17 补充修复（Qt3 实测暴露）
+
+- **协议相对封面**：B站搜索接口 `pic` 形如 `//i0.hdslb.com/...`。
+  provider 侧补 `https:`（`bili_parse.cpp::picUrl`），封面缓存再做一层 `normUrl` 防御。
+- **搜索标题高亮**：B站 `title` 含 `<em class="keyword">`，provider 侧 `stripTags` 剥除。
+- **搜索回车**：`SearchLineEdit` 之前只在有联想项时触发；现无联想项时用输入原文触发
+  （qlcomp 共享修复，qt3 实测 `search submitted: music`）。
+- **触底翻页**：滚轮滚动不经过 scrollbar 的 `valueChanged`，新增 `maybeLoadMore()`
+  在 `wheelEvent/onScroll` 共同调用（Qt3 实测 `near bottom -> loadMore` → p2 20 条）。
+- **Qt3 静态 QPixmap**：`QMap<QString,QPixmap>` 改为函数内静态，否则
+  Qt3 在 QApplication 创建前构造 QPixmap 直接 `qFatal`。
+
+## 9. 播放直链网络选项（2026-11-17 追加）
+
+B站等站点的媒体直链绑定「请求出口 IP + Referer/UA」，缺一即 403。
+本轮把选项打通到播放引擎：
+
+- `cxengine.h`：新增 `CxNetOptions{proxy, referer, userAgent}` 与
+  `CXEngine::setNetOptions()`（默认空实现，不影响既有宿主）。
+- `eng_ffmpeg`：`av_dict_set("headers", "Referer/User-Agent", …)` +
+  `av_dict_set("http_proxy", …)` 后 `avformat_open_input`。
+- `eng_mpv`：`loadfile` 前设置 `http-proxy` / `http-header-fields`（含 Quick 二段起播）。
+- `CXVideoPlayer::setNetOptions()`：`setEngine` 之后自动透传。
+- providers 补元数据：bilibili/红果/YouTube/小红书 的 `Stream.extra` 提供
+  `referer` / `userAgent`；UI 在播放前组装 `CxNetOptions`，
+  未显式指定 proxy 时沿用 `QXVOTUBE_PROXY`（与 API 同出口）。
+
+Qt3 实测：`pos=0→29000ms` 连续推进，无 `HTTP error 403`；Qt4 同样通过。

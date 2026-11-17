@@ -20,6 +20,7 @@ public:
     const char* name() const { return "mpv"; }
     bool isAvailable() const;
 
+    void setNetOptions(const CxNetOptions& o) { m_net = o; }
     bool open(const QString& url);
     void close();
     bool play();
@@ -72,7 +73,9 @@ private:
     void closeInternal();
     void dispatchEvent(const CXMpvUiEvent* ev);
     bool cxOpenCore(const QString& routeUrl, bool glRoute);
+    void applyNetOptions();   // loadfile 之前设置 proxy/headers
 
+    CxNetOptions m_net; // 直链代理/防盗链头
     void* h_mpv;       // mpv_handle*
     void* h_rc;        // mpv_render_context*(M4-B;0=wid 路)
     const char* m_renderPath;

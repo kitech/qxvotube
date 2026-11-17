@@ -1,13 +1,32 @@
 #include "parse.h"
 
-#include <QMap>
+#include <qmap.h>
 
 namespace qxv {
 namespace bilibili {
 namespace parse {
 
-QList<VideoItem> searchResult(cJSON* root) {
-    QList<VideoItem> out;
+// 搜索接口 title 带高亮标签(<em class="keyword">..</em>):剥掉
+static QString stripTags(const QString& s) {
+    QString out;
+    bool inTag = false;
+    for (int i = 0; i < s.length(); ++i) {
+        const QChar c = s.at(i);
+        if (c == QChar('<')) { inTag = true; continue; }
+        if (c == QChar('>')) { inTag = false; continue; }
+        if (!inTag) out.append(c);
+    }
+    return out;
+}
+
+// B站部分接口返回协议相对封面(//i0.hdslb.com/...):统一补 https:
+static QString picUrl(const QString& u) {
+    if (u.startsWith(qFromUtf8("//"))) return qFromUtf8("https:") + u;
+    return u;
+}
+
+QList36<VideoItem> searchResult(cJSON* root) {
+    QList36<VideoItem> out;
     cJSON* results = jarr(jobj(root, "data"), "result");
     for (int i = 0; i < jsize(results); ++i) {
         const cJSON* g = jat(results, i);          // result_type 分组
@@ -17,10 +36,10 @@ QList<VideoItem> searchResult(cJSON* root) {
             const cJSON* it = jat(data, k);
             VideoItem vi;
             vi.id     = jstr(it, "bvid");
-            vi.title  = jstr(it, "title");
+            vi.title  = stripTags(jstr(it, "title"));
             vi.author = jstr(it, "author");
             vi.uid    = QString::number(jint(it, "mid"));
-            vi.cover  = jstr(it, "pic");
+            vi.cover  = picUrl(jstr(it, "pic"));
             vi.durationMs = jint(it, "duration") * 1000;
             if (!vi.id.isEmpty()) out.append(vi);
         }
@@ -28,7 +47,7 @@ QList<VideoItem> searchResult(cJSON* root) {
     return out;
 }
 
-Result detailFromView(cJSON* root, VideoItem* viOut, QList<VideoItem>* partsOut) {
+Result detailFromView(cJSON* root, VideoItem* viOut, QList36<VideoItem>* partsOut) {
     const cJSON* data = jobj(root, "data");
     if (!data) return Result::fail(Err::Parse, qFromUtf8("bilibili: no data"));
     VideoItem vi;
@@ -36,7 +55,7 @@ Result detailFromView(cJSON* root, VideoItem* viOut, QList<VideoItem>* partsOut)
     vi.title  = jstr(data, "title");
     vi.author = jstr(jobj(data, "owner"), "name");
     vi.uid    = QString::number(jint(jobj(data, "owner"), "mid"));
-    vi.cover  = jstr(data, "pic");
+    vi.cover  = picUrl(jstr(data, "pic"));
     vi.durationMs = jint(data, "duration") * 1000;
     vi.extra.insert(qFromUtf8("desc"), jstr(data, "desc"));
     vi.extra.insert(qFromUtf8("tname"), jstr(data, "tname"));
@@ -46,7 +65,7 @@ Result detailFromView(cJSON* root, VideoItem* viOut, QList<VideoItem>* partsOut)
     vi.extra.insert(qFromUtf8("cid"), QString::number(jint(data, "cid")));
 
     // 分P:part.id 用 "bvid.cid" 复合形式 → 可直接喂 resolve/resolveQuality
-    QList<VideoItem> parts;
+    QList36<VideoItem> parts;
     cJSON* pages = jarr(data, "pages");
     for (int i = 0; i < jsize(pages); ++i) {
         const cJSON* p = jat(pages, i);
@@ -55,11 +74,9 @@ Result detailFromView(cJSON* root, VideoItem* viOut, QList<VideoItem>* partsOut)
         part.id = qFromUtf8("%1.%2").arg(vi.id, cid);
         part.title = jstr(p, "part");
         part.durationMs = jint(p, "duration") * 1000;
-        part.extra = QVariantMap{
-            { qFromUtf8("bvid"), vi.id },
-            { qFromUtf8("cid"), cid },
-            { qFromUtf8("page"), (long long)jint(p, "page") },
-        };
+        part.extra.insert(qFromUtf8("bvid"), vi.id);
+        part.extra.insert(qFromUtf8("cid"), cid);
+        part.extra.insert(qFromUtf8("page"), (long long)jint(p, "page"));
         parts.append(part);
     }
     if (viOut) *viOut = vi;
@@ -67,18 +84,18 @@ Result detailFromView(cJSON* root, VideoItem* viOut, QList<VideoItem>* partsOut)
     return Result::ok();
 }
 
-QList<VideoItem> popular(cJSON* root, bool* hasMore) {
+QList36<VideoItem> popular(cJSON* root, bool* hasMore) {
     const cJSON* data = jobj(root, "data");
-    QList<VideoItem> items;
+    QList36<VideoItem> items;
     cJSON* list = jarr(data, "list");
     for (int i = 0; i < jsize(list); ++i) {
         const cJSON* it = jat(list, i);
         VideoItem vi;
         vi.id     = jstr(it, "bvid");
-        vi.title  = jstr(it, "title");
+        vi.title  = stripTags(jstr(it, "title"));
         vi.author = jstr(jobj(it, "owner"), "name");
         vi.uid    = QString::number(jint(jobj(it, "owner"), "mid"));
-        vi.cover  = jstr(it, "pic");
+        vi.cover  = picUrl(jstr(it, "pic"));
         vi.durationMs = jint(it, "duration") * 1000;
         vi.extra.insert(qFromUtf8("aid"), (long long)jint(it, "aid"));
         vi.extra.insert(qFromUtf8("tname"), jstr(it, "tname"));
@@ -88,18 +105,18 @@ QList<VideoItem> popular(cJSON* root, bool* hasMore) {
     return items;
 }
 
-QList<VideoItem> newlist(cJSON* root, int page, bool* hasMore) {
+QList36<VideoItem> newlist(cJSON* root, int page, bool* hasMore) {
     const cJSON* data = jobj(root, "data");
     cJSON* arr = jarr(data, "archives");
-    QList<VideoItem> items;
+    QList36<VideoItem> items;
     for (int i = 0; i < jsize(arr); ++i) {
         const cJSON* it = jat(arr, i);
         VideoItem vi;
         vi.id     = jstr(it, "bvid");
-        vi.title  = jstr(it, "title");
+        vi.title  = stripTags(jstr(it, "title"));
         vi.author = jstr(jobj(it, "owner"), "name");
         vi.uid    = QString::number(jint(jobj(it, "owner"), "mid"));
-        vi.cover  = jstr(it, "pic");
+        vi.cover  = picUrl(jstr(it, "pic"));
         vi.durationMs = jint(it, "duration") * 1000;
         // 播放量:stat.view(部分响应为 0,UI 侧按 0 隐藏,不自造数据)
         vi.extra.insert(qFromUtf8("view"),
@@ -118,12 +135,12 @@ QList<VideoItem> newlist(cJSON* root, int page, bool* hasMore) {
     return items;
 }
 
-QList<CategoryItem> popularRegions(cJSON* root) {
+QList36<CategoryItem> popularRegions(cJSON* root) {
     const cJSON* data = jobj(root, "data");
     cJSON* list = jarr(data, "list");
     QMap<QString, int> hits;       // tid -> 出现次数
     QMap<QString, QString> names;  // tid -> tname
-    QList<QString> order;          // 首次出现顺序(同频次时保持稳定)
+    QList36<QString> order;          // 首次出现顺序(同频次时保持稳定)
     for (int i = 0; i < jsize(list); ++i) {
         const cJSON* it = jat(list, i);
         const long long tid = jint(it, "tid", 0);
@@ -134,19 +151,20 @@ QList<CategoryItem> popularRegions(cJSON* root) {
         hits[k] += 1;
         names[k] = tname;
     }
-    QList<CategoryItem> out;
+    QList36<CategoryItem> out;
     while (!order.isEmpty()) {     // 频次降序(同频次保持首次出现顺序)
         int best = 0;
         for (int i = 1; i < order.size(); ++i)
             if (hits[order[i]] > hits[order[best]]) best = i;
-        const QString k = order.takeAt(best);
-        out.append(CategoryItem(k, names.value(k)));
+        const QString k = order[best];
+        qstrListRemoveOne(order, k);
+        out.append(CategoryItem(k, names[k]));
     }
     return out;
 }
 
-QList<VideoItem> pageList(cJSON* root, const QString& bvid) {
-    QList<VideoItem> parts;
+QList36<VideoItem> pageList(cJSON* root, const QString& bvid) {
+    QList36<VideoItem> parts;
     cJSON* list = jarr(root, "data");
     for (int i = 0; i < jsize(list); ++i) {
         const cJSON* p = jat(list, i);
@@ -155,11 +173,9 @@ QList<VideoItem> pageList(cJSON* root, const QString& bvid) {
         part.id = qFromUtf8("%1.%2").arg(bvid, cid);
         part.title = jstr(p, "part");
         part.durationMs = jint(p, "duration") * 1000;
-        part.extra = QVariantMap{
-            { qFromUtf8("bvid"), bvid },
-            { qFromUtf8("cid"), cid },
-            { qFromUtf8("page"), (long long)jint(p, "page") },
-        };
+        part.extra.insert(qFromUtf8("bvid"), bvid);
+        part.extra.insert(qFromUtf8("cid"), cid);
+        part.extra.insert(qFromUtf8("page"), (long long)jint(p, "page"));
         parts.append(part);
     }
     return parts;

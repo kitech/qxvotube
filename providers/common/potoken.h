@@ -1,5 +1,5 @@
 #pragma once
-#include <QString>
+#include <qstring.h>
 #include <functional>
 
 // YouTube PO token 获取口(P2 风控对策):

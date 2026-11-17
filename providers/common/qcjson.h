@@ -3,14 +3,13 @@
 // 用法:JRoot root(body); checkApi 后用 jstr/jint/jobj/jarr 取值。
 // 禁用 QJson(Qt3 无此 API);所有解析一律走这里。
 // Qt3 头名小写口径同 qlcomp/compatcore34.h(QT3_BUILD 宏由引用方 .pro 定义)
+#include <qstring.h>
 #ifdef QT3_BUILD
-#include <qstring.h>   // 含 QByteArray(qcstring)
+#include <qcstring.h>
 #else
-#include <QString>
 #include <QByteArray>
 #endif
 #include "cJSON.h"
-
 namespace qxv {
 
 // RAII root:cJSON_Parse 出的对象树,析构统一 cJSON_Delete

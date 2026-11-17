@@ -53,12 +53,12 @@ static QString chField(const cJSON* o, const char* a, const char* b) {
     return v;
 }
 
-QList<CategoryItem> channelList(cJSON* root) {
+QList36<CategoryItem> channelList(cJSON* root) {
     static const char* kKeys[] = { "channel_list", "channels", "channel",
                                    "homefeedChannel" };
     for (size_t k = 0; k < sizeof(kKeys) / sizeof(kKeys[0]); ++k) {
         cJSON* arr = jarr(root, kKeys[k]);
-        QList<CategoryItem> out;
+        QList36<CategoryItem> out;
         for (int i = 0; i < jsize(arr); ++i) {
             const cJSON* it = jat(arr, i);
             const QString id   = chField(it, "id", "channel_id");
@@ -71,10 +71,10 @@ QList<CategoryItem> channelList(cJSON* root) {
         }
         if (!out.isEmpty()) return out;   // 命中即用,不再试其它键
     }
-    return QList<CategoryItem>();
+    return QList36<CategoryItem>();
 }
 
-QList<VideoItem> feedNotes(cJSON* root) {    QList<VideoItem> out;
+QList36<VideoItem> feedNotes(cJSON* root) {    QList36<VideoItem> out;
     const cJSON* feed = jobj(root, "feed");
     cJSON* feeds = jarr(feed, "feeds");
     for (int i = 0; i < jsize(feeds); ++i) {
@@ -88,8 +88,8 @@ QList<VideoItem> feedNotes(cJSON* root) {    QList<VideoItem> out;
     return out;
 }
 
-QList<VideoItem> userNotes(cJSON* root) {
-    QList<VideoItem> out;
+QList36<VideoItem> userNotes(cJSON* root) {
+    QList36<VideoItem> out;
     const cJSON* user = jobj(root, "user");
     cJSON* tabs = jarr(user, "notes");   // [[{id,noteCard,xsecToken}...], ...]
     for (int t = 0; t < jsize(tabs); ++t) {
@@ -114,13 +114,13 @@ QList<VideoItem> userNotes(cJSON* root) {
 }
 
 Result noteDetail(cJSON* root, const QString& noteId, VideoItem* viOut,
-                  QList<Stream>* streamsOut) {
+                  QList36<Stream>* streamsOut) {
     const cJSON* noteRoot = jobj(root, "note");
     const cJSON* map = jobj(noteRoot, "noteDetailMap");
     if (!map) return Result::fail(Err::Parse, qFromUtf8("xhs: no noteDetailMap"));
 
     const cJSON* entry = nullptr;
-    if (!noteId.isEmpty()) entry = jobj(map, noteId.toUtf8().constData());
+    if (!noteId.isEmpty()) entry = jobj(map, qToUtf8(noteId).data());
     if (!entry) {
         // 分享链接里 id 与返回 key 可能大小写/后缀不同:取第一个
         const cJSON* it = nullptr;
@@ -150,7 +150,7 @@ Result noteDetail(cJSON* root, const QString& noteId, VideoItem* viOut,
     cJSON* images = jarr(note, "imageList");
     if (jsize(images) > 0) vi.cover = coverUrl(jat(images, 0));
 
-    QList<Stream> streams;
+    QList36<Stream> streams;
     const cJSON* video = jobj(note, "video");
     if (video) {
         const cJSON* streamRoot = jobj(jobj(video, "media"), "stream");
@@ -209,20 +209,20 @@ Result noteDetail(cJSON* root, const QString& noteId, VideoItem* viOut,
 
 bool parseShareUrl(const QString& url, QString* noteId, QString* xsecToken) {
     // 形如 .../explore/<24hex>?xsec_token=xxx&xsec_source=pc_share
-    const int ex = url.indexOf(qFromUtf8("/explore/"));
+    const int ex = qIndexOf(url, qFromUtf8("/explore/"));
     if (ex >= 0) {
         const int start = ex + 9;
-        int end = url.indexOf('?', start);
-        if (end < 0) end = url.indexOf('/', start);
-        if (end < 0) end = url.size();
+        int end = qIndexOf(url, qFromUtf8("?"), start);
+        if (end < 0) end = qIndexOf(url, qFromUtf8("/"), start);
+        if (end < 0) end = url.length();
         const QString id = url.mid(start, end - start);
         if (!id.isEmpty() && noteId) *noteId = id;
     }
-    const int t = url.indexOf(qFromUtf8("xsec_token="));
+    const int t = qIndexOf(url, qFromUtf8("xsec_token="));
     if (t >= 0) {
         const int start = t + 11;
-        int end = url.indexOf('&', start);
-        if (end < 0) end = url.size();
+        int end = qIndexOf(url, qFromUtf8("&"), start);
+        if (end < 0) end = url.length();
         if (xsecToken) *xsecToken = url.mid(start, end - start);
     }
     return (noteId && !noteId->isEmpty());

@@ -39,19 +39,19 @@ int main(int argc, char** argv) {
                 Result res, const QList<VideoItem>& items, bool) {
             if (res.code == Err::Unsupported || res.code == Err::NeedAuth) {
                 // 能力不支持/需登录(抖音仅热榜、小红书搜索)= 跳过,不算失败
-                std::printf("[skip] %-9s search: %s\n", qPrintable(pid),
-                            qPrintable(res.message));
+                std::printf("[skip] %-9s search: %s\n", qToUtf8(pid).data(),
+                            qToUtf8(res.message).data());
                 done(); return;
             }
             if (res.code != Err::Ok || items.isEmpty()) {
                 std::printf("[FAIL] %-9s search: code=%d msg=%s\n",
-                            qPrintable(pid), int(res.code),
-                            qPrintable(res.message));
+                            qToUtf8(pid).data(), int(res.code),
+                            qToUtf8(res.message).data());
                 ++failures;
                 done(); return;
             } else {
                 std::printf("[ ok ] %-9s search: %d items, first=%s\n",
-                            qPrintable(pid), items.size(),
+                            qToUtf8(pid).data(), items.size(),
                             qPrintable(items.first().title));
                 // 再走 resolve 链
                 const QString vid = items.first().id;
@@ -60,8 +60,8 @@ int main(int argc, char** argv) {
                                    const QList<VideoItem>& parts) {
                     if (res2.code != Err::Ok || parts.isEmpty()) {
                         std::printf("[FAIL] %-9s detail %s: %s\n",
-                                    qPrintable(pid), qPrintable(vid),
-                                    qPrintable(res2.message));
+                                    qToUtf8(pid).data(), qToUtf8(vid).data(),
+                                    qToUtf8(res2.message).data());
                         ++failures;
                         done(); return;
                     } else {
@@ -69,12 +69,12 @@ int main(int argc, char** argv) {
                                               Result res3, const PlayResult& pr) {
                             if (res3.code != Err::Ok || pr.streams.isEmpty()) {
                                 std::printf("[FAIL] %-9s resolve: %s\n",
-                                            qPrintable(pid),
-                                            qPrintable(res3.message));
+                                            qToUtf8(pid).data(),
+                                            qToUtf8(res3.message).data());
                                 ++failures;
                             } else {
                                 std::printf("[ ok ] %-9s resolve: %d streams, "
-                                            "url=%s\n", qPrintable(pid),
+                                            "url=%s\n", qToUtf8(pid).data(),
                                             pr.streams.size(),
                                             qPrintable(pr.streams.first()
                                                            .url.left(60)));
@@ -92,20 +92,20 @@ int main(int argc, char** argv) {
                                       " AppleWebKit/537.36" },
                                 };
                                 if (pid == qFromUtf8("youtube"))
-                                    fr.proxy = QXV_ENV("QXVOTUBE_PROXY");
+                                    fr.proxy = qenv("QXVOTUBE_PROXY");
                                 fetch.send(fr, [pid, &done, &failures](
                                                    const NetResponse& nr) {
                                     const int n = nr.body.size();
                                     if (nr.ok() && n > 0) {
                                         std::printf("[ ok ] %-9s streamhead: "
                                                     "%d bytes, head=%.8s\n",
-                                                    qPrintable(pid), n,
+                                                    qToUtf8(pid).data(), n,
                                                     nr.body.constData());
                                     } else {
                                         std::printf("[FAIL] %-9s streamhead: "
                                                     "status=%d %s\n",
-                                                    qPrintable(pid), nr.status,
-                                                    qPrintable(nr.error));
+                                                    qToUtf8(pid).data(), nr.status,
+                                                    qToUtf8(nr.error).data());
                                         ++failures;
                                     }
                                     done();

@@ -9,7 +9,7 @@ bool Result::retriable() const {
     case Err::RateLimit:
         return true;
     case Err::Http: {
-        const int st = detail.value("httpStatus").toInt();
+        const int st = qMapValue(detail, qFromUtf8("httpStatus"), QVariant()).toInt();
         return st >= 500 && st < 600;
     }
     default:

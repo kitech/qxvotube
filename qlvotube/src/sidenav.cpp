@@ -97,7 +97,7 @@ void SideNav::onSearchSubmitted(const QString& text)
 #ifdef QT3_BUILD
     const QString kw = text.stripWhiteSpace();
 #else
-    const QString kw = text.trimmed();
+    const QString kw = qTrim(text);
 #endif
     if (kw.isEmpty()) return;
 #if QT_VERSION >= 0x060000

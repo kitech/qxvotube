@@ -1,7 +1,5 @@
 #pragma once
-#include <QByteArray>
-#include <QList>
-#include <QtGlobal>
+#include "compat.h"
 
 // 红果 CENC 密文 mp4 的 box 解析(手写,禁字符串搜索——流式对齐需偏移精确)。
 // 口径对齐 zhangbaio/hongguo frida/decutil.py + oracle.py:
@@ -17,8 +15,8 @@ struct TrackInfo {
     quint32 ivSize = 0;         // tenc.default_IV_size(8/16)
     QByteArray kid;             // tenc.default_KID(16B)
     quint64 baseIv = 0;         // 本轨 senc 首样本 IV 前 8 字节(BE)
-    QList<quint32> sampleSizes; // stsz
-    QList<quint64> sampleOffsets; // stco/co64 + stsc 展开后的样本绝对偏移
+    QList36<quint32> sampleSizes; // stsz
+    QList36<quint64> sampleOffsets; // stco/co64 + stsc 展开后的样本绝对偏移
 };
 
 // 遍历 [off,end) 内的一层 box;cb(type 四字符, box 内容区起始偏移, 内容长度)。
@@ -30,7 +28,7 @@ bool walkBoxes(const QByteArray& buf, quint64 off, quint64 end, BoxCb cb,
 
 // 解析全部加密轨(视频/音频)。只处理带 senc 的轨;未加密轨跳过。
 // 返回 0 成功;-1 结构不符(moov/trak/stbl 缺失等)。
-int findTracks(const QByteArray& buf, QList<TrackInfo>& out);
+int findTracks(const QByteArray& buf, QList36<TrackInfo>& out);
 
 } // namespace hgcenc
 } // namespace qxv

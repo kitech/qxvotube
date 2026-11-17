@@ -30,6 +30,7 @@ public:
     const char* name() const { return "ffmpeg"; }
     bool isAvailable() const { return true; }
 
+    void setNetOptions(const CxNetOptions& o) { m_net = o; }
     bool open(const QString& url);
     void close();
     bool play();
@@ -84,6 +85,7 @@ private:
     void cxScanSub(long ms); // 字幕轴查询/变化即 emit(仅 UI 线程)
     bool reopenAt(long posMs, bool wasPlaying); // 换轨重启
 
+    CxNetOptions m_net;      // 直链代理/防盗链头
     void* m_fmtCtx;          // AVFormatContext*
     CxPacketQueue* m_vq;
     CxPacketQueue* m_aq;

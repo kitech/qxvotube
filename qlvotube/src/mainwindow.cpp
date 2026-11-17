@@ -26,9 +26,7 @@
 #include "eqdialog.h"
 #include "providers/common/provider.h"
 #include "providers/common/errortext.h"
-#if QT_VERSION >= 0x050000
 #include "providers/common/debuglog.h"   /* QXVOTUBE_DEBUG → providers 分级日志 */
-#endif
 #include "videoui.h"
 #include "videothumbcache.h"
 #include "translator.h"
@@ -156,9 +154,7 @@ MainWindow::MainWindow(QWidget* parent)
     , videoPane(0)
     , m_glRenderer(0)
     , m_eqDialog(0)
-#if QT_VERSION >= 0x050000
     , m_curProv(0)
-#endif
     , m_gridPage(1)
     , m_gridHasMore(false)
     , m_gridLoading(false)
@@ -991,27 +987,7 @@ void MainWindow::tryPlayTrack(const Track& t)
         QTimer::singleShot(800, this, SLOT(onQaAutoSub()));
 }
 
-// ── 视频源(providers)接线 ──────────────────────────────────────────
-#if QT_VERSION < 0x050000
-/* Qt3/Qt4:providers 只编 stub(createProviders()==0 源)→ 隐藏站点入口。
- * 真实实现依赖 Qt>=5 API(QUrlQuery/JSON 等),老 Qt 不启用视频源 UI。 */
-void MainWindow::setupVideoProviders()
-{
-    if (getenv("QLVOTUBE_DEBUG") != 0)
-#if QT_VERSION >= 0x060000
-        qDebug() << "providers: stub build (video sources disabled)";
-#else
-        qDebug("providers: stub build (video sources disabled)");
-#endif
-    if (sideNav) sideNav->setVideoSites(QStringList());
-}
-void MainWindow::onSiteChanged(const QString&) {}
-void MainWindow::onChipActivated(const QString&) {}
-void MainWindow::onVideoActivated(const QString&) {}
-void MainWindow::onGridLoadMore() {}
-void MainWindow::onSearchSubmitted(const QString&) {}
-void MainWindow::showVideoError(const QString&, const QString&, qxv::Err) {}
-#else
+// ── 视频源(providers)接线 ──
 void MainWindow::setupVideoProviders()
 {
     dbg::loadFromEnv();   /* QXVOTUBE_DEBUG="模块:级别" 生效 */
@@ -1030,8 +1006,8 @@ void MainWindow::setupVideoProviders()
     const char* px = getenv("QXVOTUBE_PROXY");
     if (px && *px) {                             /* http://host:port */
         const QString s = qFromUtf8(px);
-        const int c1 = s.indexOf(qFromUtf8("://"));
-        const int c2 = s.lastIndexOf(QLatin1Char(':'));
+        const int c1 = qIndexOf(s, qFromUtf8("://"));
+        const int c2 = qLastIndexOf(s, qFromUtf8(":"));
         if (c1 > 0 && c2 > c1) {
             pc.enabled = true;
             pc.host = s.mid(c1 + 3, c2 - c1 - 3);
@@ -1093,7 +1069,7 @@ void MainWindow::onSiteChanged(const QString& providerId)
     qxv::VideoProvider* p = m_curProv;
     const int gen = m_gridGen;
     p->categories([this, providerId, gen](const qxv::Result& r,
-                                     const QList<qxv::CategoryItem>& cats) {
+                                     const QList36<qxv::CategoryItem>& cats) {
         VideoUiEvent* ev = new VideoUiEvent(VideoUiEvent::Categories);
         ev->gen = gen;
         ev->text = providerId;
@@ -1131,7 +1107,7 @@ void MainWindow::loadVideoPage(int page)
     }
     qxv::SearchCb done = [this, page, chip, site, gen](
                         const qxv::Result& r,
-                        const QList<qxv::VideoItem>& items, bool hasMore) {
+                        const QList36<qxv::VideoItem>& items, bool hasMore) {
         VideoUiEvent* ev = new VideoUiEvent(VideoUiEvent::Page);
         ev->gen = gen;
         ev->page = page;
@@ -1152,7 +1128,8 @@ void MainWindow::loadVideoPage(int page)
             d.cover = items[i].cover;
             d.durationMs = items[i].durationMs;
             d.playCount =
-                items[i].extra.value(qFromUtf8("view")).toLongLong();
+                qMapValue(items[i].extra, qFromUtf8("view"), QVariant())
+                    .toLongLong();
             ev->cards.push_back(d);
         }
         if (getenv("QLVOTUBE_DEBUG") != 0) {
@@ -1214,7 +1191,7 @@ void MainWindow::onSearchSubmitted(const QString& kw)
     m_videoMode = false;
     m_videoIdx = -1;
     contentView->showVideoGrid(
-        _A("content.search_result", QStringList() << kw),
+        _("content.search_result").arg(kw),
         m_chipList, QString());
     loadVideoPage(1);
 }
@@ -1317,13 +1294,20 @@ void MainWindow::playVideoAt(int index)
             ev->text = qFromUtf8("|err|") + QString::number((int)r.code)
                        + qFromUtf8("|") + r.message;
         } else {
-            ev->text = pr.streams.first().url;
+            const qxv::Stream& st = pr.streams.first();
+            ev->text = st.url;
+            ev->referer = qMapValue(st.extra, qFromUtf8("referer"),
+                                    qMapValue(st.extra, qFromUtf8("Referer"),
+                                              QVariant())).toString();
+            ev->userAgent = qMapValue(st.extra, qFromUtf8("userAgent"),
+                                      qMapValue(st.extra, qFromUtf8("User-Agent"),
+                                                QVariant())).toString();
+            ev->proxy = qMapValue(st.extra, qFromUtf8("proxy"),
+                                  QVariant()).toString();
         }
         QApplication::postEvent(this, ev);
     });
 }
-
-#endif  // QT3_BUILD(视频源 UI)
 
 void MainWindow::onTrackActivated(int playlistId, int trackIndex)
 {
@@ -1664,13 +1648,11 @@ void MainWindow::onSeekRequested(int ms)
 
 void MainWindow::onPrev()
 {
-#if QT_VERSION >= 0x050000
     if (m_videoMode && !m_videoIds.empty()) {
         const int n = (int)m_videoIds.size();
         playVideoAt((m_videoIdx - 1 + n) % n);   /* 回绕,与音频一致 */
         return;
     }
-#endif
     if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
         playArgvAt(m_argvIdx - 1);   /* 到头回绕 */
         return;
@@ -1686,7 +1668,6 @@ void MainWindow::onPrev()
 
 void MainWindow::onNext()
 {
-#if QT_VERSION >= 0x050000
     if (m_videoMode && !m_videoIds.empty()) {
         if (m_videoIdx + 1 >= (int)m_videoIds.size()) {
             if (playerBar) playerBar->setPlaying(false);   /* 播完停 */
@@ -1695,7 +1676,6 @@ void MainWindow::onNext()
         playVideoAt(m_videoIdx + 1);
         return;
     }
-#endif
     if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
         playArgvAt(m_argvIdx + 1);
         return;
@@ -1802,7 +1782,6 @@ void MainWindow::dropEvent(QDropEvent* e)
 
 void MainWindow::customEvent(CustomEventBase* event)
 {
-#if QT_VERSION >= 0x050000
     if (event->type() == VideoUiEventType) {
         VideoUiEvent* e = static_cast<VideoUiEvent*>(event);
         if (e->gen != m_gridGen) {          /* 切源/切分类后旧响应 */
@@ -1819,7 +1798,7 @@ void MainWindow::customEvent(CustomEventBase* event)
         }
         if (e->kind == VideoUiEvent::Categories) {
             QString site = e->text;
-            const int sep = site.indexOf(qFromUtf8("|err|"));
+            const int sep = qIndexOf(site, qFromUtf8("|err|"));
             QString why;
             if (sep >= 0) {
                 why = site.mid(sep + 5);
@@ -1854,12 +1833,12 @@ void MainWindow::customEvent(CustomEventBase* event)
             return;
         }
         if (e->kind == VideoUiEvent::Page) {
-            const int sep = e->text.indexOf(qFromUtf8("|err|"));
+            const int sep = qIndexOf(e->text, qFromUtf8("|err|"));
             if (sep >= 0) {
                 const QString site = e->text.left(sep);
                 const QString rest = e->text.mid(sep + 5);
-                const int code = rest.section(QLatin1Char('|'), 0, 0).toInt();
-                const QString msg = rest.section(QLatin1Char('|'), 1);
+                const int code = rest.section(QChar('|'), 0, 0).toInt();
+                const QString msg = rest.section(QChar('|'), 1);
                 m_gridLoading = false;
                 showVideoError(site + qFromUtf8(" p")
                                    + QString::number(e->page), msg,
@@ -1896,8 +1875,8 @@ void MainWindow::customEvent(CustomEventBase* event)
         if (e->kind == VideoUiEvent::Status) {
             if (e->text.startsWith(qFromUtf8("|err|"))) {
                 const QString rest = e->text.mid(5);
-                const int code = rest.section(QLatin1Char('|'), 0, 0).toInt();
-                const QString msg = rest.section(QLatin1Char('|'), 1);
+                const int code = rest.section(QChar('|'), 0, 0).toInt();
+                const QString msg = rest.section(QChar('|'), 1);
                 const QString head =
                     _(qToUtf8(qxv::i18nKeyFor((qxv::Err)code)).data());
                 QString text = head;
@@ -1913,12 +1892,32 @@ void MainWindow::customEvent(CustomEventBase* event)
                 t.playable = true;
             } else {
                 t.id = -1;
-                t.title = m_videoTitles.value(e->chipKey, e->chipKey);
+                t.title = qMapValue(m_videoTitles, e->chipKey, e->chipKey);
                 t.url = e->text;
                 t.playable = true;
                 t.durationMs = 0;
                 t.ncmId = 0;
                 t.albumId = 0;
+            }
+            if (m_player) {
+                CxNetOptions no;
+                no.referer = e->referer;
+                no.userAgent = e->userAgent;
+                no.proxy = e->proxy;
+                if (no.proxy.isEmpty()) no.proxy = qenv("QXVOTUBE_PROXY");
+                m_player->setNetOptions(no);
+                if (getenv("QLVOTUBE_DEBUG") != 0) {
+#if QT_VERSION >= 0x060000
+                    qDebug() << "media net: referer" << no.referer
+                             << "ua" << (no.userAgent.isEmpty() ? "-" : "+")
+                             << "proxy" << no.proxy;
+#else
+                    qDebug("media net: referer %s ua %d proxy %s",
+                           qToUtf8(no.referer).data(),
+                           int(!no.userAgent.isEmpty()),
+                           qToUtf8(no.proxy).data());
+#endif
+                }
             }
             tryPlayTrack(t);
             switchToPlayerView(true);
@@ -1926,8 +1925,6 @@ void MainWindow::customEvent(CustomEventBase* event)
         }
         return;   /* postEvent 投递的事件由事件循环自动删除 */
     }
-#endif  // QT3_BUILD(VideoUiEvent)
-
     if (event->type() == ApiResultReadyType) {
         ApiHttpResultEvent* e = static_cast<ApiHttpResultEvent*>(event);
         if (e->resp.curlErrStr.empty()) {

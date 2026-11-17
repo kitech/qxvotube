@@ -19,7 +19,7 @@ std::string mediaCacheKey(const char* prefix, const QString& mxcUrl) {
     int slash = mxcUrl.lastIndexOf('/');
     if (slash < 0) return {};
     QString id = mxcUrl.mid(slash + 1);
-    int q = id.indexOf('?');
+    int q = id.indexOf(QLatin1Char('?'));
     if (q >= 0) id = id.left(q);
     return std::string(prefix) + "_" + std::string(id.toUtf8().data());
 #endif

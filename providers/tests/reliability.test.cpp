@@ -24,7 +24,7 @@ int g_fail = 0;
 
 void check(bool ok, const char* what, const QString& got = QString()) {
     if (ok) std::printf("[ ok ] %s\n", what);
-    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qPrintable(got)); }
+    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qToUtf8(got).data()); }
 }
 } // namespace
 

@@ -2,7 +2,7 @@
 #include "compat.h"
 #include "result.h"
 
-#include <QVariantMap>
+#include <qvariant.h>
 
 // 认证方式感知的错误模型(2026-11-15):
 //   输出错误时必须能区分:cookie / oauth / 用户名密码 / 无凭证(游客)，
@@ -39,17 +39,17 @@ struct AuthContext {
 // 从 provider 通用凭证推断:优先 cookie → token(oauth) → username/password
 inline AuthContext credContext(const QVariantMap& cred) {
     AuthContext c;
-    if (!cred.value(qFromUtf8("cookie")).toString().trimmed().isEmpty()) {
+    if (!qTrim(qMapValue(cred, qFromUtf8("cookie"), QVariant()).toString()).isEmpty()) {
         c.mode = AuthMode::Cookie;
         c.provided = true;
         return c;
     }
-    if (!cred.value(qFromUtf8("token")).toString().trimmed().isEmpty()) {
+    if (!qTrim(qMapValue(cred, qFromUtf8("token"), QVariant()).toString()).isEmpty()) {
         c.mode = AuthMode::OAuth;
         c.provided = true;
         return c;
     }
-    if (!cred.value(qFromUtf8("username")).toString().trimmed().isEmpty()) {
+    if (!qTrim(qMapValue(cred, qFromUtf8("username"), QVariant()).toString()).isEmpty()) {
         c.mode = AuthMode::Password;
         c.provided = true;
     }
@@ -58,8 +58,8 @@ inline AuthContext credContext(const QVariantMap& cred) {
 
 // 脱敏服务器消息(简化空白→含去 CR/LF,超长截断)
 inline QString sanitizeServerMsg(const QString& raw, int maxLen = 120) {
-    QString s = raw.simplified();
-    if (s.size() > maxLen) s = s.left(maxLen) + qFromUtf8("…");
+    QString s = qSimplified(raw);
+    if (s.length() > maxLen) s = s.left(maxLen) + qFromUtf8("…");
     return s;
 }
 
@@ -81,7 +81,7 @@ inline Result authFail(Err code, const AuthContext& ctx, const QString& devMsg,
     if (!serverMsg.isEmpty())
         r.detail.insert(qFromUtf8("server.message"), sanitizeServerMsg(serverMsg));
     for (QVariantMap::const_iterator it = extra.begin(); it != extra.end(); ++it)
-        r.detail.insert(it.key(), it.value());
+        r.detail.insert(it.key(), *it);
     return r;
 }
 
@@ -98,7 +98,7 @@ inline Result withServer(Result r, int httpStatus,
 }
 
 inline AuthMode authModeOf(const Result& r) {
-    const QString m = r.detail.value(qFromUtf8("auth.mode")).toString();
+    const QString m = qMapValue(r.detail, qFromUtf8("auth.mode"), QVariant()).toString();
     if (m == qFromUtf8("cookie")) return AuthMode::Cookie;
     if (m == qFromUtf8("oauth")) return AuthMode::OAuth;
     if (m == qFromUtf8("password")) return AuthMode::Password;

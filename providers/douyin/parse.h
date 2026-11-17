@@ -3,7 +3,7 @@
 #include "common/provider.h"
 #include "common/qcjson.h"
 
-#include <QList>
+#include <qlist.h>
 
 // 抖音响应解析(纯函数,供 provider 与离线 fixture 单测共用)。
 namespace qxv {
@@ -13,7 +13,7 @@ namespace parse {
 // 热榜 /aweme/v1/web/hot/search/list/ → data.word_list[]
 // id="hot:<group_id>", title=word, extra: hotValue/videoCount/discussCount/
 // rank/kind=hotword/cover
-QList<VideoItem> hotWords(cJSON* root);
+QList36<VideoItem> hotWords(cJSON* root);
 
 } // namespace parse
 } // namespace douyin

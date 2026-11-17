@@ -26,7 +26,14 @@ bool CXVideoPlayer::setEngine(CxEngineType type)
     else
         m_engine = cxEngineCreateFor(type);
     wireEngine();
+    if (m_engine) m_engine->setNetOptions(m_net);
     return m_engine != 0;
+}
+
+void CXVideoPlayer::setNetOptions(const CxNetOptions& o)
+{
+    m_net = o;
+    if (m_engine) m_engine->setNetOptions(o);
 }
 
 void CXVideoPlayer::setRenderer(CXVideoRenderer* r){

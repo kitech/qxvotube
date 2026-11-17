@@ -2,9 +2,9 @@
 #include "compat.h"
 #include "result.h"
 
-#include <QDateTime>
-#include <QMap>
-#include <QString>
+#include <qdatetime.h>
+#include <qmap.h>
+#include <qstring.h>
 
 // 直链缓存(TTL):CDN 直链带时效(红果 ~6h / bilibili ~2h / YouTube expire=...),
 // 过期后必须重新 resolve,否则播放器报 403。
@@ -17,17 +17,17 @@
 namespace qxv {
 namespace streamcache {
 
-inline qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
+inline qint64 nowMs() { return wallMs(); }
 
 // 从 URL 查询串解析 expire=<unix 秒>(YouTube googlevideo 等),
 // 返回 min(fallbackMs, expire-now-60s);解析不到/已过期返回 0。
 inline qint64 ttlFromUrl(const QString& url, qint64 fallbackMs) {
     qint64 ttl = fallbackMs;
-    const int i = url.indexOf(qFromUtf8("expire="));
+    const int i = qIndexOf(url, qFromUtf8("expire="));
     if (i >= 0) {
         int j = i + 7;
         QString digits;
-        while (j < url.size()) {
+        while (j < url.length()) {
             const QChar c = url.at(j);
             if (c >= QChar('0') && c <= QChar('9')) { digits.append(c); ++j; }
             else break;
@@ -48,8 +48,8 @@ public:
     bool get(const QString& key, PlayResult* out) {
         QMap<QString, Entry>::iterator it = m_.find(key);
         if (it == m_.end()) return false;
-        if (nowMs() >= it->expiresAt) { m_.erase(it); return false; }
-        if (out) *out = it->pr;
+        if (nowMs() >= (*it).expiresAt) { m_.erase(it); return false; }
+        if (out) *out = (*it).pr;
         return true;
     }
 

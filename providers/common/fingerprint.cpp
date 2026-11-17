@@ -1,6 +1,6 @@
 #include "compat.h"
 #include "fingerprint.h"
-#include <QDate>
+#include <qdatetime.h>
 
 namespace qxv {
 
@@ -10,25 +10,30 @@ static QString chromeVer() {
     return QString::number(110 + (year - 2023) * 12);
 }
 
-static QVector<QPair<QString, QString>> webHeaders(const QString& ua,
+static NetHeaders webHeaders(const QString& ua,
                                                    const QString& lang,
                                                    const QString& brand,
                                                    const QString& platform) {
     const QString v = chromeVer();
-    return {
-        { "User-Agent", ua },
-        { "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
-        { "Accept-Language", lang },
-        { "Accept-Encoding", "gzip, deflate" },   // 主动不设 br(httplib 不支持)
-        { "sec-ch-ua", QString("\"%1\";v=\"%2\", \"Chromium\";v=\"%2\", \"Not=A?Brand\";v=\"24\"").arg(brand, v) },
-        { "sec-ch-ua-mobile", qFromUtf8("?%1").arg(platform == qFromUtf8("mobile") ? 1 : 0) },
-        { "sec-ch-ua-platform", platform == qFromUtf8("mobile")
-                                   ? qFromUtf8("\"Android\"") : qFromUtf8("\"Windows\"") },
-        { "Sec-Fetch-Dest", "document" },
-        { "Sec-Fetch-Mode", "navigate" },
-        { "Sec-Fetch-Site", "none" },
-        { "Upgrade-Insecure-Requests", "1" },
-    };
+    NetHeaders h;
+    h.append(qMakePair(qFromUtf8("User-Agent"), ua));
+    h.append(qMakePair(qFromUtf8("Accept"),
+        qFromUtf8("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")));
+    h.append(qMakePair(qFromUtf8("Accept-Language"), lang));
+    h.append(qMakePair(qFromUtf8("Accept-Encoding"), qFromUtf8("gzip, deflate")));
+    h.append(qMakePair(qFromUtf8("sec-ch-ua"),
+        QString::fromUtf8("\"%1\";v=\"%2\", \"Chromium\";v=\"%2\", \"Not=A?Brand\";v=\"24\"")
+            .arg(brand, v)));
+    h.append(qMakePair(qFromUtf8("sec-ch-ua-mobile"),
+        qFromUtf8("?%1").arg(platform == qFromUtf8("mobile") ? 1 : 0)));
+    h.append(qMakePair(qFromUtf8("sec-ch-ua-platform"),
+        platform == qFromUtf8("mobile") ? qFromUtf8("\"Android\"")
+                                        : qFromUtf8("\"Windows\"")));
+    h.append(qMakePair(qFromUtf8("Sec-Fetch-Dest"), qFromUtf8("document")));
+    h.append(qMakePair(qFromUtf8("Sec-Fetch-Mode"), qFromUtf8("navigate")));
+    h.append(qMakePair(qFromUtf8("Sec-Fetch-Site"), qFromUtf8("none")));
+    h.append(qMakePair(qFromUtf8("Upgrade-Insecure-Requests"), qFromUtf8("1")));
+    return h;
 }
 
 Fingerprint Fingerprint::chromeWeb(const QString& langTag) {
@@ -59,10 +64,9 @@ Fingerprint Fingerprint::appClient(const QString& userAgent) {
     Fingerprint f;
     f.userAgent = userAgent;
     f.deviceName = qFromUtf8("app-%1").arg(userAgent.left(24));
-    f.headers = {
-        { "User-Agent", userAgent },
-        { "Accept-Encoding", "gzip, deflate" },
-    };
+    f.headers.append(qMakePair(qFromUtf8("User-Agent"), userAgent));
+    f.headers.append(qMakePair(qFromUtf8("Accept-Encoding"),
+                               qFromUtf8("gzip, deflate")));
     return f;
 }
 

@@ -5,10 +5,10 @@ namespace hongguo {
 namespace parse {
 
 bool extractRouterData(const QByteArray& html, JRoot& out) {
-    const QByteArray key("_ROUTER_DATA");
-    const int at = html.indexOf(key);
+    const QByteArray key = qbaFromCharptr("_ROUTER_DATA");
+    const int at = qIndexOf(html, key);
     if (at < 0) return false;
-    const char* start = html.constData() + at + key.size();
+    const char* start = html.data() + at + key.size();
     const size_t left = static_cast<size_t>(html.size() - at - key.size());
     // 跳过到 '=' 之后第一个 '{'
     int off = 0;
@@ -19,9 +19,9 @@ bool extractRouterData(const QByteArray& html, JRoot& out) {
     return out.ok();
 }
 
-QList<VideoItem> searchList(cJSON* root, int page, bool* hasMore) {
+QList36<VideoItem> searchList(cJSON* root, int page, bool* hasMore) {
     cJSON* list = jarr(root, "searchList");
-    QList<VideoItem> items;
+    QList36<VideoItem> items;
     for (int i = 0; i < jsize(list); ++i) {
         const cJSON* it = jat(list, i);
         const cJSON* vd = jobj(it, "video_data");
@@ -59,7 +59,7 @@ QList<VideoItem> searchList(cJSON* root, int page, bool* hasMore) {
 }
 
 // 单个 section 的条目解析(homeSections / homeSection 共用)
-static void sectionItems(const cJSON* sec, QList<VideoItem>* out) {
+static void sectionItems(const cJSON* sec, QList36<VideoItem>* out) {
     cJSON* list = jarr(sec, "video_list");
     const QString tab = jstr(sec, "tab_type");
     for (int i = 0; i < jsize(list); ++i) {
@@ -79,19 +79,19 @@ static void sectionItems(const cJSON* sec, QList<VideoItem>* out) {
     }
 }
 
-QList<VideoItem> homeSections(cJSON* root) {
+QList36<VideoItem> homeSections(cJSON* root) {
     const cJSON* pageObj = jobj(jobj(root, "loaderData"), "page");
     cJSON* sections = jarr(pageObj, "homeSections");
-    QList<VideoItem> items;
+    QList36<VideoItem> items;
     for (int s = 0; s < jsize(sections); ++s)
         sectionItems(jat(sections, s), &items);
     return items;
 }
 
-QList<CategoryItem> homeTabs(cJSON* root) {
+QList36<CategoryItem> homeTabs(cJSON* root) {
     const cJSON* pageObj = jobj(jobj(root, "loaderData"), "page");
     cJSON* sections = jarr(pageObj, "homeSections");
-    QList<CategoryItem> out;
+    QList36<CategoryItem> out;
     for (int s = 0; s < jsize(sections); ++s) {
         const cJSON* sec = jat(sections, s);
         const QString type = jstr(sec, "tab_type");
@@ -106,10 +106,10 @@ QList<CategoryItem> homeTabs(cJSON* root) {
     return out;
 }
 
-QList<VideoItem> homeSection(cJSON* root, const QString& tab) {
+QList36<VideoItem> homeSection(cJSON* root, const QString& tab) {
     const cJSON* pageObj = jobj(jobj(root, "loaderData"), "page");
     cJSON* sections = jarr(pageObj, "homeSections");
-    QList<VideoItem> items;
+    QList36<VideoItem> items;
     for (int s = 0; s < jsize(sections); ++s) {
         const cJSON* sec = jat(sections, s);
         if (jstr(sec, "tab_type") == tab) sectionItems(sec, &items);
@@ -117,7 +117,7 @@ QList<VideoItem> homeSection(cJSON* root, const QString& tab) {
     return items;
 }
 
-QList<VideoItem> rankList(cJSON* root, int page, bool* hasMore) {
+QList36<VideoItem> rankList(cJSON* root, int page, bool* hasMore) {
     const cJSON* ld = jobj(root, "loaderData");
     const cJSON* pg = nullptr;
     if (ld) {
@@ -127,7 +127,7 @@ QList<VideoItem> rankList(cJSON* root, int page, bool* hasMore) {
             if (cJSON_IsObject(it) && jobj(it, "content")) { pg = it; break; }
         }
     }
-    QList<VideoItem> items;
+    QList36<VideoItem> items;
     if (!pg) { if (hasMore) *hasMore = false; return items; }
     const cJSON* content = jobj(pg, "content");
     cJSON* list = jarr(content, "rankList");
@@ -152,7 +152,7 @@ QList<VideoItem> rankList(cJSON* root, int page, bool* hasMore) {
     return items;
 }
 
-Result seriesDetail(cJSON* root, VideoItem* viOut, QList<VideoItem>* partsOut) {
+Result seriesDetail(cJSON* root, VideoItem* viOut, QList36<VideoItem>* partsOut) {
     const cJSON* sd = jobj(jobj(jobj(root, "loaderData"), "detail_page"),
                            "seriesDetail");
     if (!sd) return Result::fail(Err::Parse,
@@ -171,7 +171,7 @@ Result seriesDetail(cJSON* root, VideoItem* viOut, QList<VideoItem>* partsOut) {
     vi.extra.insert(qFromUtf8("accessibleEpisodeCnt"), accessible);
     vi.extra.insert(qFromUtf8("payType"), (long long)jint(sd, "pay_type"));
 
-    QList<VideoItem> parts;
+    QList36<VideoItem> parts;
     cJSON* vids = jarr(sd, "vid_list");
     for (int i = 0; i < jsize(vids); ++i) {
         VideoItem part;

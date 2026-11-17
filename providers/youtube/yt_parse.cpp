@@ -6,8 +6,8 @@ namespace qxv {
 namespace youtube {
 namespace parse {
 
-QList<VideoItem> searchItems(cJSON* root) {
-    QList<VideoItem> items;
+QList36<VideoItem> searchItems(cJSON* root) {
+    QList36<VideoItem> items;
     // 通用递归遍历(结构随版本改版,不写死路径):
     //   WEB  → videoRenderer;ANDROID/IOS → compactVideoRenderer
     std::function<void(cJSON*)> walk = [&](cJSON* n) {
@@ -85,8 +85,8 @@ QString continuation(cJSON* n) {
     return QString();
 }
 
-QList<QString> playlistVideoIds(cJSON* n, int cap) {
-    QList<QString> out;
+QList36<QString> playlistVideoIds(cJSON* n, int cap) {
+    QList36<QString> out;
     if (!n || cap <= 0) return out;
     if (cJSON_IsObject(n)) {
         if (cJSON* we = cJSON_GetObjectItemCaseSensitive(n, "watchEndpoint")) {
@@ -99,7 +99,7 @@ QList<QString> playlistVideoIds(cJSON* n, int cap) {
         }
         cJSON* ch;
         cJSON_ArrayForEach(ch, n) {
-            const QList<QString> sub = playlistVideoIds(ch, cap - out.size());
+            const QList36<QString> sub = playlistVideoIds(ch, cap - out.size());
             for (int i = 0; i < sub.size(); ++i)
                 if (!out.contains(sub[i])) out.append(sub[i]);
             if (out.size() >= cap) break;
@@ -107,7 +107,7 @@ QList<QString> playlistVideoIds(cJSON* n, int cap) {
     } else if (cJSON_IsArray(n)) {
         cJSON* ch;
         cJSON_ArrayForEach(ch, n) {
-            const QList<QString> sub = playlistVideoIds(ch, cap - out.size());
+            const QList36<QString> sub = playlistVideoIds(ch, cap - out.size());
             for (int i = 0; i < sub.size(); ++i)
                 if (!out.contains(sub[i])) out.append(sub[i]);
             if (out.size() >= cap) break;

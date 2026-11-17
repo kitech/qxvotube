@@ -27,7 +27,7 @@ void check(bool ok, const char* what, const QString& got = QString()) {
         std::printf("[ ok ] %s\n", what);
     } else {
         ++g_fail;
-        std::printf("[FAIL] %s %s\n", what, qPrintable(got));
+        std::printf("[FAIL] %s %s\n", what, qToUtf8(got).data());
     }
 }
 
@@ -87,10 +87,10 @@ void runChecks(hgapp::Track track) {
                         track.url, track.spadeA, &url);
     check(r.code == Err::Ok, "open session", r.message);
     if (r.code != Err::Ok) { QCoreApplication::exit(1); return; }
-    std::printf("[info] local url: %s\n", qPrintable(url));
+    std::printf("[info] local url: %s\n", qToUtf8(url).data());
 
     const int port = srv.port();
-    const QString path = url.mid(url.indexOf('/', 7));   // /hg/<token>.mp4
+    const QString path = url.mid(qIndexOf(url, qFromUtf8("/"), 7));   // /hg/<token>.mp4
     const QString token = srv.tokenOf(QString::fromUtf8("probe"),
                                       track.definition);
 
@@ -144,7 +144,7 @@ void runChecks(hgapp::Track track) {
             pclose(p);
         }
         check(out.contains(qFromUtf8("hevc")) || out.contains(qFromUtf8("h264")),
-              "ffprobe decodes codec", out.trimmed());
+              "ffprobe decodes codec", qTrim(out));
         // 真解码 30 帧(ffprobe 只读头;这里让解码器真吃数据)
         const std::string dcmd = "ffmpeg -v error -i '" + url.toStdString()
                                + "' -frames:v 30 -f null - 2>&1";
@@ -156,8 +156,8 @@ void runChecks(hgapp::Track track) {
             while (fgets(buf, sizeof(buf), dp)) derr += QString::fromUtf8(buf);
             drc = pclose(dp);
         }
-        check(drc == 0 && derr.trimmed().isEmpty(),
-              "ffmpeg decodes 30 frames", derr.trimmed().left(300));
+        check(drc == 0 && qTrim(derr).isEmpty(),
+              "ffmpeg decodes 30 frames", qTrim(derr).left(300));
     }
 
     // 6) 会话回收(释放引用 + 2s 静默)
@@ -179,7 +179,7 @@ void runChecks(hgapp::Track track) {
     check(r2.code == Err::Ok && srv.stats().running, "server restarted",
           r2.message);
     if (r2.code == Err::Ok) {
-        const QString p2 = url2.mid(url2.indexOf('/', 7));
+        const QString p2 = url2.mid(qIndexOf(url2, qFromUtf8("/"), 7));
         HttpResult e = getRange(srv.port(), p2, 0, 65536);
         check(e.status == 206 && !e.body.isEmpty(), "restarted stream serves");
         srv.release(QString::fromUtf8("probe"), track.definition);
@@ -202,7 +202,7 @@ int main(int argc, char** argv) {
 
     hgapp::videoModel(vid, [](const Result& r, const QList<hgapp::Track>& tracks) {
         if (r.code != Err::Ok) {
-            std::printf("[FAIL] videoModel: %s\n", qPrintable(r.message));
+            std::printf("[FAIL] videoModel: %s\n", qToUtf8(r.message).data());
             QCoreApplication::exit(1);
             return;
         }
@@ -212,8 +212,8 @@ int main(int argc, char** argv) {
             QCoreApplication::exit(1);
             return;
         }
-        std::printf("[ ok ] track: %s/%s\n", qPrintable(best->definition),
-                    qPrintable(best->codecType));
+        std::printf("[ ok ] track: %s/%s\n", qToUtf8(best->definition).data(),
+                    qToUtf8(best->codecType).data());
         runChecks(*best);
     });
 

@@ -7,9 +7,14 @@
 
 namespace qxv {
 
-QList<VideoProvider*> createProviders() {
-    return { new BilibiliProvider(), new YoutubeProvider(), new HongguoProvider(),
-             new DouyinProvider(), new XiaohongshuProvider() };
+QList36<VideoProvider*> createProviders() {
+    QList36<VideoProvider*> l;
+    l.append(new BilibiliProvider());
+    l.append(new YoutubeProvider());
+    l.append(new HongguoProvider());
+    l.append(new DouyinProvider());
+    l.append(new XiaohongshuProvider());
+    return l;
 }
 
 } // namespace qxv

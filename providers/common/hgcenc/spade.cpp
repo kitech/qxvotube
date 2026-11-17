@@ -1,6 +1,6 @@
 #include "spade.h"
 
-#include <QVector>
+#include <qvector.h>
 
 // 口径与 zhangbaio/hongguo frida/unwrap_spade.py 逐行对齐:
 //   bVar5 = spade[0]^spade[1]^spade[2]      初级种子

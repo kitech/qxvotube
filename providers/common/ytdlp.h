@@ -1,8 +1,8 @@
 #pragma once
 #include "common/compat.h"
 
-#include <QList>
-#include <QString>
+#include <qlist.h>
+#include <qstring.h>
 #include <functional>
 
 // yt-dlp 可选后端(2026-11-15):
@@ -33,7 +33,7 @@ struct Info {
     QString err;
     QString title;
     QString hlsMaster;   // HLS 多码率主播放列表(hls_variant),含音频
-    QList<Format> formats;
+    QList36<Format> formats;
 };
 
 // 是否可用:显式 env 优先;否则探测 PATH 里是否有 yt-dlp

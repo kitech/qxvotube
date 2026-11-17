@@ -1,7 +1,7 @@
 #pragma once
-#include <QVector>
-#include <QPair>
-#include <QString>
+#include "compat.h"
+#include <qpair.h>
+#include <qstring.h>
 
 // 浏览器/客户端指纹档位:
 //  - Web 档:Chrome UA + sec-ch-ua 全套 + Accept-Language(与 locale 一致)
@@ -9,7 +9,7 @@
 namespace qxv {
 
 struct Fingerprint {
-    QVector<QPair<QString, QString>> headers;  // 含 UA;不含 Cookie
+    NetHeaders headers;  // 含 UA;不含 Cookie
     QString userAgent;
     QString deviceName;                        // 档案名(日志/持久化键)
 

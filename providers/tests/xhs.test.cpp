@@ -18,7 +18,7 @@ namespace {
 int g_fail = 0;
 void check(bool ok, const char* what, const QString& got = QString()) {
     if (ok) std::printf("[ ok ] %s\n", what);
-    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qPrintable(got)); }
+    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qToUtf8(got).data()); }
 }
 } // namespace
 
@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
             QCoreApplication::exit(1);
             return;
         }
-        std::printf("[info] video note: %s\n", qPrintable(target));
+        std::printf("[info] video note: %s\n", qToUtf8(target).data());
 
         const QString ref = target + QString::fromUtf8("@") + token;
         xhs->resolve(ref, [xhs, uid](Result r2, const PlayResult& pr) {
@@ -72,12 +72,12 @@ int main(int argc, char** argv) {
                 return;
             }
             const Stream& s = pr.streams.first();
-            std::printf("[info] stream %s %s\n", qPrintable(s.quality),
+            std::printf("[info] stream %s %s\n", qToUtf8(s.quality).data(),
                         qPrintable(s.url.left(70)));
             check(s.url.startsWith(QString::fromUtf8("https://")), "https 直链");
 
             // 注意:Client(host,port) 恒明文;https 必须 scheme 形式
-            const int sp = s.url.indexOf(QString::fromUtf8("://"));
+            const int sp = qIndexOf(s.url, QString::fromUtf8("://"));
             const int slash = s.url.indexOf(QLatin1Char('/'), sp + 3);
             httplib::Client cli(
                 s.url.left(slash).toStdString());
@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
                     // 用户页 SSR 在本 IP 上常被软风控(37KB 壳)→ 记 skip
                     if (r3.code == Err::RateLimit || r3.code == Err::CaptchaRequired) {
                         std::printf("[skip] userVideos: 软风控(%s)\n",
-                                    qPrintable(r3.message));
+                                    qToUtf8(r3.message).data());
                     } else {
                         check(r3.code == Err::Ok && !v.isEmpty(),
                               "userVideos 元数据", r3.message);

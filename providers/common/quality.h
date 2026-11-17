@@ -1,8 +1,8 @@
 #pragma once
 #include "compat.h"
 
-#include <QString>
-#include <QStringList>
+#include <qstring.h>
+#include <qstringlist.h>
 
 // 全仓统一的清晰度词汇(2026-11-15):
 //   144/160/240/360/480/540/720/1080/1440/2160(大小写不敏感,"720p"/"720P" 等价)
@@ -16,11 +16,11 @@ namespace qxv {
 namespace quality {
 
 inline int heightOf(const QString& q) {
-    const QString s = q.trimmed().toLower();
+    const QString s = qToLower(qTrim(q));
     if (s.isEmpty() || s == qFromUtf8("auto") || s == qFromUtf8("best"))
         return 0;
     QString digits;
-    for (int i = 0; i < s.size(); ++i) {
+    for (int i = 0; i < s.length(); ++i) {
         const QChar ch = s.at(i);
         if (ch >= QChar('0') && ch <= QChar('9')) digits.append(ch);
         else break;
@@ -40,7 +40,7 @@ inline QString labelFor(int height) {
 inline QString bestAtMost(const QStringList& avail, int wantHeight) {
     int best = -1, lowest = -1;
     for (int i = 0; i < avail.size(); ++i) {
-        const int h = heightOf(avail.at(i));
+        const int h = heightOf(avail[i]);
         if (h <= 0) continue;
         if (lowest < 0 || h < lowest) lowest = h;
         if (wantHeight <= 0 || h <= wantHeight) {

@@ -15,7 +15,7 @@ using namespace qxv;
 static int g_fail = 0;
 static void check(bool ok, const char* what, const QString& got = QString()) {
     if (ok) std::printf("[ ok ] %s\n", what);
-    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qPrintable(got)); }
+    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qToUtf8(got).data()); }
 }
 
 int main(int argc, char** argv) {

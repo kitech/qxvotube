@@ -3,8 +3,8 @@
 #include "common/localstream/localstream.h"
 #include "common/result.h"
 
-#include <QList>
-#include <QString>
+#include <qlist.h>
+#include <qstring.h>
 
 // 红果 CENC 密文 → 本地明文流(hgstream)。HTTP/会话/生命周期全部由
 // common/localstream 承担;本层只做:
@@ -45,7 +45,7 @@ public:
     void release(const QString& vid, const QString& quality);
 
     // 调试/测试:该会话前 n 个样本(偏移/大小,是否视频轨)
-    QList<SampleRef> samplesOf(const QString& token, int n) const;
+    QList36<SampleRef> samplesOf(const QString& token, int n) const;
     QString tokenOf(const QString& vid, const QString& quality) const;
 
     void setProxy(const QString& proxy);

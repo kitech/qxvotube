@@ -8,11 +8,12 @@
 #include "common/qcjson.h"
 #include "parse.h"
 #include "common/quality.h"
+#if QT_VERSION >= 0x050000
 #include "common/ytdlp.h"
-#include "common/autherror.h"
 #include "common/localstream/localstream.h"
+#endif
+#include "common/autherror.h"
 
-#include <QUrlQuery>
 #include <functional>
 
 // InnerTube(游客口径,yt-dlp/pytubefix 同款):
@@ -75,13 +76,13 @@ static const YtClient& kDefaultClient = kClients[0];
 
 // 从首页 HTML 的 ytcfg 里抓 visitorData(访客身份;必须随 X-Goog-Visitor-Id 头发送)
 static QString parseVisitorData(const QByteArray& html) {
-    static const QByteArray k("\"visitorData\":\"");
-    int i = html.indexOf(k);
+    static const QByteArray k = qbaFromCharptr("\"visitorData\":\"");
+    int i = qIndexOf(html, k);
     if (i < 0) return QString();
     i += k.size();
-    const int j = html.indexOf('"', i);
+    const int j = qIndexOf(html, qFromUtf8("\""), i);
     if (j < 0) return QString();
-    return QString::fromUtf8(html.mid(i, j - i));
+    return qFromUtf8(qbaData(qbaMid(html, i, j - i)), j - i);
 }
 
 void YoutubeProvider::innertube(const QString& endpoint, const QByteArray& body,
@@ -101,14 +102,14 @@ void YoutubeProvider::innertube(const QString& endpoint, const QByteArray& body,
         pre.autoCookie = true;
         pre.proxy = m_proxy.enabled
             ? qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port)
-            : QXV_ENV("QXVOTUBE_PROXY");
+            : qenv("QXVOTUBE_PROXY");
         m_net.send(pre, [this, endpoint, body, ua, cb, visitorId, noCookie](
                              const NetResponse& wr) {
             // 预热响应里的 visitorData = 本会话访客身份(后续请求必须带上)
             if (m_visitorData.isEmpty())
                 m_visitorData = parseVisitorData(wr.body);
             if (!m_visitorData.isEmpty())
-                DBG_P(kMod, Debug, "visitorData %d chars", m_visitorData.size());
+                DBG_P(kMod, Debug, "visitorData %d chars", m_visitorData.length());
             innertube(endpoint, body, ua, cb, visitorId, noCookie);
         });
         return;
@@ -136,18 +137,18 @@ void YoutubeProvider::innertube(const QString& endpoint, const QByteArray& body,
     if (m_proxy.enabled) {
         req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
     } else {
-        req.proxy = QXV_ENV("QXVOTUBE_PROXY");
+        req.proxy = qenv("QXVOTUBE_PROXY");
     }
     req.maxAttempts = 3;      // 429/5xx/传输错误统一退避重试
     req.retryDelayMs = 400;   // YouTube 经代理,退避稍长
-    DBG_P(kMod, Debug, "POST /%s (%d bytes)", qPrintable(endpoint), body.size());
+    DBG_P(kMod, Debug, "POST /%s (%d bytes)", qToUtf8(endpoint).data(), body.size());
     m_net.send(req, std::move(cb));
 }
 
 // cJSON 构造 body(自动转义 kw 等),打印后即弃
 static QByteArray dumpBody(cJSON* root) {
     char* s = cJSON_PrintUnformatted(root);
-    const QByteArray b = QByteArray(s);
+    const QByteArray b = qbaFromCharptr(s);
     cJSON_free(s);
     cJSON_Delete(root);
     return b;
@@ -168,12 +169,12 @@ static QByteArray playerBody(const QString& videoId, const Potoken& p) {
         cJSON_AddStringToObject(cli, "clientVersion", "2.20260101.00.00");
         if (!p.visitorData.isEmpty())
             cJSON_AddStringToObject(cli, "visitorData",
-                                    p.visitorData.toUtf8().constData());
+                                    qToUtf8(p.visitorData).data());
         cJSON_AddStringToObject(cli, "hl", "en");
         cJSON_AddStringToObject(cli, "gl", "US");
         cJSON* sid = cJSON_AddObjectToObject(root,
                                              "serviceIntegrityDimensions");
-        cJSON_AddStringToObject(sid, "poToken", p.token.toUtf8().constData());
+        cJSON_AddStringToObject(sid, "poToken", qToUtf8(p.token).data());
     } else {
         // 默认 ANDROID 客户端(2026-11-15 实测:formats=itag18 360p 直链,
         // 免 PoToken/免 decipher;ANDROID_VR 在该 IP 上被 bot 拦截)
@@ -190,7 +191,7 @@ static QByteArray playerBody(const QString& videoId, const Potoken& p) {
         cJSON_AddStringToObject(cli, "hl", "en");
         cJSON_AddStringToObject(cli, "gl", "US");
     }
-    cJSON_AddStringToObject(root, "videoId", videoId.toUtf8().constData());
+    cJSON_AddStringToObject(root, "videoId", qToUtf8(videoId).data());
     cJSON_AddBoolToObject(root, "contentCheckOk", 1);
     cJSON_AddBoolToObject(root, "racyCheckOk", 1);
     return dumpBody(root);
@@ -215,7 +216,7 @@ static QByteArray searchBody(const QString& kw) {
     cJSON* root = cJSON_CreateObject();
     cJSON* ctx = cJSON_AddObjectToObject(root, "context");
     addClient(cJSON_AddObjectToObject(ctx, "client"), kDefaultClient);
-    cJSON_AddStringToObject(root, "query", kw.toUtf8().constData());
+    cJSON_AddStringToObject(root, "query", qToUtf8(kw).data());
     return dumpBody(root);
 }
 
@@ -224,7 +225,7 @@ static QByteArray continuationBody(const QString& token) {
     cJSON* root = cJSON_CreateObject();
     cJSON* ctx = cJSON_AddObjectToObject(root, "context");
     addClient(cJSON_AddObjectToObject(ctx, "client"), kDefaultClient);
-    cJSON_AddStringToObject(root, "continuation", token.toUtf8().constData());
+    cJSON_AddStringToObject(root, "continuation", qToUtf8(token).data());
     return dumpBody(root);
 }
 
@@ -236,7 +237,7 @@ static Result playability(const cJSON* root,
     const QString st = jstr(ps, "status");
     if (st == qFromUtf8("OK")) return Result::ok();
     const QString reason = jstr(ps, "reason");
-    const QString low = reason.toLower();
+    const QString low = qToLower(reason);
     const QString devMsg =
         qFromUtf8("youtube playability %1: %2").arg(st, reason);
 
@@ -270,7 +271,7 @@ void YoutubeProvider::search(const QString& kw, int page, SearchCb cb) {
     // 仍空则显式 Err::RateLimit(不再静默回 0 条)。
     QString contToken;
     if (page > 1) {
-        contToken = m_searchTokens.value(kw).value(page);
+        contToken = m_searchTokens[kw][page];   // Qt3 QMap 无 value()
         if (contToken.isEmpty()) {
             cb(Result::fail(Err::Parse,
                qFromUtf8("youtube: 第 %1 页 token 缺失(需按序翻页 1→N)").arg(page)),
@@ -290,7 +291,7 @@ void YoutubeProvider::search(const QString& kw, int page, SearchCb cb) {
       [this, cb, kw, page, sp, attempt](const NetResponse& r) {
         const bool transient = !r.ok() || r.status >= 500
             || r.body.size() < 1024
-            || r.body.contains(QByteArray("backendError"));
+            || qIndexOf(r.body, qFromUtf8("backendError")) >= 0;
         if (transient && attempt < 3) {
             DBG_P(kMod, Debug, "search transient (status=%d %d bytes) retry %d",
                   r.status, r.body.size(), attempt + 1);
@@ -300,7 +301,7 @@ void YoutubeProvider::search(const QString& kw, int page, SearchCb cb) {
         if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}, false); return; }
         JRoot root(r.body);
         if (!root.ok()) { cb(Result::fail(Err::Parse, "not json"), {}, false); return; }
-        const QList<VideoItem> items = youtube::parse::searchItems(root.p);
+        const QList36<VideoItem> items = youtube::parse::searchItems(root.p);
         // 分页:本页响应里的 token 指向 page+1(超过 16 个关键词则清空缓存)
         const QString next = youtube::parse::continuation(root.p);
         if (!next.isEmpty()) {
@@ -308,9 +309,9 @@ void YoutubeProvider::search(const QString& kw, int page, SearchCb cb) {
             m_searchTokens[kw][page + 1] = next;
         }
         DBG_P(kMod, Debug, "search '%s' p%d -> %d items (next=%d)",
-              qPrintable(kw), page, items.size(), int(!next.isEmpty()));
+              qToUtf8(kw).data(), page, items.size(), int(!next.isEmpty()));
         if (items.isEmpty()) {
-            DBG_P(kMod, Trace, "search empty body head: %.400s", r.body.constData());
+            DBG_P(kMod, Trace, "search empty body head: %.400s", r.body.data());
             cb(Result::fail(Err::RateLimit,
                qFromUtf8("youtube search 空结果(风控/改版,已重试 %1 次)")
                    .arg(attempt)), {}, false);
@@ -325,7 +326,7 @@ void YoutubeProvider::search(const QString& kw, int page, SearchCb cb) {
 // ── 分类:首页 ytInitialData 里的 chip bar(动态,不硬编码分类名) ──
 // 现状:该出口 IP 的首页是空壳(无 ytInitialData/chips)→ Unsupported;
 //      换可达代理后同一段代码自动生效。
-static void walkChips(const cJSON* node, QList<CategoryItem>* out)
+static void walkChips(const cJSON* node, QList36<CategoryItem>* out)
 {
     if (!node) return;
     if (cJSON_IsObject(node)) {
@@ -350,9 +351,9 @@ static void walkChips(const cJSON* node, QList<CategoryItem>* out)
 // 从 HTML 里取 var ytInitialData = {...};(花括号配平 + 字符串感知)
 static bool extractInitialData(const QByteArray& html, JRoot& out)
 {
-    const int at = html.indexOf("ytInitialData");
+    const int at = qIndexOf(html, "ytInitialData");
     if (at < 0) return false;
-    const int brace = html.indexOf('{', at);
+    const int brace = qIndexOf(html, qFromUtf8("{"), at);
     if (brace < 0) return false;
     int depth = 0, end = -1;
     bool inStr = false, esc = false;
@@ -369,7 +370,7 @@ static bool extractInitialData(const QByteArray& html, JRoot& out)
         else if (ch == '}') { if (--depth == 0) { end = i; break; } }
     }
     if (end < 0) return false;
-    out.p = cJSON_ParseWithLengthOpts(html.constData() + brace,
+    out.p = cJSON_ParseWithLengthOpts(html.data() + brace,
                                       (size_t)(end - brace + 1), nullptr, 0);
     return out.ok();
 }
@@ -388,11 +389,11 @@ void YoutubeProvider::webGetHtml(
     req.maxAttempts = 2;
     if (m_proxy.enabled)
         req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
-    DBG_P(kMod, Info, "GET %s", qPrintable(req.url));
+    DBG_P(kMod, Info, "GET %s", qToUtf8(req.url).data());
     m_net.send(req, [cb](const NetResponse& r) {
         if (!r.ok()) {
             DBG_P(kMod, Warn, "html http=%d err=%s", r.status,
-                  qPrintable(r.error));
+                  qToUtf8(r.error).data());
             cb(Result::fail(Err::Network, r.error.isEmpty()
                    ? qFromUtf8("http %1").arg(r.status) : r.error), {});
             return;
@@ -402,7 +403,7 @@ void YoutubeProvider::webGetHtml(
 }
 
 void YoutubeProvider::categories(
-    std::function<void(const Result&, const QList<CategoryItem>&)> cb)
+    std::function<void(const Result&, const QList36<CategoryItem>&)> cb)
 {
     webGetHtml(qFromUtf8("/?hl=en&gl=US"),
                [cb](const Result& r, const QByteArray& html) {
@@ -415,7 +416,7 @@ void YoutubeProvider::categories(
                qFromUtf8("youtube: 首页无初始数据(IP 被判空壳)")), {});
             return;
         }
-        QList<CategoryItem> chips;
+        QList36<CategoryItem> chips;
         walkChips(root.p, &chips);
         DBG_P(kMod, Info, "categories: %d chips", chips.size());
         if (chips.isEmpty()) {
@@ -433,7 +434,7 @@ void YoutubeProvider::categoryFeed(const QString& key, int page, SearchCb cb)
     if (key.isEmpty()) { homeFeed(page, cb); return; }
     // 翻页需要 continuation,当前无任何 chip 样本可验证 → 不假翻页
     DBG_P(kMod, Warn, "categoryFeed: 无 chips 样本/continuation,暂不支持"
-                      " (key=%s p%d)", qPrintable(key), page);
+                      " (key=%s p%d)", qToUtf8(key).data(), page);
     cb(Result::fail(Err::Unsupported,
        qFromUtf8("youtube: 分类列表暂不可用(首页空壳,无 continuation 样本)")),
        {}, false);
@@ -452,8 +453,8 @@ void YoutubeProvider::homeFeed(int page, SearchCb cb) {
 
 // 播放列表:id 形如 PL.../UU.../OL.../FL.../RD...(长度 > 11)
 static bool looksLikePlaylist(const QString& id) {
-    if (id.size() <= 11) return false;
-    const QString p = id.left(2).toUpper();
+    if (id.length() <= 11) return false;
+    const QString p = qToUpper(id.left(2));
     return p == qFromUtf8("PL") || p == qFromUtf8("UU") || p == qFromUtf8("OL")
         || p == qFromUtf8("FL") || p == qFromUtf8("RD");
 }
@@ -481,19 +482,19 @@ void YoutubeProvider::detail(const QString& id, DetailCb cb) {
         cJSON_AddStringToObject(cli, "hl", "en");
         cJSON_AddStringToObject(cli, "gl", "US");
         cJSON_AddStringToObject(root, "browseId",
-                                qFromUtf8("VL%1").arg(id).toUtf8().constData());
+                                qToUtf8(qFromUtf8("VL%1").arg(id)).data());
         const QByteArray body = dumpBody(root);
         innertube("browse", body, kDefaultClient.ua,
             [cb, id](const NetResponse& r) {
             if (!r.ok()) {
                 cb(withServer(Result::fail(Err::Network, r.error), r.status,
-                              QString(), QString::fromUtf8(r.body.left(200))),
+                              QString(), qbaHead(r.body, 200)),
                    {}, {});
                 return;
             }
             JRoot root2(r.body);
             if (!root2.ok()) { cb(Result::fail(Err::Parse, "not json"), {}, {}); return; }
-            const QList<QString> ids = youtube::parse::playlistVideoIds(root2.p, 100);
+            const QList36<QString> ids = youtube::parse::playlistVideoIds(root2.p, 100);
             if (ids.isEmpty()) {
                 cb(Result::fail(Err::Parse,
                    qFromUtf8("youtube: 播放列表无条目(风控/改版)")), {}, {});
@@ -503,7 +504,7 @@ void YoutubeProvider::detail(const QString& id, DetailCb cb) {
             vi.id = id;
             vi.title = id;   // 列表标题在 header 渲染器里,ANDROID 未稳定提供
             vi.extra.insert(qFromUtf8("playlist"), true);
-            QList<VideoItem> parts;
+            QList36<VideoItem> parts;
             for (int i = 0; i < ids.size(); ++i) {
                 VideoItem part;
                 part.id = ids[i];
@@ -511,7 +512,7 @@ void YoutubeProvider::detail(const QString& id, DetailCb cb) {
                 part.extra.insert(qFromUtf8("index"), i);
                 parts.append(part);
             }
-            DBG_P(kMod, Debug, "playlist %s -> %d items", qPrintable(id),
+            DBG_P(kMod, Debug, "playlist %s -> %d items", qToUtf8(id).data(),
                   parts.size());
             cb(Result::ok(), vi, parts);
         }, QString(), true);
@@ -525,7 +526,7 @@ void YoutubeProvider::detail(const QString& id, DetailCb cb) {
             [this, cb, id](const NetResponse& r) {
             if (!r.ok()) {
                 cb(withServer(Result::fail(Err::Network, r.error), r.status,
-                              QString(), QString::fromUtf8(r.body.left(200))),
+                              QString(), qbaHead(r.body, 200)),
                    {}, {});
                 return;
             }
@@ -547,7 +548,7 @@ void YoutubeProvider::detail(const QString& id, DetailCb cb) {
                             jstr(vd, "shortDescription"));
             // 注:ANDROID player 响应不含章节(chapter/macroMarkers 全空),
             //     章节需 WEB 渲染器 → 暂不提供(文档已记)。
-            cb(Result::ok(), vi, QList<VideoItem>{ vi });   // 单视频
+            { QList36<VideoItem> one; one.append(vi); cb(Result::ok(), vi, one); }   // 单视频
         }, p.visitorData, true);
     });
 }
@@ -563,12 +564,13 @@ void YoutubeProvider::resolveQuality(const QString& id, const QString& quality,
     {
         PlayResult cached;
         if (m_cache.get(ckey, &cached)) {
-            DBG_P(kMod, Debug, "resolve cache hit %s", qPrintable(id));
+            DBG_P(kMod, Debug, "resolve cache hit %s", qToUtf8(id).data());
             cb(Result::ok(), cached);
             return;
         }
     }
     const int want = quality::heightOf(quality);
+#if QT_VERSION >= 0x050000
     // >360p 且 yt-dlp 可用 → DASH 合流;其余走 progressive(itag18)
     if (want > 360 && ytdlp::enabled()) {
         resolveDash(id, quality, want, [this, id, quality, cb, ckey](
@@ -580,27 +582,29 @@ void YoutubeProvider::resolveQuality(const QString& id, const QString& quality,
                 return;
             }
             DBG_P(kMod, Info, "dash failed (%s) -> progressive fallback",
-                  qPrintable(r.message));
+                  qToUtf8(r.message).data());
             resolveProgressive(id, quality, cb);
         });
         return;
     }
+#endif
     resolveProgressive(id, quality, cb);
 }
 
+#if QT_VERSION >= 0x050000
 // 拉 HLS 主播放列表并按请求高度裁剪(保留 #EXT-X-MEDIA 音频轨)
 static QByteArray trimHlsMaster(const QByteArray& master, int wantHeight) {
-    const QList<QByteArray> lines = master.split('\n');
+    const QList36<QByteArray> lines = master.split('\n');
     QByteArray chosenInf, chosenUri;
     int best = -1, lowest = -1;
     QByteArray lowestInf, lowestUri;
     for (int i = 0; i + 1 < lines.size(); ++i) {
         const QByteArray l = lines[i].trimmed();
         if (!l.startsWith("#EXT-X-STREAM-INF")) continue;
-        const int rp = l.indexOf("RESOLUTION=");
+        const int rp = qIndexOf(l, "RESOLUTION=");
         int h = 0;
         if (rp >= 0) {
-            const int x = l.indexOf('x', rp);
+            const int x = qIndexOf(l, qFromUtf8("x"), rp);
             int e = x + 1;
             while (e < l.size() && l[e] >= '0' && l[e] <= '9') ++e;
             if (x > 0 && e > x + 1) h = l.mid(x + 1, e - x - 1).toInt();
@@ -638,8 +642,8 @@ void YoutubeProvider::resolveDash(const QString& id, const QString& quality,
     const QString url = qFromUtf8("https://www.youtube.com/watch?v=%1").arg(id);
     const QString proxy = m_proxy.enabled
         ? qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port)
-        : QXV_ENV("QXVOTUBE_PROXY");
-    DBG_P(kMod, Debug, "dash/hls: yt-dlp fetch %s (want<=%dp)", qPrintable(id),
+        : qenv("QXVOTUBE_PROXY");
+    DBG_P(kMod, Debug, "dash/hls: yt-dlp fetch %s (want<=%dp)", qToUtf8(id).data(),
           wantHeight);
     ytdlp::fetch(url, proxy, [this, id, quality, wantHeight, proxy, cb](
                                  const ytdlp::Info& info) {
@@ -689,11 +693,13 @@ void YoutubeProvider::resolveDash(const QString& id, const QString& quality,
             pr.streams.append(st);
             DBG_P(kMod, Info, "hls ready: <=%dp (master %d bytes -> %d bytes) %s",
                   wantHeight, r.body.size(), trimmed.size(),
-                  qPrintable(localUrl));
+                  qToUtf8(localUrl).data());
             cb(Result::ok(), pr);
         });
     });
 }
+
+#endif  // resolveDash/trimHlsMaster(Qt4+)
 
 void YoutubeProvider::resolveProgressive(const QString& id, const QString& quality,
                                         ResolveCb cb) {
@@ -722,13 +728,17 @@ void YoutubeProvider::resolveProgressive(const QString& id, const QString& quali
                     const cJSON* f = jat(formats, i);
                     Stream st;
                     st.url = jstr(f, "url");
+                    st.extra.insert(qFromUtf8("referer"),
+                                    qFromUtf8("https://www.youtube.com/"));
+                    st.extra.insert(qFromUtf8("userAgent"),
+                                    qFromUtf8(kClients[0].ua));
                     st.quality = qFromUtf8("%1x%2")
                         .arg(static_cast<int>(jint(f, "width")))
                         .arg(static_cast<int>(jint(f, "height")));
                     st.kind = qFromUtf8("mp4");
                     // 当前只有 itag18(360p);请求任何其它档(含 160/240/480)
                     // → 显式降级标注(请求更低也算不符,省流量意图未满足)
-                    if (!quality.trimmed().isEmpty()) {
+                    if (!qTrim(quality).isEmpty()) {
                         st.extra.insert(qFromUtf8("requestedQuality"), quality);
                         const int got = static_cast<int>(jint(f, "height"));
                         const int want = quality::heightOf(quality);

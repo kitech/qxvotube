@@ -18,7 +18,7 @@ namespace {
 int g_fail = 0;
 void check(bool ok, const char* what, const QString& got = QString()) {
     if (ok) std::printf("[ ok ] %s\n", what);
-    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qPrintable(got)); }
+    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qToUtf8(got).data()); }
 }
 
 QString run(const QString& prog, const QStringList& args, int timeoutMs,
@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
 
     const QString id = argc > 1 ? QString::fromUtf8(argv[1])
                                 : qFromUtf8("0q7siV1PH2g");
-    const QString proxy = QXV_ENV("QXVOTUBE_PROXY");
+    const QString proxy = qenv("QXVOTUBE_PROXY");
 
     const QList<VideoProvider*> provs = createProviders();
     VideoProvider* yt = nullptr;
@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
         check(s.url.startsWith(qFromUtf8("http://127.0.0.1:")), "本地 URL",
               s.url);
         check(s.extra.value(qFromUtf8("hlsMaster")).toBool(), "extra.hlsMaster");
-        std::printf("[info] url=%s\n", qPrintable(s.url));
+        std::printf("[info] url=%s\n", qToUtf8(s.url).data());
 
         int code = -1;
         const QString probe = run(qFromUtf8("ffprobe"),
@@ -79,14 +79,14 @@ int main(int argc, char** argv) {
               qFromUtf8("-of"), qFromUtf8("csv=p=0"), s.url },
             60000, &code, proxy);
         check(code == 0 && probe.contains(qFromUtf8("1920,1080")),
-              "ffprobe 1080p", probe.trimmed().left(120));
+              "ffprobe 1080p", qTrim(probe).left(120));
 
         const QString dec = run(qFromUtf8("ffmpeg"),
             { qFromUtf8("-v"), qFromUtf8("error"), qFromUtf8("-i"), s.url,
               qFromUtf8("-frames:v"), qFromUtf8("30"), qFromUtf8("-f"),
               qFromUtf8("null"), qFromUtf8("-") },
             90000, &code, proxy);
-        check(code == 0, "ffmpeg 解码 30 帧", dec.trimmed().left(200));
+        check(code == 0, "ffmpeg 解码 30 帧", qTrim(dec).left(200));
 
         std::printf("ytdash: %s\n", g_fail ? "FAILED" : "all green");
         QCoreApplication::exit(g_fail ? 1 : 0);

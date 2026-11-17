@@ -181,10 +181,8 @@ private:
     CXVideoEqDialog* m_eqDialog;
     QString m_curUrl;        /* 当前播放源(引擎切换后重开) */
     /* 视频源网格状态 */
-#if QT_VERSION >= 0x050000
-    QList<qxv::VideoProvider*> m_providers;
+    QList36<qxv::VideoProvider*> m_providers;
     qxv::VideoProvider* m_curProv;
-#endif
     int m_gridPage;
     bool m_gridHasMore;
     bool m_gridLoading;

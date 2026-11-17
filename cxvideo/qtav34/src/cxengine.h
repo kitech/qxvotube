@@ -10,6 +10,16 @@ class QWidget;
 
 struct CXVideoEq;
 
+// 网络选项(播放直链需要的代理/防盗链头);空 = 直连、不加头
+struct CxNetOptions {
+    QString proxy;      // "http://host:port"
+    QString referer;
+    QString userAgent;
+    bool isEmpty() const {
+        return proxy.isEmpty() && referer.isEmpty() && userAgent.isEmpty();
+    }
+};
+
 // 引擎抽象(detail.md 第 3 节;UI 线程 API,线程→UI 经事件回投)
 class CXEngine : public QObject {
     Q_OBJECT
@@ -18,6 +28,9 @@ public:
 
     virtual const char* name() const = 0;
     virtual bool isAvailable() const = 0;
+
+    // 直链网络选项(默认空实现;引擎在 open() 时使用)
+    virtual void setNetOptions(const CxNetOptions&) { }
 
     virtual bool open(const QString& url) { m_url = url; return true; }
     virtual void close() { m_url = QString(); }

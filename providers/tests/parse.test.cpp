@@ -22,13 +22,13 @@ int g_fail = 0;
 
 void check(bool ok, const char* what, const QString& got = QString()) {
     if (ok) std::printf("[ ok ] %s\n", what);
-    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qPrintable(got)); }
+    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qToUtf8(got).data()); }
 }
 
 QByteArray load(const QString& name) {
     QFile f(QString::fromUtf8(FIXTURE_DIR) + QLatin1Char('/') + name);
     if (!f.open(QIODevice::ReadOnly)) {
-        std::printf("[FAIL] fixture missing: %s\n", qPrintable(name));
+        std::printf("[FAIL] fixture missing: %s\n", qToUtf8(name).data());
         ++g_fail;
         return QByteArray();
     }

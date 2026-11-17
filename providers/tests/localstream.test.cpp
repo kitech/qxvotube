@@ -17,7 +17,7 @@ int g_fail = 0;
 
 void check(bool ok, const char* what, const QString& got = QString()) {
     if (ok) std::printf("[ ok ] %s\n", what);
-    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qPrintable(got)); }
+    else { ++g_fail; std::printf("[FAIL] %s %s\n", what, qToUtf8(got).data()); }
 }
 
 // 100KB 可预测内容:第 i 字节 = 'A' + i%26
@@ -78,10 +78,10 @@ int main(int argc, char** argv) {
     QString url;
     Result r = srv.open(QString::fromUtf8("mem"), std::make_shared<MemorySource>(100 * 1024), &url);
     check(r.code == Err::Ok, "open memory source", r.message);
-    std::printf("[info] url: %s\n", qPrintable(url));
+    std::printf("[info] url: %s\n", qToUtf8(url).data());
 
     const int port = srv.port();
-    const QString path = url.mid(url.indexOf('/', 7));
+    const QString path = url.mid(qIndexOf(url, qFromUtf8("/"), 7));
 
     HttpResult a = get(port, path, 0, 1024);
     check(a.status == 206, "range 206", QString::number(a.status));
@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
                          std::make_shared<MemorySource>(2048), &url2);
     check(r2.code == Err::Ok && srv.stats().running, "restarted", r2.message);
     if (r2.code == Err::Ok) {
-        const QString p2 = url2.mid(url2.indexOf('/', 7));
+        const QString p2 = url2.mid(qIndexOf(url2, qFromUtf8("/"), 7));
         HttpResult d = get(srv.port(), p2, 0, 64);
         check(d.status == 206 && d.body.size() == 64, "restarted serves");
         srv.release(QString::fromUtf8("mem2"));

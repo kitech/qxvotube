@@ -4,10 +4,9 @@
 #include "common/qcjson.h"
 #include "common/autherror.h"
 
-#include <QDateTime>
-#include <QUrlQuery>
+#include <qdatetime.h>
 
-#include <QMap>
+#include <qmap.h>
 
 #include <random>
 
@@ -30,7 +29,7 @@ const char* kUa =
 Device g_dev;
 // 注册合流:并发 ensureDevice 只真正注册一次,其余排队等结果
 bool g_registering = false;
-QList<std::function<void(const Result&, const Device&)>> g_waiters;
+QList36<std::function<void(const Result&, const Device&)>> g_waiters;
 
 std::mt19937& randGen() {
     static std::mt19937 g(static_cast<unsigned>(
@@ -75,7 +74,7 @@ QString commonQuery(const Device& d) {
     q.addQueryItem(qFromUtf8("openudid"), qFromUtf8("hglive0000000001"));
     q.addQueryItem(qFromUtf8("cdid"), qFromUtf8("hglivecdid0000000000000000000001"));
     q.addQueryItem(qFromUtf8("_rticket"), QString::number(nowMs()));
-    return q.toString(QUrl::FullyEncoded);
+    return q.toString();
 }
 
 NetClient& net() {
@@ -137,7 +136,7 @@ void doRegister(std::function<void(const Result&, const Device&)> cb) {
     NetRequest req;
     req.method = qFromUtf8("POST");
     req.url = qFromUtf8("%1/service/2/device_register/?%2")
-                  .arg(qFromUtf8(kRegHost), q.toString(QUrl::FullyEncoded));
+                  .arg(qFromUtf8(kRegHost), q.toString());
     req.headers = {
         { "Content-Type", "application/json; charset=utf-8" },
         { "User-Agent", kUa },
@@ -176,7 +175,7 @@ void doRegister(std::function<void(const Result&, const Device&)> cb) {
         }
         g_dev = d;
         DBG_P(kMod, Info, "device registered: did=%s iid=%s new_user=%lld",
-              qPrintable(d.deviceId), qPrintable(d.installId),
+              qToUtf8(d.deviceId).data(), qToUtf8(d.installId).data(),
               jint(root.p, "new_user"));
         cb(Result::ok(), d);
     });
@@ -189,7 +188,7 @@ void setDevice(const Device& d) { g_dev = d; }
 
 static void finishRegister(const Result& r, const Device& d) {
     g_registering = false;
-    const QList<std::function<void(const Result&, const Device&)>> waiters =
+    const QList36<std::function<void(const Result&, const Device&)>> waiters =
         g_waiters;
     g_waiters.clear();
     for (int i = 0; i < waiters.size(); ++i) waiters[i](r, d);
@@ -197,13 +196,13 @@ static void finishRegister(const Result& r, const Device& d) {
 
 void ensureDevice(std::function<void(const Result&, const Device&)> cb) {
     // env 覆盖优先(真机抓包可用)
-    const QString envDid = QXV_ENV("QXVOTUBE_HG_DEVICE_ID");
-    const QString envIid = QXV_ENV("QXVOTUBE_HG_INSTALL_ID");
+    const QString envDid = qenv("QXVOTUBE_HG_DEVICE_ID");
+    const QString envIid = qenv("QXVOTUBE_HG_INSTALL_ID");
     if (!envDid.isEmpty() && !envIid.isEmpty()) {
         if (g_dev.deviceId != envDid || g_dev.installId != envIid) {
             g_dev.deviceId = envDid;
             g_dev.installId = envIid;
-            DBG_P(kMod, Info, "device from env: did=%s", qPrintable(envDid));
+            DBG_P(kMod, Info, "device from env: did=%s", qToUtf8(envDid).data());
         }
         cb(Result::ok(), g_dev);
         return;
@@ -229,7 +228,7 @@ namespace {
 
 // tracks 缓存:vid → (tracks, 过期时间);10 分钟(CDN 6h,取短更安全)
 struct TrackCacheEntry {
-    QList<Track> tracks;
+    QList36<Track> tracks;
     qint64 expiresAt = 0;
 };
 QMap<QString, TrackCacheEntry>& trackCache() {
@@ -239,12 +238,12 @@ QMap<QString, TrackCacheEntry>& trackCache() {
 const qint64 kTrackTtlMs = 10 * 60 * 1000;
 
 // 从 video_model JSON 字符串解析轨道列表
-bool parseTracks(const QString& vmStr, QList<Track>* out, QString* err) {
-    JRoot vm(vmStr.toUtf8());
+bool parseTracks(const QString& vmStr, QList36<Track>* out, QString* err) {
+    JRoot vm(qToUtf8(vmStr));
     if (!vm.ok()) { if (err) *err = qFromUtf8("video_model not json"); return false; }
     const cJSON* list = jarr(vm.p, "video_list");
     const long long expire = jint(vm.p, "url_expire");
-    QList<Track> tracks;
+    QList36<Track> tracks;
     for (int i = 0; i < jsize(list); ++i) {
         const cJSON* it = jat(list, i);
         Track t;
@@ -267,8 +266,8 @@ bool parseTracks(const QString& vmStr, QList<Track>* out, QString* err) {
 
 void videoModels(const QStringList& vids,
                  std::function<void(const Result&,
-                                    const QMap<QString, QList<Track>>&)> cb) {
-    if (vids.isEmpty()) { cb(Result::ok(), QMap<QString, QList<Track>>()); return; }
+                                    const QMap<QString, QList36<Track>>&)> cb) {
+    if (vids.isEmpty()) { cb(Result::ok(), QMap<QString, QList36<Track>>()); return; }
     ensureDevice([vids, cb](const Result& dr, const Device& d) {
         if (dr.code != Err::Ok) { cb(dr, {}); return; }
         cJSON* root = cJSON_CreateObject();
@@ -320,12 +319,12 @@ void videoModels(const QStringList& vids,
                    qFromUtf8("hongguo-app: code=%1").arg(jint(root.p, "code"))), {});
                 return;
             }
-            QMap<QString, QList<Track>> out;
+            QMap<QString, QList36<Track>> out;
             const cJSON* data = jobj(root.p, "data");
             for (int i = 0; i < vids.size(); ++i) {
                 const cJSON* vd = jobj(data, vids[i].toUtf8().constData());
                 if (!vd) continue;
-                QList<Track> tracks;
+                QList36<Track> tracks;
                 QString err;
                 if (!parseTracks(jstr(vd, "video_model"), &tracks, &err)) continue;
                 out.insert(vids[i], tracks);
@@ -341,13 +340,13 @@ void videoModels(const QStringList& vids,
 }
 
 void videoModel(const QString& vid,
-                std::function<void(const Result&, const QList<Track>&)> cb) {
+                std::function<void(const Result&, const QList36<Track>&)> cb) {
     {
         QMap<QString, TrackCacheEntry>& c = trackCache();
         auto it = c.find(vid);
         if (it != c.end()) {
             if (nowMs() < it->expiresAt) {
-                DBG_P(kMod, Debug, "video_model cache hit %s", qPrintable(vid));
+                DBG_P(kMod, Debug, "video_model cache hit %s", qToUtf8(vid).data());
                 cb(Result::ok(), it->tracks);
                 return;
             }
@@ -365,7 +364,7 @@ void videoModel(const QString& vid,
         cJSON_AddItemToObject(root, "biz_param", bp);
         cJSON* map = cJSON_CreateObject();
         cJSON* arr = cJSON_CreateArray();
-        cJSON_AddItemToArray(arr, cJSON_CreateString(vid.toUtf8().constData()));
+        cJSON_AddItemToArray(arr, cJSON_CreateString(qToUtf8(vid).constData()));
         cJSON_AddItemToObject(map, "1", arr);
         cJSON_AddItemToObject(root, "mixed_video_id_map", map);
         char* s = cJSON_PrintUnformatted(root);
@@ -389,7 +388,7 @@ void videoModel(const QString& vid,
         req.maxAttempts = 3;      // 200 空包=字节系风控,退避重试
         req.retryDelayMs = 500;
         req.retryOnEmpty = true;
-        DBG_P(kMod, Debug, "video_model vid=%s", qPrintable(vid));
+        DBG_P(kMod, Debug, "video_model vid=%s", qToUtf8(vid).data());
 
         net().send(req, [cb, vid](const NetResponse& r) {
             if (!r.ok()) {
@@ -415,13 +414,13 @@ void videoModel(const QString& vid,
                     200, QString::number(code), jstr(root.p, "message")), {});
                 return;
             }
-            const cJSON* vd = jobj(jobj(root.p, "data"), vid.toUtf8().constData());
+            const cJSON* vd = jobj(jobj(root.p, "data"), qToUtf8(vid).constData());
             if (!vd) {
                 cb(Result::fail(Err::Parse,
                    qFromUtf8("hongguo-app: no data[%1]").arg(vid)), {});
                 return;
             }
-            QList<Track> out;
+            QList36<Track> out;
             QString perr;
             if (!parseTracks(jstr(vd, "video_model"), &out, &perr)) {
                 cb(Result::fail(Err::Parse,
@@ -435,14 +434,14 @@ void videoModel(const QString& vid,
                 trackCache().insert(vid, e);
             }
             DBG_P(kMod, Info, "video_model %s -> %d tracks (first %s/%s)",
-                  qPrintable(vid), out.size(), qPrintable(out[0].definition),
-                  qPrintable(out[0].codecType));
+                  qToUtf8(vid).data(), out.size(), qToUtf8(out[0].definition).data(),
+                  qToUtf8(out[0].codecType).data());
             cb(Result::ok(), out);
         });
     });
 }
 
-const Track* pickBest(const QList<Track>& tracks) {
+const Track* pickBest(const QList36<Track>& tracks) {
     const Track* best = nullptr;
     for (int i = 0; i < tracks.size(); ++i) {
         const Track& t = tracks[i];

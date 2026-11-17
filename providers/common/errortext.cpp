@@ -5,8 +5,8 @@ namespace qxv {
 
 QString i18nKeyFor(const Result& r) {
     if (r.code == Err::NeedAuth || r.code == Err::AuthExpired) {
-        const QString mode = r.detail.value(qFromUtf8("auth.mode")).toString();
-        const bool provided = r.detail.value(qFromUtf8("auth.provided")).toBool();
+        const QString mode = qMapValue(r.detail, qFromUtf8("auth.mode"), QVariant()).toString();
+        const bool provided = qMapValue(r.detail, qFromUtf8("auth.provided"), QVariant()).toBool();
         if (r.code == Err::AuthExpired) {
             if (mode == qFromUtf8("oauth"))
                 return qFromUtf8("error.auth_oauth_expired");

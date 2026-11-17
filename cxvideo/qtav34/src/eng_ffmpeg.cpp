@@ -57,7 +57,20 @@ bool CXEngineFfmpeg::open(const QString& url)
 
     QByteArray ba = qToUtf8(url);
     AVFormatContext* fmt = 0;
-    if (avformat_open_input(&fmt, ba.data(), 0, 0) < 0) {
+    // 直链网络选项:防盗链头 + 代理(与 API 同出口;ffmpeg 由 av_dict 传入)
+    AVDictionary* opts = 0;
+    std::string hdr;
+    if (!m_net.referer.isEmpty())
+        hdr += "Referer: " + std::string(qToUtf8(m_net.referer).data()) + "\r\n";
+    if (!m_net.userAgent.isEmpty())
+        hdr += "User-Agent: " + std::string(qToUtf8(m_net.userAgent).data()) + "\r\n";
+    if (!hdr.empty()) av_dict_set(&opts, "headers", hdr.c_str(), 0);
+    if (!m_net.proxy.isEmpty())
+        av_dict_set(&opts, "http_proxy",
+                    qToUtf8(m_net.proxy).data(), 0);
+    const int openRc = avformat_open_input(&fmt, ba.data(), 0, &opts);
+    if (opts) av_dict_free(&opts);
+    if (openRc < 0) {
         emit noticedError((int)CxErrOpenFail, m_url);
         return false;
     }

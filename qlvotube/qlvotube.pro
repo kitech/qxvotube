@@ -47,6 +47,7 @@ include(../cxvideo/qtav34/cxvideo.pri)
 # 视频源库(Qt3/Qt4 = stub → 0 源；Qt>=5 = 真实实现)。
 # 宿主已编 cJSON/compatcore34/md5(cxvideo.pri + qlite.pri),故跳过 pri 内的重复件。
 DEFINES += QXV_PROVIDERS_NO_QLCOMP
+DEFINES += QXV_EVENTPOLLER_EXTERNAL
 include(../providers/providers.pri)
 INCLUDEPATH += $$PWD/..   # 让 "providers/common/provider.h" 这类路径可解析
 INCLUDEPATH += ../qlcomp

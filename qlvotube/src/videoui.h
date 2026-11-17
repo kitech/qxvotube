@@ -31,6 +31,7 @@ public:
     std::vector<VideoCardData> cards;      /* Page */
     QString text;                    /* Error/Status 文案;Page/Categories 带站点前缀 */
     QString chipKey;                 /* Page: 本次分类;Status: 视频 id */
+    QString referer, userAgent, proxy;  /* Status: 直链所需网络选项 */
     bool hasMore;
     bool loading;
     int page;

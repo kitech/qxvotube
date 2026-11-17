@@ -3,10 +3,10 @@
 #include "common/debuglog.h"
 #include "common/qcjson.h"
 
-#include <QCoreApplication>
-#include <QFileInfo>
-#include <QProcess>
-#include <QStandardPaths>
+#include <qcoreapplication.h>
+#include <qfileinfo.h>
+#include <qprocess.h>
+#include <qstandardpaths.h>
 
 // 说明见 ytdlp.h。用 QProcess + finished 信号(不阻塞调用线程);
 // 未安装/失败时 Info.ok=false,调用方回落 itag18。
@@ -17,7 +17,7 @@ namespace ytdlp {
 static const char* kMod = "ytdlp";
 
 bool enabled() {
-    const QString v = QXV_ENV("QXVOTUBE_YT_YTDLP");
+    const QString v = qenv("QXVOTUBE_YT_YTDLP");
     if (v == qFromUtf8("0")) return false;
     if (v == qFromUtf8("1")) return true;
     // 自动探测
@@ -53,7 +53,7 @@ void fetch(const QString& url, const QString& proxy,
                      [p, cb](QProcess::ProcessError) {
         Info r;
         r.err = qFromUtf8("yt-dlp 启动失败: %1").arg(p->errorString());
-        DBG_P(kMod, Warn, "%s", qPrintable(r.err));
+        DBG_P(kMod, Warn, "%s", qToUtf8(r.err).data());
         p->deleteLater();
         cb(r);
     });
@@ -67,7 +67,7 @@ void fetch(const QString& url, const QString& proxy,
             r.err = qFromUtf8("yt-dlp exit=%1 %2")
                         .arg(code)
                         .arg(QString::fromUtf8(errOut.left(300)));
-            DBG_P(kMod, Warn, "%s", qPrintable(r.err));
+            DBG_P(kMod, Warn, "%s", qToUtf8(r.err).data());
             p->deleteLater();
             cb(r);
             return;

@@ -9,7 +9,6 @@
 #include "common/quality.h"
 #include "common/autherror.h"
 
-#include <QUrlQuery>
 #include <functional>
 #include <ctime>
 
@@ -84,10 +83,10 @@ void BilibiliProvider::apiGet(const QString& path, const QString& query,
         req.headers.append(h);
     req.headers.append(qMakePair(qFromUtf8("Referer"),
         qFromUtf8("https://www.bilibili.com/")));
-    const QString token = m_cred.value("cookie").toString();
+    const QString token = qMapValue(m_cred, qFromUtf8("cookie"), QVariant()).toString();
     if (!token.isEmpty())
         req.headers.append({ "Cookie", token });
-    DBG_P(kMod, Debug, "GET %s", qPrintable(req.url));
+    DBG_P(kMod, Debug, "GET %s", qToUtf8(req.url).data());
     m_net.send(req, std::move(cb));
 }
 
@@ -96,12 +95,12 @@ void BilibiliProvider::search(const QString& kw, int page, SearchCb cb) {
     q.addQueryItem("keyword", kw);
     q.addQueryItem("page", QString::number(page));
     q.addQueryItem("page_size", "20");   // 实测:pagesize=20,numPages=50
-    apiGet("/x/web-interface/search/all/v2", q.toString(QUrl::FullyEncoded),
+    apiGet("/x/web-interface/search/all/v2", q.toString(),
            [this, cb, page, kw](const NetResponse& r) {
         if (!r.ok()) {
             cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
                    ? qFromUtf8("http %1").arg(r.status) : r.error),
-                   r.status, QString(), QString::fromUtf8(r.body.left(200))),
+                   r.status, QString(), qbaHead(r.body, 200)),
                {}, false);
             return;
         }
@@ -110,25 +109,25 @@ void BilibiliProvider::search(const QString& kw, int page, SearchCb cb) {
         res = checkApi(r.body, root, credContext(m_cred));
         if (res.code != Err::Ok) { cb(res, {}, false); return; }
         const cJSON* data = jobj(root.p, "data");
-        const QList<VideoItem> items = bilibili::parse::searchResult(root.p);
+        const QList36<VideoItem> items = bilibili::parse::searchResult(root.p);
         // 服务端给总页数(实测 numPages=50);缺失时退化为"本页满 20 条即还有"
         const long long numPages = jint(data, "numPages", 0);
         const bool hasMore = numPages > 0 ? (page < numPages)
                                           : items.size() >= 20;
         DBG_P(kMod, Debug, "search '%s' p%d -> %d items (numPages=%lld)",
-              qPrintable(kw), page, items.size(), numPages);
+              qToUtf8(kw).data(), page, items.size(), numPages);
         cb(Result::ok(), items, hasMore);
     });
 }
 
 // ── 分类:popular 条目自带 tid/tname(动态,无硬编码表) ─────────────
 // 缓存 30min(分区变化极慢;失败不缓存,下次重试)
-static QList<CategoryItem> g_regions;
+static QList36<CategoryItem> g_regions;
 static long long g_regionsAt = 0;
 static const int kRegionsTtlSec = 30 * 60;
 
 void BilibiliProvider::categories(
-    std::function<void(const Result&, const QList<CategoryItem>&)> cb) {
+    std::function<void(const Result&, const QList36<CategoryItem>&)> cb) {
     const long long now = (long long)::time(0);
     if (!g_regions.isEmpty() && now - g_regionsAt < kRegionsTtlSec) {
         DBG_P(kMod, Debug, "categories: cache hit (%d)", g_regions.size());
@@ -139,25 +138,25 @@ void BilibiliProvider::categories(
     q.addQueryItem("pn", "1");
     q.addQueryItem("ps", "20");
     DBG_P(kMod, Info, "categories: GET popular (derive regions)");
-    apiGet("/x/web-interface/popular", q.toString(QUrl::FullyEncoded),
+    apiGet("/x/web-interface/popular", q.toString(),
            [this, cb](const NetResponse& r) {
         if (!r.ok()) {
             DBG_P(kMod, Warn, "categories: popular http=%d err=%s", r.status,
-                  qPrintable(r.error));
+                  qToUtf8(r.error).data());
             cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
                    ? qFromUtf8("http %1").arg(r.status) : r.error),
-                   r.status, QString(), QString::fromUtf8(r.body.left(200))), {});
+                   r.status, QString(), qbaHead(r.body, 200)), {});
             return;
         }
         JRoot root;
         const Result res = checkApi(r.body, root, credContext(m_cred));
         if (res.code != Err::Ok) {
             DBG_P(kMod, Warn, "categories: checkApi code=%d %s",
-                  (int)res.code, qPrintable(res.message));
+                  (int)res.code, qToUtf8(res.message).data());
             cb(res, {});
             return;
         }
-        QList<CategoryItem> regs = bilibili::parse::popularRegions(root.p);
+        QList36<CategoryItem> regs = bilibili::parse::popularRegions(root.p);
         DBG_P(kMod, Info, "categories: %d regions from popular", regs.size());
         if (regs.isEmpty()) {
             DBG_P(kMod, Warn, "categories: 0 regions (popular 结构可能变更)");
@@ -181,19 +180,19 @@ void BilibiliProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
     /* key = "<tid>|<tname>"(categories() 产出,UI 不解释)。
      * 二级分区 tid 在 newlist 常为空 → 用分区名走站内搜索兜底(可翻页)。 */
     QString rid = key, tname;
-    const int bar = key.indexOf(qFromUtf8("|"));
+    const int bar = qIndexOf(key, qFromUtf8("|"));
     if (bar >= 0) { rid = key.left(bar); tname = key.mid(bar + 1); }
     const bool hasRid = rid.toLongLong() > 0;
 
     if (!hasRid) {
         if (tname.isEmpty()) {
-            DBG_P(kMod, Warn, "categoryFeed: 非法 key='%s'", qPrintable(key));
+            DBG_P(kMod, Warn, "categoryFeed: 非法 key='%s'", qToUtf8(key).data());
             cb(Result::fail(Err::Unsupported,
                qFromUtf8("bilibili: 分类 key 无效")), {}, false);
             return;
         }
         DBG_P(kMod, Info, "categoryFeed: '%s' 无 rid → 搜索兜底 p%d",
-              qPrintable(tname), page);
+              qToUtf8(tname).data(), page);
         search(tname, page, cb);
         return;
     }
@@ -202,15 +201,15 @@ void BilibiliProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
     q.addQueryItem("rid", rid);
     q.addQueryItem("pn", QString::number(page));
     q.addQueryItem("ps", "20");
-    DBG_P(kMod, Info, "categoryFeed: rid=%s p%d", qPrintable(rid), page);
-    apiGet("/x/web-interface/newlist", q.toString(QUrl::FullyEncoded),
+    DBG_P(kMod, Info, "categoryFeed: rid=%s p%d", qToUtf8(rid).data(), page);
+    apiGet("/x/web-interface/newlist", q.toString(),
            [this, cb, rid, tname, key, page](const NetResponse& r) {
         if (!r.ok()) {
             DBG_P(kMod, Warn, "categoryFeed rid=%s p%d http=%d err=%s",
-                  qPrintable(rid), page, r.status, qPrintable(r.error));
+                  qToUtf8(rid).data(), page, r.status, qToUtf8(r.error).data());
             cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
                    ? qFromUtf8("http %1").arg(r.status) : r.error),
-                   r.status, QString(), QString::fromUtf8(r.body.left(200))),
+                   r.status, QString(), qbaHead(r.body, 200)),
                {}, false);
             return;
         }
@@ -218,25 +217,25 @@ void BilibiliProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
         const Result res = checkApi(r.body, root, credContext(m_cred));
         if (res.code != Err::Ok) {
             DBG_P(kMod, Warn, "categoryFeed rid=%s p%d code=%d",
-                  qPrintable(rid), page, (int)res.code);
+                  qToUtf8(rid).data(), page, (int)res.code);
             cb(res, {}, false);
             return;
         }
         bool hasMore = false;
-        const QList<VideoItem> items =
+        const QList36<VideoItem> items =
             bilibili::parse::newlist(root.p, page, &hasMore);
         DBG_P(kMod, Debug, "categoryFeed rid=%s p%d -> %d items (hasMore=%d)",
-              qPrintable(rid), page, items.size(), int(hasMore));
+              qToUtf8(rid).data(), page, items.size(), int(hasMore));
         if (items.isEmpty() && !tname.isEmpty()) {
             DBG_P(kMod, Warn,
                   "categoryFeed rid=%s p%d empty → '%s' 搜索兜底(key=%s)",
-                  qPrintable(rid), page, qPrintable(tname), qPrintable(key));
+                  qToUtf8(rid).data(), page, qToUtf8(tname).data(), qToUtf8(key).data());
             search(tname, page, cb);
             return;
         }
         if (items.isEmpty())
             DBG_P(kMod, Warn, "categoryFeed rid=%s p%d empty (无内容/rid 失效)",
-                  qPrintable(rid), page);
+                  qToUtf8(rid).data(), page);
         cb(Result::ok(), items, hasMore);
     });
 }
@@ -248,12 +247,12 @@ void BilibiliProvider::homeFeed(int page, SearchCb cb) {
     QUrlQuery q;
     q.addQueryItem("pn", QString::number(page));
     q.addQueryItem("ps", "20");
-    apiGet("/x/web-interface/popular", q.toString(QUrl::FullyEncoded),
+    apiGet("/x/web-interface/popular", q.toString(),
            [this, cb, page](const NetResponse& r) {
         if (!r.ok()) {
             cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
                    ? qFromUtf8("http %1").arg(r.status) : r.error),
-                   r.status, QString(), QString::fromUtf8(r.body.left(200))),
+                   r.status, QString(), qbaHead(r.body, 200)),
                {}, false);
             return;
         }
@@ -261,7 +260,7 @@ void BilibiliProvider::homeFeed(int page, SearchCb cb) {
         const Result res = checkApi(r.body, root, credContext(m_cred));
         if (res.code != Err::Ok) { cb(res, {}, false); return; }
         bool hasMore = false;
-        const QList<VideoItem> items = bilibili::parse::popular(root.p, &hasMore);
+        const QList36<VideoItem> items = bilibili::parse::popular(root.p, &hasMore);
         DBG_P(kMod, Debug, "homeFeed p%d -> %d items (hasMore=%d)",
               page, items.size(), int(hasMore));
         cb(Result::ok(), items, hasMore);
@@ -271,14 +270,14 @@ void BilibiliProvider::homeFeed(int page, SearchCb cb) {
 void BilibiliProvider::detail(const QString& id, DetailCb cb) {
     QUrlQuery q;
     q.addQueryItem("bvid", id);
-    apiGet("/x/web-interface/view", q.toString(QUrl::FullyEncoded),
+    apiGet("/x/web-interface/view", q.toString(),
            [this, cb, id](const NetResponse& r) {
         if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}, {}); return; }
         JRoot root;
         const Result res = checkApi(r.body, root, credContext(m_cred));
         if (res.code != Err::Ok) { cb(res, {}, {}); return; }
         VideoItem vi;
-        QList<VideoItem> parts;
+        QList36<VideoItem> parts;
         const Result dres = bilibili::parse::detailFromView(root.p, &vi, &parts);
         if (dres.code != Err::Ok) { cb(dres, {}, {}); return; }
         if (!parts.isEmpty()) { cb(Result::ok(), vi, parts); return; }
@@ -286,17 +285,17 @@ void BilibiliProvider::detail(const QString& id, DetailCb cb) {
         // pages 缺失(部分老稿件/接口裁剪)→ 用 pagelist 兜底
         QUrlQuery q2;
         q2.addQueryItem("bvid", vi.id);
-        apiGet("/x/player/pagelist", q2.toString(QUrl::FullyEncoded),
+        apiGet("/x/player/pagelist", q2.toString(),
                [this, cb, vi](const NetResponse& r2) {
             if (!r2.ok()) {
                 cb(withServer(Result::fail(Err::Network, r2.error), r2.status,
-                              QString(), QString::fromUtf8(r2.body.left(200))),
+                              QString(), qbaHead(r2.body, 200)),
                    vi, {});
                 return;
             }
             JRoot root2;
             const Result res2 = checkApi(r2.body, root2, credContext(m_cred));
-            QList<VideoItem> parts2;
+            QList36<VideoItem> parts2;
             if (res2.code == Err::Ok)
                 parts2 = bilibili::parse::pageList(root2.p, vi.id);
             if (parts2.isEmpty()) parts2.append(vi);   // 单 P:主项即唯一分集
@@ -332,7 +331,7 @@ void BilibiliProvider::resolveQuality(const QString& id, const QString& quality,
                                       ResolveCb cb) {
     // id 形如 "BV1xx411c7mD@cid123"(detail 出的分集)或纯 bvid(单P)
     QString bvid = id, cid;
-    const int at = id.indexOf(qFromUtf8("."));
+    const int at = qIndexOf(id, qFromUtf8("."));
     if (at > 0) { bvid = id.left(at); cid = id.mid(at + 1); }
 
     bool recognized = true;
@@ -349,7 +348,7 @@ void BilibiliProvider::resolveQuality(const QString& id, const QString& quality,
     {
         PlayResult cached;
         if (m_cache.get(ckey, &cached)) {
-            DBG_P(kMod, Debug, "resolve cache hit %s", qPrintable(id));
+            DBG_P(kMod, Debug, "resolve cache hit %s", qToUtf8(id).data());
             cb(Result::ok(), cached);
             return;
         }
@@ -362,11 +361,11 @@ void BilibiliProvider::resolveQuality(const QString& id, const QString& quality,
         q.addQueryItem("cid", cid2);
         q.addQueryItem("qn", QString::number(qn));
         q.addQueryItem("platform", "html5");
-        apiGet("/x/player/playurl", q.toString(QUrl::FullyEncoded),
+        apiGet("/x/player/playurl", q.toString(),
                [this, cb, bvid2, quality, ckey](const NetResponse& r) {
             if (!r.ok()) {
                 cb(withServer(Result::fail(Err::Network, r.error), r.status,
-                              QString(), QString::fromUtf8(r.body.left(200))), {});
+                              QString(), qbaHead(r.body, 200)), {});
                 return;
             }
             JRoot root;
@@ -383,8 +382,12 @@ void BilibiliProvider::resolveQuality(const QString& id, const QString& quality,
                     s.url = jstr(dv, "url");
                     s.quality = actual;
                     s.kind = qFromUtf8("mp4");
-                    s.extra = QVariantMap{
-                        { "Referer", qFromUtf8("https://www.bilibili.com/") } };
+                    static const QString kUA =
+                        Fingerprint::chromeWeb(qFromUtf8("zh-CN,en-US"))
+                            .headers[0].second;
+                    s.extra.insert(qFromUtf8("referer"),
+                                   qFromUtf8("https://www.bilibili.com/"));
+                    s.extra.insert(qFromUtf8("userAgent"), kUA);
                     if (!quality.isEmpty()) {
                         s.extra.insert(qFromUtf8("requestedQuality"), quality);
                         // 请求档与服务端实际档不一致(含"给高了")→ 标降级
@@ -411,15 +414,16 @@ void BilibiliProvider::resolveQuality(const QString& id, const QString& quality,
 
     if (cid.isEmpty()) {
         detail(bvid, [cb, playUrl](Result res, const VideoItem&,
-                                   const QList<VideoItem>& parts) {
+                                   const QList36<VideoItem>& parts) {
             if (res.code != Err::Ok || parts.isEmpty()) {
                 cb(res, {}); return;
             }
             // 分P 的 part.id 是 "bvid.cid" 复合形式,这里必须取 extra.cid
-            QString cid = parts.first().extra.value(qFromUtf8("cid")).toString();
+            QString cid = qMapValue(parts.first().extra, qFromUtf8("cid"),
+                                    QVariant()).toString();
             if (cid.isEmpty()) cid = parts.first().id;
-            playUrl(parts.first().extra.value(qFromUtf8("bvid")).toString(),
-                    cid);
+            playUrl(qMapValue(parts.first().extra, qFromUtf8("bvid"),
+                              QVariant()).toString(), cid);
         });
         return;
     }

@@ -1,64 +1,61 @@
 #include "videothumbcache.h"
 
+#include "providers/common/compat.h"
 #include <qapplication.h>
 #include <qmap.h>
+#include <qstringlist.h>
 #if QT_VERSION >= 0x040000
 #include <QDebug>
 #endif
 #include <cstdio>
 #include <cstdlib>
 
-#ifdef QT3_BUILD
-/* Qt3:视频源 UI 不启用(providers=0 源),封面缓存退化为空实现;
- * ContentView 自动回落到 identicon 占位。 */
-namespace thumbcache {
-void request(const QString&, QWidget*) {}
-QPixmap pixmap(const QString&) { return QPixmap(); }
-int requested() { return 0; }
-int failed() { return 0; }
-void accept(const QString&, const QImage&) {}
-} // namespace thumbcache
-#else
-
 namespace {
 
-QMap<QString, QPixmap> g_cache;     // GUI 线程
-QMap<QString, int> g_state;         // 1=在途 2=失败(其余=未请求)
-QStringList g_lru;                  // 命中/新增移到头部(容量上限用)
+QMap<QString, QPixmap>& cache() { static QMap<QString, QPixmap> m; return m; }
+QMap<QString, int>& state() { static QMap<QString, int> m; return m; }
+QStringList& lru() { static QStringList l; return l; }
 int g_requested = 0;
 int g_failed = 0;
-const int kMaxThumbs = 300;         // 约几百 MB 上限内的安全值
+const int kMaxThumbs = 300;
+
+/* 协议相对封面(//i0.hdslb.com/...)补 https:curl 要求绝对 URL */
+QString normUrl(const QString& url)
+{
+    if (url.startsWith(qFromUtf8("//"))) return qFromUtf8("https:") + url;
+    return url;
+}
 
 /* 图床防盗链:按封面域名给 Referer(取不到 → 空,不发无谓头) */
 QString refererFor(const QString& url)
 {
-    const int p = url.indexOf(QString::fromLatin1("://"));
-    const int slash = url.indexOf(QLatin1Char('/'), p + 3);
+    const int p = qIndexOf(url, qFromUtf8("://"));
+    const int slash = qIndexOf(url, qFromUtf8("/"), p + 3);
     const QString host = (p >= 0 && slash > p) ? url.mid(p + 3, slash - p - 3)
                                                : QString();
-    if (host.endsWith(QString::fromLatin1("hdslb.com")))
-        return QString::fromLatin1("https://www.bilibili.com/");
-    if (host.contains(QString::fromLatin1("xiaohongshu"))
-        || host.contains(QString::fromLatin1("xhscdn")))
-        return QString::fromLatin1("https://www.xiaohongshu.com/");
-    if (host.endsWith(QString::fromLatin1("ytimg.com")))
-        return QString::fromLatin1("https://www.youtube.com/");
-    if (host.contains(QString::fromLatin1("byteimg"))
-        || host.contains(QString::fromLatin1("douyinpic"))
-        || host.contains(QString::fromLatin1("bytedance")))
-        return QString::fromLatin1("https://hongguoduanju.com/");
+    if (host.endsWith(qFromUtf8("hdslb.com")))
+        return qFromUtf8("https://www.bilibili.com/");
+    if (host.contains(qFromUtf8("xiaohongshu"))
+        || host.contains(qFromUtf8("xhscdn")))
+        return qFromUtf8("https://www.xiaohongshu.com/");
+    if (host.endsWith(qFromUtf8("ytimg.com")))
+        return qFromUtf8("https://www.youtube.com/");
+    if (host.contains(qFromUtf8("byteimg"))
+        || host.contains(qFromUtf8("douyinpic"))
+        || host.contains(qFromUtf8("bytedance")))
+        return qFromUtf8("https://hongguoduanju.com/");
     return QString();
 }
 
 QString proxyFromEnv()
 {
-    const char* px = getenv("QXVOTUBE_PROXY");   // http://host:port
+    const char* px = getenv("QXVOTUBE_PROXY");
     if (!px || !*px) return QString();
-    const QString s = QString::fromLatin1(px);
-    if (s.startsWith(QString::fromLatin1("http://"))
-        || s.startsWith(QString::fromLatin1("socks5://")))
+    const QString s = qFromUtf8(px);
+    if (s.startsWith(qFromUtf8("http://"))
+        || s.startsWith(qFromUtf8("socks5://")))
         return s;
-    return QString::fromLatin1("http://") + s;
+    return qFromUtf8("http://") + s;
 }
 
 struct ThumbCtx {
@@ -71,14 +68,16 @@ void onThumbDone(const HttpResponse& resp, void* udata)
     ThumbCtx* ctx = static_cast<ThumbCtx*>(udata);
     QImage img;
     if (resp.httpCode == 200 && !resp.body.empty()) {
-        img = QImage::fromData(reinterpret_cast<const uchar*>(resp.body.data()),
-                              static_cast<int>(resp.body.size()));
+        const uchar* p = reinterpret_cast<const uchar*>(resp.body.data());
+        const int n = static_cast<int>(resp.body.size());
+#ifdef QT3_BUILD
+        img.loadFromData(p, (uint)n);
+#else
+        img = QImage::fromData(p, n);
+#endif
     }
     if (ctx && ctx->target) {
         QApplication::postEvent(ctx->target, new ThumbReadyEvent(ctx->url, img));
-    } else if (ctx) {
-        delete ctx;
-        return;
     }
     delete ctx;
 }
@@ -87,79 +86,83 @@ void onThumbDone(const HttpResponse& resp, void* udata)
 
 namespace thumbcache {
 
-void request(const QString& url, QWidget* target)
+void request(const QString& urlRaw, QWidget* target)
 {
+    const QString url = normUrl(urlRaw);
     if (url.isEmpty() || !target) return;
-    if (g_cache.contains(url) || g_state.value(url) != 0) return;
+    if (cache().contains(url) || state().contains(url)) return;
 
     HttpRequest req;
-    req.url = url.toUtf8().constData();
+    req.url = qToUtf8(url).data();
     req.timeoutSec = 20;
     req.followRedirects = true;
     req.extraHeaders["User-Agent"] =
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     const QString ref = refererFor(url);
-    if (!ref.isEmpty()) req.extraHeaders["Referer"] = ref.toUtf8().constData();
+    if (!ref.isEmpty()) req.extraHeaders["Referer"] = qToUtf8(ref).data();
     const QString px = proxyFromEnv();
-    if (!px.isEmpty()) req.proxy = px.toUtf8().constData();
+    if (!px.isEmpty()) req.proxy = qToUtf8(px).data();
 
     ThumbCtx* ctx = new ThumbCtx;
     ctx->url = url;
     ctx->target = target;
-    g_state[url] = 1;
+    state()[url] = 1;
     ++g_requested;
-    if (getenv("QLVOTUBE_DEBUG") != 0)
+    if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
         qDebug() << "thumb: GET" << url << "referer" << ref;
 #else
         qDebug("thumb: GET %s referer %s", qToUtf8(url).data(),
                qToUtf8(ref).data());
 #endif
+    }
     EventPoller::addRequest(req, onThumbDone, ctx);
 }
 
-QPixmap pixmap(const QString& url)
+QPixmap pixmap(const QString& urlRaw)
 {
-    if (g_cache.contains(url)) {          // 命中提升热度(LRU)
-        g_lru.removeAll(url);
-        g_lru.prepend(url);
+    const QString url = normUrl(urlRaw);
+    if (cache().contains(url)) {
+        qstrListRemoveOne(lru(), url);
+        lru().prepend(url);
+        return cache()[url];
     }
-    return g_cache.value(url);
+    return QPixmap();
 }
 
 int requested() { return g_requested; }
 int failed() { return g_failed; }
 
-/* 事件处理入口(ContentView::customEvent 调用) */
 void accept(const QString& url, const QImage& image)
 {
     if (image.isNull()) {
-        g_state[url] = 2;
+        state()[url] = 2;
         ++g_failed;
-        if (getenv("QLVOTUBE_DEBUG") != 0)
+        if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
             qWarning() << "thumb: FAILED (decode)" << url;
 #else
             qWarning("thumb: FAILED (decode) %s", qToUtf8(url).data());
 #endif
+        }
         return;
     }
 #ifdef QT3_BUILD
     QPixmap pm;
     pm.convertFromImage(image);
-    g_cache.insert(url, pm);
+    cache().insert(url, pm);
 #else
-    g_cache.insert(url, QPixmap::fromImage(image));
+    cache().insert(url, QPixmap::fromImage(image));
 #endif
-    g_state[url] = 3;
-    g_lru.removeAll(url);
-    g_lru.prepend(url);
-    while (g_lru.size() > kMaxThumbs) {
-        const QString victim = g_lru.last();
-        g_lru.removeLast();
-        g_cache.remove(victim);
-        g_state.remove(victim);
+    state()[url] = 3;
+    qstrListRemoveOne(lru(), url);
+    lru().prepend(url);
+    while (lru().size() > (uint)kMaxThumbs) {
+        const QString victim = lru().last();
+        qstrListRemoveOne(lru(), victim);
+        cache().remove(victim);
+        state().remove(victim);
         if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
             qDebug() << "thumb: evicted" << victim;
@@ -171,5 +174,3 @@ void accept(const QString& url, const QImage& image)
 }
 
 } // namespace thumbcache
-
-#endif  // QT3_BUILD(videothumbcache)

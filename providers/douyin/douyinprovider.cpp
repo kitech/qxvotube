@@ -5,7 +5,6 @@
 #include "common/debuglog.h"
 #include "common/fingerprint.h"
 
-#include <QUrlQuery>
 
 // 抖音免签面(2026-11-15 实测,详见 bytedance.md §13):
 //   热榜 GET https://www.douyin.com/aweme/v1/web/hot/search/list/
@@ -37,7 +36,7 @@ void DouyinProvider::homeFeed(int page, SearchCb cb) {
 
     NetRequest req;
     req.url = qFromUtf8("https://www.douyin.com/aweme/v1/web/hot/search/list/?%1")
-                  .arg(q.toString(QUrl::FullyEncoded));
+                  .arg(q.toString());
     for (const auto& h : Fingerprint::chromeWeb(qFromUtf8("zh-CN,zh;q=0.9")).headers)
         req.headers.append(h);
     req.headers.append(qMakePair(qFromUtf8("Referer"),
@@ -65,7 +64,7 @@ void DouyinProvider::homeFeed(int page, SearchCb cb) {
                    200, QString::number(code), QString()), {}, false);
             return;
         }
-        const QList<VideoItem> items = douyin::parse::hotWords(root.p);
+        const QList36<VideoItem> items = douyin::parse::hotWords(root.p);
         DBG_P(kMod, Debug, "hot list -> %d items", items.size());
         if (items.isEmpty()) {
             cb(Result::fail(Err::RateLimit,

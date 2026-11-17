@@ -118,6 +118,7 @@ private:
     std::vector<CategoryChip> m_chips;
     QString m_activeChip;
     QString m_gridErr;
+    void maybeLoadMore();  /* 触底翻页(滚轮/拖条共用) */
     int m_lastMoreAt;      /* 触底翻页节流(time(0),1s) */
     int m_chipScroll;      /* chips 横向偏移(滚轮横向滚动) */
     QStringList m_gridCats;

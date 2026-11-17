@@ -1,5 +1,5 @@
 #pragma once
-#include <QString>
+#include <qstring.h>
 
 // providers 统一调试日志:分级 + 分模块开关 + 敏感信息脱敏
 // 开关来源(优先级):环境变量 QXVOTUBE_DEBUG > QSettings providers/debug* > 缺省 Err+Warn

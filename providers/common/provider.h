@@ -37,7 +37,7 @@ public:
     // 本站分类列表。动态拉取(从站点真实数据派生),不返回硬编码分类表;
     // 无此能力/拉取失败 → Unsupported,UI 自动退化为仅「推荐」一个 chip。
     virtual void categories(
-        std::function<void(const Result&, const QList<CategoryItem>&)> cb) {
+        std::function<void(const Result&, const QList36<CategoryItem>&)> cb) {
         cb(Result::fail(Err::Unsupported, "categories not implemented"), {});
     }
     // 按分类取列表(key 来自 categories();空 key = 推荐)
@@ -76,6 +76,6 @@ public:
 };
 
 // 注册表:平台 id → provider 实例(main/UI 层据此枚举源)
-QList<VideoProvider*> createProviders();
+QList36<VideoProvider*> createProviders();
 
 } // namespace qxv

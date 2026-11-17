@@ -33,14 +33,14 @@ int main(int argc, char** argv) {
                                            const QList<VideoItem>& a,
                                            bool hasMore) {
             if (r1.code != Err::Ok || a.isEmpty()) {
-                std::printf("[FAIL] %-9s page1: %s\n", qPrintable(pid),
-                            qPrintable(r1.message));
+                std::printf("[FAIL] %-9s page1: %s\n", qToUtf8(pid).data(),
+                            qToUtf8(r1.message).data());
                 ++fails;
                 --pending;
                 return;
             }
             std::printf("[ ok ] %-9s page1: %d items hasMore=%d\n",
-                        qPrintable(pid), a.size(), int(hasMore));
+                        qToUtf8(pid).data(), a.size(), int(hasMore));
             if (!hasMore) { --pending; return; }   // 明确无边:不算失败
             QSet<QString> ids;
             for (const VideoItem& it : a) ids.insert(it.id);
@@ -54,12 +54,12 @@ int main(int argc, char** argv) {
                 const bool okOverlap = b.isEmpty() ? false : dup * 2 <= b.size();
                 if (r2.code != Err::Ok || b.isEmpty() || !okOverlap) {
                     std::printf("[FAIL] %-9s page2: %s items=%d dup=%d\n",
-                                qPrintable(pid), qPrintable(r2.message),
+                                qToUtf8(pid).data(), qToUtf8(r2.message).data(),
                                 b.size(), dup);
                     ++fails;
                 } else {
                     std::printf("[ ok ] %-9s page2: %d items (dup=0)\n",
-                                qPrintable(pid), b.size());
+                                qToUtf8(pid).data(), b.size());
                 }
                 --pending;
             });

@@ -7,10 +7,11 @@
 #include "parse.h"
 #include "common/quality.h"
 #include "common/autherror.h"
+#if QT_VERSION >= 0x050000
 #include "common/hgapp/hgapp.h"
 #include "common/hgstream/hgstream.h"
+#endif
 
-#include <QUrlQuery>
 #include <functional>
 
 // 红果短剧 web 公开口(2026-11 实测口径,docs/protocols/bytedance.md §1.1):
@@ -44,7 +45,7 @@ void HongguoProvider::webGet(const QString& path, const QString& query,
         req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
     req.maxAttempts = 3;
     req.retryDelayMs = 300;
-    DBG_P(kMod, Debug, "GET %s", qPrintable(req.url));
+    DBG_P(kMod, Debug, "GET %s", qToUtf8(req.url).data());
     m_net.send(req, std::move(cb));
 }
 
@@ -63,14 +64,14 @@ void HongguoProvider::webPostJson(const QString& path, const QByteArray& body,
     if (!referer.isEmpty())
         req.headers.append({ "Referer", referer });
     req.headers.append(Fingerprint::chromeWeb(qFromUtf8("zh-CN,en-US"))
-                           .headers.value(0));
+                           .headers[0]);
     req.autoCookie = true;
     req.timeoutSec = 25;
     if (m_proxy.enabled)
         req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
     req.maxAttempts = 3;
     req.retryDelayMs = 300;
-    DBG_P(kMod, Debug, "POST %s (%d bytes)", qPrintable(path), body.size());
+    DBG_P(kMod, Debug, "POST %s (%d bytes)", qToUtf8(path).data(), body.size());
     m_net.send(req, std::move(cb));
 }
 
@@ -82,7 +83,7 @@ void HongguoProvider::search(const QString& kw, int page, SearchCb cb) {
     QUrlQuery q;
     q.addQueryItem("query", kw);
     q.addQueryItem("page", QString::number(page));   // 实测支持;响应带分页元信息
-    webGet("/api/search/result", q.toString(QUrl::FullyEncoded),
+    webGet("/api/search/result", q.toString(),
         [cb, kw, page](const NetResponse& r) {
         if (!r.ok()) {
             cb(Result::fail(Err::Network, r.error.isEmpty()
@@ -92,9 +93,9 @@ void HongguoProvider::search(const QString& kw, int page, SearchCb cb) {
         JRoot root(r.body);
         if (!root.ok()) { cb(Result::fail(Err::Parse, "not json"), {}, false); return; }
         bool hasMore = false;
-        const QList<VideoItem> items = hongguo::parse::searchList(root.p, page, &hasMore);
+        const QList36<VideoItem> items = hongguo::parse::searchList(root.p, page, &hasMore);
         DBG_P(kMod, Debug, "search '%s' p%d -> %d items (hasMore=%d)",
-              qPrintable(kw), page, items.size(), int(hasMore));
+              qToUtf8(kw).data(), page, items.size(), int(hasMore));
         cb(Result::ok(), items, hasMore);
     });
 }
@@ -110,12 +111,12 @@ void HongguoProvider::search(const QString& kw, int page, SearchCb cb) {
 // 每类 9 条;只有第 1 页(站点无分页参数)→ page>1 返回空 + hasMore=false。
 // ── 分类:首页 SSR homeSections 的 tab(动态) ──────────────────────
 void HongguoProvider::categories(
-    std::function<void(const Result&, const QList<CategoryItem>&)> cb) {
+    std::function<void(const Result&, const QList36<CategoryItem>&)> cb) {
     DBG_P(kMod, Info, "categories: GET / (read homeSections tabs)");
     webGet("/", QString(), [cb](const NetResponse& r) {
         if (!r.ok()) {
             DBG_P(kMod, Warn, "categories: GET / http=%d err=%s", r.status,
-                  qPrintable(r.error));
+                  qToUtf8(r.error).data());
             cb(Result::fail(Err::Network, r.error.isEmpty()
                    ? qFromUtf8("http %1").arg(r.status) : r.error), {});
             return;
@@ -128,7 +129,7 @@ void HongguoProvider::categories(
                qFromUtf8("hongguo: 首页无 _ROUTER_DATA")), {});
             return;
         }
-        QList<CategoryItem> tabs = hongguo::parse::homeTabs(root.p);
+        QList36<CategoryItem> tabs = hongguo::parse::homeTabs(root.p);
         DBG_P(kMod, Info, "categories: %d tabs", tabs.size());
         if (tabs.isEmpty()) {
             DBG_P(kMod, Warn, "categories: 0 tabs (homeSections 结构可能变更)");
@@ -144,14 +145,14 @@ void HongguoProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
     if (key.isEmpty()) { homeFeed(page, cb); return; }
     if (page > 1) {   // tab 过滤仅首屏(SSR 单页,无分页参数)
         DBG_P(kMod, Debug, "categoryFeed tab=%s p%d: 无更多分页",
-              qPrintable(key), page);
+              qToUtf8(key).data(), page);
         cb(Result::ok(), {}, false);
         return;
     }
-    DBG_P(kMod, Info, "categoryFeed: GET / tab=%s", qPrintable(key));
+    DBG_P(kMod, Info, "categoryFeed: GET / tab=%s", qToUtf8(key).data());
     webGet("/", QString(), [cb, key](const NetResponse& r) {
         if (!r.ok()) {
-            DBG_P(kMod, Warn, "categoryFeed tab=%s http=%d", qPrintable(key),
+            DBG_P(kMod, Warn, "categoryFeed tab=%s http=%d", qToUtf8(key).data(),
                   r.status);
             cb(Result::fail(Err::Network, r.error.isEmpty()
                    ? qFromUtf8("http %1").arg(r.status) : r.error), {}, false);
@@ -160,18 +161,18 @@ void HongguoProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
         JRoot root;
         if (!hongguo::parse::extractRouterData(r.body, root)) {
             DBG_P(kMod, Err, "categoryFeed tab=%s 无 _ROUTER_DATA",
-                  qPrintable(key));
+                  qToUtf8(key).data());
             cb(Result::fail(Err::Parse,
                qFromUtf8("hongguo: 首页无 _ROUTER_DATA")), {}, false);
             return;
         }
-        const QList<VideoItem> items =
+        const QList36<VideoItem> items =
             hongguo::parse::homeSection(root.p, key);
         DBG_P(kMod, Debug, "categoryFeed tab=%s -> %d items",
-              qPrintable(key), items.size());
+              qToUtf8(key).data(), items.size());
         if (items.isEmpty())
             DBG_P(kMod, Warn, "categoryFeed tab=%s empty (tab_type 变更?)",
-                  qPrintable(key));
+                  qToUtf8(key).data());
         cb(Result::ok(), items, false);
     });
 }
@@ -193,7 +194,7 @@ void HongguoProvider::homeFeed(int page, SearchCb cb) {
                 return;
             }
             bool hasMore = false;
-            const QList<VideoItem> items =
+            const QList36<VideoItem> items =
                 hongguo::parse::rankList(root.p, page, &hasMore);
             DBG_P(kMod, Debug, "homeFeed(rank) p%d -> %d items (hasMore=%d)",
                   page, items.size(), int(hasMore));
@@ -214,7 +215,7 @@ void HongguoProvider::homeFeed(int page, SearchCb cb) {
                {}, false);
             return;
         }
-        const QList<VideoItem> items = hongguo::parse::homeSections(root.p);
+        const QList36<VideoItem> items = hongguo::parse::homeSections(root.p);
         DBG_P(kMod, Debug, "homeFeed -> %d items", items.size());
         cb(Result::ok(), items, true);   // 第 2 页起走 /rank/hot-drama
     });
@@ -223,7 +224,7 @@ void HongguoProvider::homeFeed(int page, SearchCb cb) {
 void HongguoProvider::detail(const QString& id, DetailCb cb) {
     QUrlQuery q;
     q.addQueryItem("series_id", id);
-    webGet("/detail", q.toString(QUrl::FullyEncoded),
+    webGet("/detail", q.toString(),
         [cb, id](const NetResponse& r) {
         if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}, {}); return; }
         JRoot root;
@@ -233,25 +234,27 @@ void HongguoProvider::detail(const QString& id, DetailCb cb) {
             return;
         }
         VideoItem vi;
-        QList<VideoItem> parts;
+        QList36<VideoItem> parts;
         const Result dres = hongguo::parse::seriesDetail(root.p, &vi, &parts);
-        DBG_P(kMod, Debug, "detail %s -> %d episodes", qPrintable(id),
+        DBG_P(kMod, Debug, "detail %s -> %d episodes", qToUtf8(id).data(),
               parts.size());
+#if QT_VERSION >= 0x050000
         // 预热前 N 集 tracks(默认 3;QXVOTUBE_HG_PREFETCH=0 关闭)
         if (dres.code == Err::Ok && !parts.isEmpty()) {
             int n = 3;
-            if (!QXV_ENV_EMPTY("QXVOTUBE_HG_PREFETCH"))
-                n = QXV_ENV("QXVOTUBE_HG_PREFETCH").toInt();
+            if (!qenv_empty("QXVOTUBE_HG_PREFETCH"))
+                n = qenv("QXVOTUBE_HG_PREFETCH").toInt();
             QStringList vids;
             for (int i = 0; i < parts.size() && i < n; ++i)
                 if (!parts[i].id.isEmpty()) vids << parts[i].id;
             if (!vids.isEmpty())
                 hgapp::videoModels(vids, [](const Result& r,
-                                            const QMap<QString, QList<hgapp::Track>>& m) {
+                                            const QMap<QString, QList36<hgapp::Track>>& m) {
                     DBG_P(kMod, Debug, "prefetch -> %d/%d (%s)", m.size(),
-                          qPrintable(QString::number(1)), qPrintable(r.message));
+                          qPrintable(QString::number(1)), qToUtf8(r.message).data());
                 });
         }
+#endif
         cb(dres, vi, parts);
 
     });
@@ -264,8 +267,10 @@ void HongguoProvider::detail(const QString& id, DetailCb cb) {
 //           ② web 公开口 360p 明文(fallback-play-info)
 // App 链失败(风控/只有 bytevc2/代理起不来)一律显式回退 web,不静默失败。
 HongguoProvider::~HongguoProvider() {
+#if QT_VERSION >= 0x050000
     if (!m_streamVid.isEmpty())
         hgstream::Server::instance().release(m_streamVid, m_streamQuality);
+#endif
 }
 
 void HongguoProvider::resolve(const QString& id, ResolveCb cb) {
@@ -275,16 +280,16 @@ void HongguoProvider::resolve(const QString& id, ResolveCb cb) {
 void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
                                      ResolveCb cb) {
     QString seriesId = id, vid;
-    const int at = id.indexOf('@');
+    const int at = qIndexOf(id, qFromUtf8("@"));
     if (at > 0) { seriesId = id.left(at); vid = id.mid(at + 1); }
 
     auto playInfo = [this, seriesId](const QString& vid2, ResolveCb cb2) {
         // body 构造用 cJSON(自动转义)
         cJSON* bodyRoot = cJSON_CreateObject();
         cJSON_AddStringToObject(bodyRoot, "item_id",
-                                vid2.toUtf8().constData());
+                                qToUtf8(vid2).data());
         char* s = cJSON_PrintUnformatted(bodyRoot);
-        const QByteArray body(s);
+        const QByteArray body = qbaFromCharptr(s);
         cJSON_free(s);
         cJSON_Delete(bodyRoot);
 
@@ -299,7 +304,7 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
                     Result::fail(Err::Paywalled,
                         qFromUtf8("hongguo: 试看集外(HTTP %1)").arg(r.status)),
                     r.status, QString::fromUtf8("public_fallback_unavailable"),
-                    QString::fromUtf8(r.body.left(200))), {});
+                    qbaHead(r.body, 200)), {});
                 return;
             }
             if (!r.ok()) { cb2(Result::fail(Err::Network, r.error), {}); return; }
@@ -318,6 +323,10 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
             pr.item.extra.insert(qFromUtf8("seriesId"), seriesId);
             Stream st;
             st.url = url;
+            static const QString kUA =
+                Fingerprint::chromeWeb(qFromUtf8("zh-CN,en-US")).headers[0].second;
+            st.extra.insert(qFromUtf8("referer"), qFromUtf8(kSite));
+            st.extra.insert(qFromUtf8("userAgent"), kUA);
             st.quality = qFromUtf8("360P");   // 公开回退档固定
             st.kind = qFromUtf8("mp4");       // 明文渐进(fallback 口)
             st.extra.insert(qFromUtf8("urlExpire"),
@@ -341,7 +350,7 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
     {
         PlayResult cached;
         if (m_cache.get(ckey, &cached)) {
-            DBG_P(kMod, Debug, "resolve cache hit %s", qPrintable(id));
+            DBG_P(kMod, Debug, "resolve cache hit %s", qToUtf8(id).data());
             cb(Result::ok(), cached);
             return;
         }
@@ -377,13 +386,14 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
         };
         if (!vid.isEmpty()) { viaWeb(vid); return; }
         detail(seriesId, [cb, viaWeb](Result res, const VideoItem&,
-                                      const QList<VideoItem>& parts) {
+                                      const QList36<VideoItem>& parts) {
             if (res.code != Err::Ok || parts.isEmpty()) { cb(res, {}); return; }
             viaWeb(parts.first().id);
         });
         return;
     }
 
+#if QT_VERSION >= 0x050000
     // 通道②:App 协议(零签名 H3a)+ 本地流式解密代理(H2b)。
     // 只有 bytevc1(HEVC 通用可播)才走;bytevc2 私有编码 → web 保底并留说明。
     auto tryApp = [this, cb, seriesId, playInfo, quality, ckey](
@@ -391,21 +401,21 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
         hgapp::videoModel(vid2, [this, cb, seriesId, vid2, playInfo, quality,
                                  ckey](
                                     const Result& r,
-                                    const QList<hgapp::Track>& tracks) {
+                                    const QList36<hgapp::Track>& tracks) {
             if (r.code != Err::Ok) {
                 DBG_P(kMod, Info, "app chain failed (%s) -> web fallback",
-                      qPrintable(r.message));
+                      qToUtf8(r.message).data());
                 playInfo(vid2, cb);
                 return;
             }
             // 指定清晰度:按 definition 精确选(大小写不敏感);
             // 未指定 → pickBest(优先 bytevc1 最高档)
             const hgapp::Track* best = nullptr;
-            if (quality.trimmed().isEmpty()) {
+            if (qTrim(quality).isEmpty()) {
                 best = hgapp::pickBest(tracks);
             } else {
                 for (int i = 0; i < tracks.size(); ++i)
-                    if (QXV_IEQ(tracks[i].definition, quality)) {
+                    if (qieq(tracks[i].definition, quality)) {
                         best = &tracks[i];
                         break;
                     }
@@ -433,7 +443,7 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
                 vid2, best->definition, best->url, best->spadeA, &localUrl);
             if (o.code != Err::Ok) {
                 DBG_P(kMod, Warn, "local proxy failed (%s) -> web fallback",
-                      qPrintable(o.message));
+                      qToUtf8(o.message).data());
                 playInfo(vid2, cb);
                 return;
             }
@@ -449,19 +459,19 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
             pr.item.extra.insert(qFromUtf8("seriesId"), seriesId);
             Stream st;
             st.url = localUrl;
-            st.quality = best->definition.toUpper();   // "1080P"
+            st.quality = qToUpper(best->definition);   // "1080P"
             st.kind = qFromUtf8("mp4");                // 本地代理出明文 mp4
             st.extra.insert(qFromUtf8("localProxy"), true);
             st.extra.insert(qFromUtf8("cenc"), true);
             st.extra.insert(qFromUtf8("source"), qFromUtf8("app"));
             st.extra.insert(qFromUtf8("codec"), best->codecType);
             st.extra.insert(qFromUtf8("definition"), best->definition);
-            if (!quality.trimmed().isEmpty())
+            if (!qTrim(quality).isEmpty())
                 st.extra.insert(qFromUtf8("requestedQuality"), quality);
             pr.streams.append(st);
             DBG_P(kMod, Info, "resolve %s -> app %s (local proxy %s)",
-                  qPrintable(vid2), qPrintable(best->definition),
-                  qPrintable(localUrl));
+                  qToUtf8(vid2).data(), qToUtf8(best->definition).data(),
+                  qToUtf8(localUrl).data());
             // 本地代理地址 10 分钟内复用(会话 refs 在,地址有效)
             m_cache.put(ckey, pr, 10 * 60 * 1000);
             cb(Result::ok(), pr);
@@ -471,10 +481,19 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
     if (!vid.isEmpty()) { tryApp(vid); return; }
     detail(seriesId, [cb, tryApp = std::move(tryApp)](
                          Result res, const VideoItem&,
-                         const QList<VideoItem>& parts) {
+                         const QList36<VideoItem>& parts) {
         if (res.code != Err::Ok || parts.isEmpty()) { cb(res, {}); return; }
         tryApp(parts.first().id);   // 首集
     });
+#else
+    /* Qt3:App 1080p 链路(hgcenc/hgstream)暂不编译 → 直接 web 360p 明文 */
+    if (!vid.isEmpty()) { playInfo(vid, cb); return; }
+    detail(seriesId, [cb, playInfo](Result res, const VideoItem&,
+                                    const QList36<VideoItem>& parts) {
+        if (res.code != Err::Ok || parts.isEmpty()) { cb(res, {}); return; }
+        playInfo(parts.first().id, cb);
+    });
+#endif
 }
 
 } // namespace qxv

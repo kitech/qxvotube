@@ -21,19 +21,19 @@ static bool readJson(const QString& path, JRoot* out) {
 static bool checkLang(const QString& dir, const QString& lang, int* missing) {
     JRoot root;
     if (!readJson(dir + qFromUtf8("/%1.json").arg(lang), &root)) {
-        std::printf("[FAIL] %s.json unreadable\n", qPrintable(lang));
+        std::printf("[FAIL] %s.json unreadable\n", qToUtf8(lang).data());
         ++(*missing);
         return false;
     }
     cJSON* eobj = jobj(root.p, "error");
-    if (!eobj) { std::printf("[FAIL] %s: no error object\n", qPrintable(lang)); ++(*missing); return false; }
+    if (!eobj) { std::printf("[FAIL] %s: no error object\n", qToUtf8(lang).data()); ++(*missing); return false; }
     for (int code = (int)Err::Network; code <= (int)Err::Unsupported; ++code) {
         const QString key = i18nKeyFor(static_cast<Err>(code));
         if (key.isEmpty()) continue;   // Ok/Cancelled 不需要文案
-        const QString sub = key.mid(key.indexOf(qFromUtf8(".")) + 1);
+        const QString sub = key.mid(qIndexOf(key, qFromUtf8(".")) + 1);
         const QString val = jstr(eobj, sub.toUtf8().constData());
         if (val.isEmpty()) {
-            std::printf("[FAIL] %s: missing %s\n", qPrintable(lang), qPrintable(key));
+            std::printf("[FAIL] %s: missing %s\n", qToUtf8(lang).data(), qToUtf8(key).data());
             ++(*missing);
         }
     }
@@ -43,7 +43,7 @@ static bool checkLang(const QString& dir, const QString& lang, int* missing) {
         "auth_oauth_expired", "auth_password_failed", "auth_server" };
     for (const char* k : authKeys)
         if (jstr(eobj, k).isEmpty()) {
-            std::printf("[FAIL] %s: missing error.%s\n", qPrintable(lang), k);
+            std::printf("[FAIL] %s: missing error.%s\n", qToUtf8(lang).data(), k);
             ++(*missing);
         }
     return true;

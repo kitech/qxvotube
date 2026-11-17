@@ -1,23 +1,25 @@
 #include "debuglog.h"
-#include <QHash>
-#include <QDateTime>
-#include <QFile>
-#include <QTextStream>
+#include <map>
+#include <string>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 
 // 跨 Qt 版本兼容(QXV_STR/SkipEmptyParts 等统一宏,详见 compat.h)
 #include "compat.h"
 
 namespace dbg {
 
-static QHash<QString, Level> s_modLevel;   // 模块→级别;缺省模块 "" = 全局
-static QFile s_logFile;
+static std::map<std::string, Level> s_modLevel;   // 模块→级别;缺省 "" = 全局
+static FILE* s_logFile = 0;
 static bool s_fullMode = false;
 
+static std::string keyOf(const QString& s) {
+    return std::string(qToUtf8(s).data());
+}
+
 static Level parseLevel(const QString& s) {
-    // Qt3 无 compare(QString,Qt::CaseInsensitive):转大写比较
-    const QString t = s.toUpper();
+    const QString t = qToUpper(s);
     if (t == qFromUtf8("ERR"))   return Err;
     if (t == qFromUtf8("WARN"))  return Warn;
     if (t == qFromUtf8("INFO"))  return Info;
@@ -26,32 +28,40 @@ static Level parseLevel(const QString& s) {
 }
 
 void loadFromEnv() {
-    const QString d = QXV_ENV("QXVOTUBE_DEBUG");
+    const QString d = qenv("QXVOTUBE_DEBUG");
     if (!d.isEmpty()) {
-        const QStringList segs = d.split(qFromUtf8(","), QXV_SKIP_EMPTY);
-        for (const QString& seg : segs) {
-            const int c = seg.indexOf(qFromUtf8(":"));
-            if (c < 0) { s_modLevel[QString()] = parseLevel(seg); continue; }
-            s_modLevel[seg.left(c)] = parseLevel(seg.mid(c + 1));
+        const QStringList segs = qStrSplit(d, qFromUtf8(","), true);
+        for (int i = 0; i < segs.size(); ++i) {
+            const QString& seg = segs[i];
+            const int c = qIndexOf(seg, qFromUtf8(":"));
+            if (c < 0) { s_modLevel[std::string()] = parseLevel(seg); continue; }
+            s_modLevel[keyOf(seg.left(c))] = parseLevel(seg.mid(c + 1));
         }
-        DBG(Info, "log", "debug switches loaded from env: %s", qPrintable(d));
+        DBG(Info, "log", "debug switches loaded from env: %s",
+            qToUtf8(d).data());
     }
-    s_fullMode = !QXV_ENV_EMPTY("QXVOTUBE_DEBUG_FULL");
+    s_fullMode = !qenv_empty("QXVOTUBE_DEBUG_FULL");
 }
 
 bool enabled(Level lvl, const char* module) {
-    Level base = s_modLevel.value(QString(), Warn);
-    Level m = s_modLevel.value(QString::fromLatin1(module), base);
+    Level base = Warn;
+    std::map<std::string, Level>::const_iterator d = s_modLevel.find(std::string());
+    if (d != s_modLevel.end()) base = d->second;
+    Level m = base;
+    std::map<std::string, Level>::const_iterator it =
+        s_modLevel.find(std::string(module));
+    if (it != s_modLevel.end()) m = it->second;
     return lvl <= m;
 }
 
-void setLevel(const QString& module, Level lvl) { s_modLevel[module] = lvl; }
+void setLevel(const QString& module, Level lvl) {
+    s_modLevel[keyOf(module)] = lvl;
+}
 
 void setLogFile(const QString& path) {
-    if (s_logFile.isOpen()) s_logFile.close();
+    if (s_logFile) { std::fclose(s_logFile); s_logFile = 0; }
     if (path.isEmpty()) return;
-    s_logFile.setFileName(path);
-    s_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+    s_logFile = std::fopen(qToUtf8(path).data(), "a");
 }
 
 static const char* lvlName(Level l) {
@@ -67,19 +77,17 @@ void vlog(Level lvl, const char* module, const char* file, int line,
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
 
-    const QString line_ = QString("[PROVIDERS][%1][%2] %3")
-        .arg(module, lvlName(lvl), QString::fromUtf8(buf));
-    qWarning("%s [%s:%d]", qPrintable(line_), file, line);
-    if (s_logFile.isOpen()) {
-        QTextStream t(&s_logFile);
-        t << QDateTime::currentDateTime().toString(Qt::ISODate) << ' '
-          << line_ << '\n';
-        t.flush();
+    const QString line_ = QString::fromUtf8("[PROVIDERS][%1][%2] %3")
+        .arg(qFromUtf8(module), qFromUtf8(lvlName(lvl)), qFromUtf8(buf));
+    qWarning("%s [%s:%d]", qToUtf8(line_).data(), file, line);
+    if (s_logFile) {
+        std::fprintf(s_logFile, "%s\n", qToUtf8(line_).data());
+        std::fflush(s_logFile);
     }
 }
 
 QString mask(const QString& v) {
-    if (s_fullMode || v.size() <= 8) return v;
+    if (s_fullMode || v.length() <= 8) return v;
     return v.left(8) + qFromUtf8("...");
 }
 

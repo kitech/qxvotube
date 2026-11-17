@@ -24,7 +24,7 @@ QByteArray g_key;
 
 void fail(const char* what, const QString& why) {
     ++g_fail;
-    std::printf("[FAIL] %s: %s\n", what, qPrintable(why));
+    std::printf("[FAIL] %s: %s\n", what, qToUtf8(why).data());
 }
 
 // 只解头部 1MB 内完整样本(video/audio 各);视频样本必须全部 NAL 自证通过
@@ -84,8 +84,8 @@ int main(int argc, char** argv) {
             QCoreApplication::exit(1);
             return;
         }
-        std::printf("[ ok ] device: did=%s iid=%s\n", qPrintable(d.deviceId),
-                    qPrintable(d.installId));
+        std::printf("[ ok ] device: did=%s iid=%s\n", qToUtf8(d.deviceId).data(),
+                    qToUtf8(d.installId).data());
 
         videoModel(vid, [vid](const Result& r2, const QList<Track>& tracks) {
             if (r2.code != Err::Ok) {
@@ -101,8 +101,8 @@ int main(int argc, char** argv) {
 
             const Track* best = pickBest(tracks);
             if (!best) { fail("pickBest", qFromUtf8("none")); QCoreApplication::exit(1); return; }
-            std::printf("[ ok ] pick: %s/%s\n", qPrintable(best->definition),
-                        qPrintable(best->codecType));
+            std::printf("[ ok ] pick: %s/%s\n", qToUtf8(best->definition).data(),
+                        qToUtf8(best->codecType).data());
 
             // spade → content key
             const QByteArray spade = QByteArray::fromBase64(
@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
                 return;
             }
             g_key = QByteArray::fromHex(keyHex.toUtf8());
-            std::printf("[ ok ] content key: %s\n", qPrintable(keyHex));
+            std::printf("[ ok ] content key: %s\n", qToUtf8(keyHex).data());
 
             // 头部 1MB 密文(验证口径:只要开头;完整下载不在自检范围)
             NetRequest fr;
