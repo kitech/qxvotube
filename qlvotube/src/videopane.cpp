@@ -27,6 +27,20 @@ VideoPane::VideoPane(QWidget* parent)
     m_engineLabel = new QLabel(bar);
     barLay->addWidget(m_backBtn, 0);
     barLay->addWidget(m_engineLabel, 1);
+    /* M7:右侧实时分辨率/档位 */
+    m_infoLabel = new QLabel(bar);
+    m_infoLabel->setText("");
+#ifdef QT3_BUILD
+    {
+        QPalette ip = m_infoLabel->palette();
+        ip.setColor(QPalette::Active, QColorGroup::Foreground, QColor(170, 170, 170));
+        ip.setColor(QPalette::Inactive, QColorGroup::Foreground, QColor(170, 170, 170));
+        m_infoLabel->setPalette(ip);
+    }
+#else
+    m_infoLabel->setStyleSheet(QString::fromLatin1("color: #aaaaaa;"));
+#endif
+    barLay->addWidget(m_infoLabel, 0);
     m_lay->addWidget(bar, 0);
 
     m_surface = new QWidget(this);
@@ -96,6 +110,18 @@ void VideoPane::setEngineLabel(const QString& name)
 {
     if (m_engineLabel != 0)
         m_engineLabel->setText(name);
+}
+
+void VideoPane::setVideoInfoText(const QString& text)
+{
+    if (m_infoLabel != 0)
+        m_infoLabel->setText(text);
+}
+
+void VideoPane::contextMenuEvent(QContextMenuEvent* e)
+{
+    emit contextMenuRequested(e->globalPos());
+    e->accept();
 }
 
 void VideoPane::resizeEvent(QResizeEvent* e)

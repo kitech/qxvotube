@@ -121,6 +121,11 @@ void CXVideoPlayer::setMute(bool on)
         m_engine->setMute(on);
 }
 
+CxVideoInfo CXVideoPlayer::videoInfo() const
+{
+    return m_engine != 0 ? m_engine->videoInfo() : CxVideoInfo();
+}
+
 long CXVideoPlayer::position() const
 {
     if (m_engine != 0)
@@ -204,6 +209,7 @@ void CXVideoPlayer::wireEngine()
     connect(m_engine, SIGNAL(positionChanged(long)), this, SIGNAL(positionChanged(long)));
     connect(m_engine, SIGNAL(durationChanged(long)), this, SIGNAL(durationChanged(long)));
     connect(m_engine, SIGNAL(seekFinished(long)), this, SIGNAL(seekFinished(long)));
+    connect(m_engine, SIGNAL(videoInfoChanged()), this, SIGNAL(videoInfoChanged()));   // M7
     connect(m_engine, SIGNAL(subtitleChanged(const QString&)), this, SIGNAL(subtitleChanged(const QString&)));
     connect(m_engine, SIGNAL(started()), this, SLOT(engineStarted()));
     connect(m_engine, SIGNAL(paused()), this, SLOT(enginePaused()));

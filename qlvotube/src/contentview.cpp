@@ -7,6 +7,7 @@
 #include <qglobal.h>
 #include <qpainter.h>
 #include <qevent.h>
+#include <qdatetime.h>
 #include <qfontmetrics.h>
 #if QT_VERSION >= 0x040000
 #include <QDebug>
@@ -406,6 +407,17 @@ QRect ContentView::cardRect(int i) const
     return QRect(x, y, cardW, gridCardH());
 }
 
+void ContentView::contextMenuEvent(QContextMenuEvent* e)
+{
+    if (m_mode != VideoGridMode)
+        return;
+    const int idx = rowAt(e->pos());
+    if (idx < 0 || idx >= (int)m_videos.size())
+        return;
+    emit videoContextMenu(m_videos[idx].id, e->globalPos());
+    e->accept();
+}
+
 int ContentView::rowAt(const QPoint& p) const
 {
     int y = p.y() + m_scrollY;
@@ -756,11 +768,42 @@ void ContentView::paintEvent(QPaintEvent*)
                 if (!sub.isEmpty()) sub += QString::fromUtf8(" · ");
                 sub += fmtCount(c.playCount);
             }
+            /* M7:发布日期(0=未知,不显示,避免假数据) */
+            if (c.publishMs > 0) {
+                if (!sub.isEmpty()) sub += QString::fromUtf8(" · ");
+#ifdef QT3_BUILD
+                QDateTime dt;
+                dt.setTime_t((uint)(c.publishMs / 1000));
+#elif QT_VERSION < 0x050800
+                QDateTime dt = QDateTime::fromTime_t((uint)(c.publishMs / 1000));
+#else
+                QDateTime dt = QDateTime::fromSecsSinceEpoch(c.publishMs / 1000);
+#endif
+                sub += dt.toString(QString::fromLatin1("yyyy-MM-dd"));
+            }
             if (!sub.isEmpty())
                 p.drawText(QRect(cr.x(), cr.y() + coverH + 24,
                                  cr.width(), 16),
                            Qt::AlignVCenter | Qt::AlignLeft,
                            elideOneLine(p, sub, cr.width()));
+
+            /* M7:封面右下角时长徽标 */
+            if (c.durationMs > 0) {
+                const QString dur = fmtMs((int)c.durationMs);
+                QFontMetrics dfm(small);
+                const int tw = qFontWidth(dfm, dur) + 10;
+                QRect br(cr.x() + cr.width() - tw - 6,
+                         cr.y() + coverH - 20, tw, 16);
+                p.setPen(Qt::NoPen);
+#ifdef QT3_BUILD
+                p.setBrush(QColor(32, 32, 32));   /* Qt3 QColor 无 alpha 构造 */
+#else
+                p.setBrush(QColor(0, 0, 0, 170));
+#endif
+                muiDrawRoundRect(p, br, 3, 3);
+                p.setPen(QColor(255, 255, 255));
+                p.drawText(br, Qt::AlignCenter, dur);
+            }
         }
 
         /* footer：错误+重试 / 加载中 / 加载更多 / 空态 */
@@ -800,6 +843,9 @@ void ContentView::paintEvent(QPaintEvent*)
 
 void ContentView::mousePressEvent(QMouseEvent* e)
 {
+    /* M7:右键交给 contextMenuEvent,不能顺带激活条目 */
+    if (e->button() != Qt::LeftButton)
+        return;
     if (m_mode == PlaylistListMode || m_mode == CategoryGridMode
         || m_mode == VideoGridMode) {
         if (backRect().contains(e->pos())) {

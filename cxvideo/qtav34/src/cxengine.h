@@ -20,6 +20,23 @@ struct CxNetOptions {
     }
 };
 
+// 播放信息(M7):播放器详情弹窗 + 顶栏分辨率共用。
+// 取不到的字段一律留空/0,UI 显示 N/A —— 不猜、不造假。
+struct CxVideoInfo {
+    QString url;                // 当前播放直链(可能带签名)
+    int     width;              // 解码器输出宽
+    int     height;             // 解码器输出高
+    QString codec;              // h264/hevc/av1...
+    QString hw;                 // vaapi/cuda/...;空=软解
+    qint64  bitrateKbps;        // 容器/流码率;0=未知
+    double  fps;                // avg_frame_rate;0=未知
+    QString quality;            // 实际档位(Stream.quality)
+    QString requestedQuality;   // 用户请求档位
+    bool    degraded;           // 请求档位被降级
+    CxVideoInfo()
+        : width(0), height(0), bitrateKbps(0), fps(0), degraded(false) {}
+};
+
 // 引擎抽象(detail.md 第 3 节;UI 线程 API,线程→UI 经事件回投)
 class CXEngine : public QObject {
     Q_OBJECT
@@ -60,6 +77,9 @@ public:
     // M4-A:硬解名("vaapi"/"cuda";0=软解;cmdmpv 恒 0)
     virtual const char* hwName() const { return 0; }
 
+    // M7:播放信息(默认全空;ffmpeg/mpv 各自填)
+    virtual CxVideoInfo videoInfo() const { return CxVideoInfo(); }
+
     // M1 起挂渲染器(renderer 由引擎侧驱动 showFrame)
     virtual void setRenderer(CXVideoRenderer* r) { p_renderer = r; }
     CXVideoRenderer* renderer() const { return p_renderer; }
@@ -79,6 +99,7 @@ signals:
     void positionChanged(long ms);
     void durationChanged(long ms);
     void seekFinished(long ms);
+    void videoInfoChanged();     // M7:打开完成/换轨后触发(UI 刷新顶栏/详情)
     void subtitleChanged(const QString& text); // 空串 = 当前无;connect 规格用 const QString&
 
 protected:

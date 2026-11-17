@@ -7,6 +7,7 @@
 #include "contentview.h"
 #include "ConfigDialog.h"   /* SettingsChangedMap 类型随 Q_OBJECT 槽声明完整 */
 #include "providers/common/provider.h"
+#include "cxengine.h"          /* M7:CxVideoInfo */
 #include "videoui.h"
 #include <qmainwindow.h>
 #include <qwidget.h>
@@ -73,6 +74,9 @@ private slots:
     void onSiteChanged(const QString& providerId);
     void onChipActivated(const QString& key);
     void onVideoActivated(const QString& id);
+    void onVideoContextMenu(const QString& id, const QPoint& globalPos);  /* M7 */
+    void onPlayerContextMenu(const QPoint& globalPos);                    /* M7 */
+    void applyVideoInfo();                                                /* M7 */
     void onGridLoadMore();
     void onSearchSubmitted(const QString& kw);
     void onPlayPause();
@@ -189,6 +193,11 @@ private:
     bool m_gridHasMore;
     bool m_gridLoading;
     QString m_gridChip;                    /* 当前分类 key(空=推荐) */
+    CxVideoInfo m_videoInfo;      /* M7:最近一次播放信息(详情弹窗) */
+    QString m_curQuality;         /* M7:实际档位 */
+    QString m_curRequested;       /* M7:请求档位 */
+    bool m_curDegraded;           /* M7 */
+    QString m_curWebUrl;          /* M7:当前视频网页地址 */
     QMap<QString, QString> m_videoTitles;  /* 点播时补标题(不额外请求 detail) */
     int m_gridGen;                         /* 代际:切源/切分类/新请求自增 */
     bool m_gridIsSearch;                   /* 当前网格是搜索结果 */

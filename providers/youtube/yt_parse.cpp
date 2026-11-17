@@ -23,6 +23,11 @@ QList36<VideoItem> searchItems(cJSON* root) {
                     vi.author = jstr(jat(runs, 0), "text");
                     cJSON* thumbs = jarr(jobj(vr, "thumbnail"), "thumbnails");
                     vi.cover = jstr(jat(thumbs, jsize(thumbs) - 1), "url");
+                    // M7:网页地址;publishedTimeText 是自然语言("2 days ago"),
+                    // 不解析成时间戳 → publishMs 留 0,UI 显示 --
+                    if (!vi.id.isEmpty())
+                        vi.webUrl = qFromUtf8("https://www.youtube.com/watch?v=")
+                                    + vi.id;
                     if (!vi.id.isEmpty()) items.append(vi);
                 }
             } else if (cJSON* cv = cJSON_GetObjectItemCaseSensitive(

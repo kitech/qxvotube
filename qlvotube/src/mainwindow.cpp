@@ -36,6 +36,8 @@
 #include "cxengine.h"
 #include "renderer_gl.h"     /* M5-A:ffmpeg 路 GL 渲染器 */
 #include "videorendererfactory.h"   /* M6:输出后端可配置(cxvideo-vo.md) */
+#include "videoinfodialog.h"        /* M7:视频详情弹窗 */
+#include <qclipboard.h>
 #include "appearance.h"
 #include <qlabel.h>
 #include <qpushbutton.h>
@@ -195,7 +197,7 @@ MainWindow::MainWindow(QWidget* parent)
 #endif
     );
 
-    setGeometry(100, 50, 880, 640);
+    setGeometry(100, 50, 980, 640);
     buildStatusBar();
     buildCentralWidget();
     buildAppearancePanel();
@@ -391,6 +393,13 @@ void MainWindow::buildCentralWidget()
     }
     QObject::connect(videoPane, SIGNAL(backRequested()),
                      this, SLOT(onVideoBackRequested()));
+    /* M7:播放器右键 → 视频详情/复制/浏览器打开 */
+    QObject::connect(videoPane, SIGNAL(contextMenuRequested(const QPoint&)),
+                     this, SLOT(onPlayerContextMenu(const QPoint&)));
+    /* M7:列表卡片右键 → 复制/显示/浏览器打开 */
+    QObject::connect(contentView,
+                     SIGNAL(videoContextMenu(const QString&, const QPoint&)),
+                     this, SLOT(onVideoContextMenu(const QString&, const QPoint&)));
 
     /* 引擎回执接线(进程型 cmdmpv 为 M1 主线;started/finished 已映射) */
     QObject::connect(m_player, SIGNAL(started()), this, SLOT(onPlayerStarted()));
@@ -403,6 +412,8 @@ void MainWindow::buildCentralWidget()
                      this, SLOT(onSubtitleText(const QString&)));
     QObject::connect(m_player, SIGNAL(noticedError(int,const QString&)),
                      this, SLOT(onPlayerError(int,const QString&)));
+    QObject::connect(m_player, SIGNAL(videoInfoChanged()),
+                     this, SLOT(applyVideoInfo()));   /* M7 */
 
     framelessHelper = new FramelessHelper(this);
     framelessHelper->setup(this);
@@ -1085,6 +1096,19 @@ void MainWindow::setupVideoProviders()
     sideNav->setVideoSites(ids);   /* 触发一次 siteChanged(第一个源) */
 }
 
+/* M7:默认播放分辨率(配置 video.quality;env QLVOTUBE_QUALITY 可覆盖)。
+ * 返回空 = auto(交由 provider 默认);否则返回 1080P/720P/480P/360P。 */
+static QString cxResolveQuality(const QString& cfg)
+{
+    const char* env = getenv("QLVOTUBE_QUALITY");
+    QString v = env != 0 && env[0] != '\0' ? qFromUtf8(env) : cfg;
+    if (v.isEmpty())
+        v = qFromUtf8("360P");
+    if (qToLower(v) == qFromUtf8("auto"))   /* 跨 Qt 版本安全 */
+        return QString();
+    return v;
+}
+
 void MainWindow::onSiteChanged(const QString& providerId)
 {
     m_curProv = 0;
@@ -1182,6 +1206,8 @@ void MainWindow::loadVideoPage(int page)
             d.author = items[i].author;
             d.cover = items[i].cover;
             d.durationMs = items[i].durationMs;
+            d.publishMs = items[i].publishMs;   /* M7 */
+            d.webUrl = items[i].webUrl;         /* M7 */
             d.playCount =
                 qMapValue(items[i].extra, qFromUtf8("view"), QVariant())
                     .toLongLong();
@@ -1339,8 +1365,14 @@ void MainWindow::playVideoAt(int index)
     }
     SharedStatusBar::instance()->showMessage(_("content.resolving"), 3000);
     qxv::VideoProvider* p = m_curProv;
-    p->resolve(id, [this, index](const qxv::Result& r,
-                                 const qxv::PlayResult& pr) {
+    /* M7:网页地址(右键"在浏览器打开"用) */
+    m_curWebUrl = QString();
+    for (size_t k = 0; k < m_videoCards.size(); ++k)
+        if (m_videoCards[k].id == id) { m_curWebUrl = m_videoCards[k].webUrl; break; }
+    /* M7:默认分辨率(360P;auto=传空走源默认) */
+    const QString wantQ = cxResolveQuality(Config::value("video.quality"));
+    auto onResolved = [this, index](const qxv::Result& r,
+                                    const qxv::PlayResult& pr) {
         VideoUiEvent* ev = new VideoUiEvent(VideoUiEvent::Status);
         ev->gen = m_gridGen;
         ev->page = index;
@@ -1359,9 +1391,20 @@ void MainWindow::playVideoAt(int index)
                                                 QVariant())).toString();
             ev->proxy = qMapValue(st.extra, qFromUtf8("proxy"),
                                   QVariant()).toString();
+            /* M7:实际/请求档位与降级标记 */
+            ev->quality = st.quality;
+            ev->requestedQuality =
+                qMapValue(st.extra, qFromUtf8("requestedQuality"),
+                          QVariant()).toString();
+            ev->degraded =
+                qMapValue(st.extra, qFromUtf8("degraded"), QVariant()).toBool();
         }
         QApplication::postEvent(this, ev);
-    });
+    };
+    if (wantQ.isEmpty())
+        p->resolve(id, onResolved);
+    else
+        p->resolveQuality(id, wantQ, onResolved);
 }
 
 void MainWindow::onTrackActivated(int playlistId, int trackIndex)
@@ -1423,6 +1466,26 @@ void MainWindow::openSettings()
     dlg->addCategory(_("settings.videoout_tab"), vpage);
     dlg->registerConfigItem(voutItem);
 
+    /* —— 播放分辨率页(M7):默认 360P —— */
+    CategoryPage* qpage = new CategoryPage(_("settings.quality_tab"), dlg);
+    QStringList qOpts;
+    qOpts << qFromUtf8("auto") << qFromUtf8("1080P") << qFromUtf8("720P")
+          << qFromUtf8("480P") << qFromUtf8("360P");
+    SelectConfigItem* qItem = new SelectConfigItem(
+        "video/quality", cxResolveQuality(Config::value("video.quality")), "",
+        qOpts, qpage);
+    qpage->addLabeledControl(_("settings.quality_label"), qItem->comboBox());
+    QLabel* qhint = new QLabel(_("settings.quality_hint"), qpage);
+#if QT_VERSION >= 0x040000
+    qhint->setWordWrap(true);
+#else
+    qhint->setAlignment(Qt::WordBreak | Qt::AlignLeft);
+    qhint->setMinimumHeight(44);
+#endif
+    qpage->addWidget(qhint);
+    dlg->addCategory(_("settings.quality_tab"), qpage);
+    dlg->registerConfigItem(qItem);
+
     /* —— 关于页 —— */
     CategoryPage* about = new CategoryPage(_("menu.help"), dlg);
     QLabel* aboutLabel = new QLabel(
@@ -1453,6 +1516,9 @@ void MainWindow::onSettingsSaved(const SettingsChangedMap& changed)
         bool on = (changed["ui/dark"].toString() == _("theme_dark"));
         if (on != ThemeManager::isDarkMode())
             ThemeManager::applyTheme(on);
+    }
+    if (changed.contains("video/quality")) {
+        Config::setValue("video.quality", changed["video/quality"].toString());
     }
     if (changed.contains("video/out")) {
         /* 后端在启动时创建(挂到 surface),运行期替换涉及引擎重挂,
@@ -1530,6 +1596,115 @@ void MainWindow::switchToPlayerView(bool on)
 void MainWindow::onVideoBackRequested()
 {
     switchToPlayerView(false);
+}
+
+/* ── M7:顶栏分辨率/档位 ─────────────────────────────────────────── */
+void MainWindow::applyVideoInfo()
+{
+    if (m_player == 0 || videoPane == 0)
+        return;
+    CxVideoInfo vi = m_player->videoInfo();
+    vi.quality = m_curQuality.isEmpty() ? vi.quality : m_curQuality;
+    vi.requestedQuality = m_curRequested;
+    vi.degraded = m_curDegraded;
+    if (vi.url.isEmpty())
+        vi.url = m_curUrl;
+    m_videoInfo = vi;
+
+    QString res = qFromUtf8("--");
+    if (vi.width > 0 && vi.height > 0)
+        res = qFromUtf8("%1×%2").arg(vi.width).arg(vi.height);
+    QString text = res;
+    if (!vi.quality.isEmpty())
+        text += qFromUtf8(" · ") + vi.quality;
+    videoPane->setVideoInfoText(text);
+}
+
+/* 共用:构造右键菜单(返回选中 id;Qt3=QPopupMenu,Qt4+=QMenu) */
+static int cxShowMenu(QWidget* parent, const QPoint& pos,
+                      const QStringList& items)
+{
+#ifdef QT3_BUILD
+    QPopupMenu m(parent);
+    for (int i = 0; i < items.size(); ++i)
+        m.insertItem(items[i], i + 1);
+    return m.exec(pos) - 1;      // -1 = 未选中
+#else
+    QMenu m(parent);
+    QList<QAction*> acts;
+    for (int i = 0; i < items.size(); ++i)
+        acts.append(m.addAction(items[i]));
+    QAction* sel = m.exec(pos);
+    for (int i = 0; i < acts.size(); ++i)
+        if (acts[i] == sel)
+            return i;
+    return -1;
+#endif
+}
+
+/* 列表卡片右键:复制网页地址 / 复制直链 / 显示 / 浏览器打开 */
+void MainWindow::onVideoContextMenu(const QString& id, const QPoint& globalPos)
+{
+    QString webUrl;
+    for (size_t i = 0; i < m_videoCards.size(); ++i)
+        if (m_videoCards[i].id == id) { webUrl = m_videoCards[i].webUrl; break; }
+    QStringList items;
+    items << qFromUtf8("复制网页地址")
+          << qFromUtf8("复制直链地址(会过期)")
+          << qFromUtf8("显示地址…")
+          << qFromUtf8("在浏览器打开");
+    const int sel = cxShowMenu(this, globalPos, items);
+    if (sel == 0) {
+        QApplication::clipboard()->setText(webUrl.isEmpty() ? id : webUrl);
+        SharedStatusBar::instance()->showMessage(
+            webUrl.isEmpty() ? qFromUtf8("该源未提供网页地址,已复制 id")
+                             : qFromUtf8("已复制网页地址"), 3000);
+    } else if (sel == 1) {
+        if (m_curUrl.isEmpty() || m_videoInfo.url.isEmpty()) {
+            SharedStatusBar::instance()->showMessage(
+                qFromUtf8("请先播放该视频,直链需解析后才有"), 4000);
+        } else {
+            QApplication::clipboard()->setText(m_videoInfo.url);
+            SharedStatusBar::instance()->showMessage(
+                qFromUtf8("已复制直链(带签名,可能过期)"), 4000);
+        }
+    } else if (sel == 2) {
+        ToastWidget::showCenter(this, webUrl.isEmpty() ? id : webUrl,
+                                ToastWidget::Info, 4000);
+    } else if (sel == 3) {
+        if (!webUrl.isEmpty())
+            qOpenUrl(webUrl);
+        else
+            SharedStatusBar::instance()->showMessage(
+                qFromUtf8("该源未提供网页地址"), 3000);
+    }
+}
+
+/* 播放器右键:视频详情 / 复制直链 / 浏览器打开 */
+void MainWindow::onPlayerContextMenu(const QPoint& globalPos)
+{
+    QStringList items;
+    items << qFromUtf8("视频详情…")
+          << qFromUtf8("复制直链地址(会过期)")
+          << qFromUtf8("在浏览器打开");
+    const int sel = cxShowMenu(this, globalPos, items);
+    if (sel == 0) {
+        applyVideoInfo();
+        VideoInfoDialog dlg(m_videoInfo, this);
+        dlg.exec();
+    } else if (sel == 1) {
+        if (!m_videoInfo.url.isEmpty()) {
+            QApplication::clipboard()->setText(m_videoInfo.url);
+            SharedStatusBar::instance()->showMessage(
+                qFromUtf8("已复制直链(带签名,可能过期)"), 4000);
+        }
+    } else if (sel == 2) {
+        if (!m_curWebUrl.isEmpty())
+            qOpenUrl(m_curWebUrl);
+        else
+            SharedStatusBar::instance()->showMessage(
+                qFromUtf8("该源未提供网页地址"), 3000);
+    }
 }
 
 void MainWindow::onPlayerFinished()
@@ -1961,6 +2136,8 @@ void MainWindow::customEvent(CustomEventBase* event)
                 c.cover = e->cards[i].cover;
                 c.durationMs = e->cards[i].durationMs;
                 c.playCount = e->cards[i].playCount;
+                c.publishMs = e->cards[i].publishMs;   /* M7 */
+                c.webUrl = e->cards[i].webUrl;         /* M7 */
                 cards.push_back(c);
                 if (!c.id.isEmpty())
                     m_videoTitles.insert(c.id, c.title);
@@ -2027,8 +2204,17 @@ void MainWindow::customEvent(CustomEventBase* event)
 #endif
                 }
             }
+            m_curQuality = e->quality;              /* M7 */
+            m_curRequested = e->requestedQuality;
+            m_curDegraded = e->degraded;
             tryPlayTrack(t);
             switchToPlayerView(true);
+            if (m_curDegraded && !m_curRequested.isEmpty()) {
+                SharedStatusBar::instance()->showMessage(
+                    QString::fromUtf8("请求 %1,实际 %2(该源上限)")
+                        .arg(m_curRequested, m_curQuality), 4000);
+            }
+            applyVideoInfo();
             return;
         }
         return;   /* postEvent 投递的事件由事件循环自动删除 */

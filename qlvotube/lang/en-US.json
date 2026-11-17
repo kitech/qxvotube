@@ -94,7 +94,10 @@
     "dark_label": "Dark mode",
     "videoout_tab": "Video output",
     "videoout_label": "Output backend",
-    "videoout_hint": "auto = no-GL first (xv→x11→sdl→raster→gl); takes effect on next start."
+    "videoout_hint": "auto = no-GL first (xv→x11→sdl→raster→gl); takes effect on next start.",
+    "quality_tab": "Playback quality",
+    "quality_label": "Default quality",
+    "quality_hint": "Default 360P; auto = provider default. Bilibili guests cap at 720P; YouTube 360P uses progressive."
   },
   "action": {
     "new": "New",

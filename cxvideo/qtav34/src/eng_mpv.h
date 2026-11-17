@@ -32,6 +32,8 @@ public:
     bool setMute(bool on);
     long position() const;
     long duration() const;
+    // M7:mpv 侧能取多少填多少(码率无属性=0;codec 用 video-codec)
+    CxVideoInfo videoInfo() const;
 
     // M3-A:轨道 + 外挂字幕(track-list 枚举/set aid·sid/sub-add)
     int audioTrackCount() const;

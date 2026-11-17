@@ -220,3 +220,35 @@ Qt3 实测：`pos=0→29000ms` 连续推进，无 `HTTP error 403`；Qt4 同样�
 
 > 备注：红果媒体直链的 Referer 结论仍是**第三方资料 + 代码路径自证**（去掉 Referer 后 web 360p
 > 可播；带 Referer 的 403 未能在本机复现到同一 CDN 域名），注释里保留了来源与适用范围。
+
+## 12. 播放信息 / 右键菜单 / 默认分辨率（2026-11-17，M7）
+
+### 12.1 默认播放分辨率
+- 配置 `video.quality`（设置 → 播放分辨率），默认 **360P**；`auto` = 各源默认。
+- 环境变量 `QLVOTUBE_QUALITY` 可覆盖（排障）。
+- 生效路径：`playVideoAt()` 调 `resolveQuality(id, q)`；`auto` 时回落 `resolve()`。
+- **降级如实上报**：provider 通过 `Stream.extra.degraded=true` + `requestedQuality`
+  告知，状态栏提示"请求 1080P，实际 720P（该源上限）"。
+  - bilibili 游客上限 720P；youtube 360P 直走 itag18 渐进流；douyin 未实现 `resolveQuality`（回落源默认）。
+
+### 12.2 播放器顶栏（实时分辨率）
+- `CXEngine::videoInfo()` → `CxVideoInfo{url,width,height,codec,hw,bitrateKbps,fps,quality,...}`，
+  经 `CXVideoPlayer::videoInfoChanged()` 通知 UI。
+- ffmpeg 引擎：宽高/codec **实时取解码器**（硬解失败会回落，不能快照），码率取
+  `AVFormatContext/bit_rate`，fps 取 `avg_frame_rate`。
+- libmpv：`video-params/w|h`、`video-codec`、`hwdec-current`、`container-fps`；码率无属性 → 0（UI 显示 N/A）。
+- 顶栏显示 `640×360 · 360P`；取不到显示 `--`，不编造。
+
+### 12.3 右键菜单（列表卡片 / 播放器）
+- 列表卡片：复制网页地址 / 复制直链(注明会过期) / 显示地址 / **在浏览器打开**（`qOpenUrl`）。
+- 播放器：视频详情… / 复制直链 / 在浏览器打开。
+- 列表右键**不再触发播放**（`mousePressEvent` 只处理左键）。
+- 直链含签名，换设备/过期会 403——菜单文案已注明，不做可播承诺。
+
+### 12.4 列表卡片信息
+- 封面右下角：**时长徽标**（`VideoItem.durationMs`）。
+- 作者行追加：**发布日期**（`VideoItem.publishMs`；0 = 不显示）。
+- bilibili 填 `pubdate` + `webUrl`；youtube/hongguo/xhs 填 `webUrl`（发布时间形态不定，取不到留 0）。
+
+### 12.5 视频详情弹窗
+- 字段：分辨率 / 码流 / 解码器 / 硬解（如实显示"软解"）/ 帧率 / 档位（含降级说明）/ 地址（超长截断，可一键复制完整）。

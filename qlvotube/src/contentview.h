@@ -14,7 +14,9 @@ struct VideoCard {
     QString id, title, author, cover;
     qint64 durationMs;
     qint64 playCount;
-    VideoCard() : durationMs(0), playCount(0) {}
+    qint64 publishMs;      /* M7 */
+    QString webUrl;        /* M7 */
+    VideoCard() : durationMs(0), playCount(0), publishMs(0) {}
 };
 
 /* 分类 chip(key 由站点动态提供;空 key = 推荐) */
@@ -76,10 +78,12 @@ signals:
     void backRequested();
     void chipActivated(const QString& key);
     void videoActivated(const QString& id);
+    void videoContextMenu(const QString& id, const QPoint& globalPos);  /* M7 */
 
 protected:
     void paintEvent(QPaintEvent* e);
     void mousePressEvent(QMouseEvent* e);
+    void contextMenuEvent(QContextMenuEvent* e);   /* M7 */
     void mouseMoveEvent(QMouseEvent* e);
     void wheelEvent(QWheelEvent* e);
     void resizeEvent(QResizeEvent* e);

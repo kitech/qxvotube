@@ -41,6 +41,9 @@ VideoItem fromNoteCard(const cJSON* card, const QString& noteId,
     if (!jstr(inter, "likedCount").isEmpty())
         vi.extra.insert(qFromUtf8("likedCount"), jstr(inter, "likedCount"));
     vi.extra.insert(qFromUtf8("noteId"), noteId);
+    // M7:笔记页地址;卡片 create_time 形态不定(秒/毫秒),取不到就留 0
+    if (!vi.id.isEmpty())
+        vi.webUrl = qFromUtf8("https://www.xiaohongshu.com/explore/") + vi.id;
     return vi;
 }
 

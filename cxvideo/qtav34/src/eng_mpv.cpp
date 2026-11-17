@@ -685,6 +685,47 @@ bool CXEngineMpv::screenshot(const QString& path)
     return CxMpvApi::instance().mpv_command(h_mpv, args) == 0;
 }
 
+// M7:播放信息(video-params/w|h + video-codec + hwdec-current)
+CxVideoInfo CXEngineMpv::videoInfo() const
+{
+    CxVideoInfo info;
+    if (h_mpv == 0)
+        return info;
+    CxMpvApi& api = CxMpvApi::instance();
+    if (api.mpv_get_property == 0)
+        return info;
+    long long w = 0, h = 0;
+    if (api.mpv_get_property(h_mpv, "video-params/w", (int)CxMpvFmtInt64, &w) == 0)
+        info.width = int(w);
+    if (api.mpv_get_property(h_mpv, "video-params/h", (int)CxMpvFmtInt64, &h) == 0)
+        info.height = int(h);
+    char* s = 0;
+    if (api.mpv_get_property(h_mpv, "video-codec", (int)CxMpvFmtString, &s) == 0
+        && s != 0) {
+        info.codec = QString::fromLatin1(s);
+        if (api.mpv_free != 0)
+            api.mpv_free(s);
+        s = 0;
+    }
+    if (api.mpv_get_property(h_mpv, "hwdec-current", (int)CxMpvFmtString, &s) == 0
+        && s != 0) {
+        const QString hw = QString::fromLatin1(s);
+        if (hw != QString::fromLatin1("no"))
+            info.hw = hw;
+        if (api.mpv_free != 0)
+            api.mpv_free(s);
+    }
+    const double fps = 0.0;
+    if (api.mpv_get_property != 0) {
+        double f = 0.0;
+        if (api.mpv_get_property(h_mpv, "container-fps",
+                                 (int)CxMpvFmtDouble, &f) == 0)
+            info.fps = f;
+        Q_UNUSED(fps);
+    }
+    return info;
+}
+
 // ── selftest 专用无头探测 ──
 
 int cxEngineMpvProbeLib()

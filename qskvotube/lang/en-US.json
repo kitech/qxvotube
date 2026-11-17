@@ -1,0 +1,74 @@
+{
+ "app_title": "qskvotube",
+ "Slide": "Slide",
+ "2D": "2D",
+ "3D": "3D",
+ "Perspective": "Perspective",
+ "user": {
+  "not_login": "Not signed in",
+  "click_to_login": "Tap to sign in",
+  "logged_in": "Signed in",
+  "login_developing": "Sign-in is under development"
+ },
+ "menu": {
+  "keep_screen_on": "Keep screen on",
+  "settings": "Settings",
+  "about": "About"
+ },
+ "settings": {
+  "title": "Settings",
+  "transition": "Page transition",
+  "theme": "Theme",
+  "scheme": "Color scheme",
+  "light": "Light",
+  "dark": "Dark",
+  "font_size": "Font size",
+  "engine": "Playback engine (restart to apply)",
+  "debug_bg": "Debug background",
+  "language": "Language",
+  "lang_system": "Follow system",
+  "size_s": "Small",
+  "size_m": "Medium",
+  "size_l": "Large",
+  "size_xl": "Extra large"
+ },
+ "about": {
+  "title": "About",
+  "app": "App",
+  "device": "Device",
+  "name": "Name",
+  "version": "Version",
+  "qt": "Qt",
+  "rhi": "RHI",
+  "arch": "Arch",
+  "brand": "Brand",
+  "model": "Model",
+  "android": "Android",
+  "screen": "Screen",
+  "dpi": "DPI",
+  "dpr": "DPR",
+  "kernel": "Kernel"
+ },
+ "player": {
+  "no_media": "No media",
+  "list_finished": "Playlist finished",
+  "subtitle_open": "Load external subtitle",
+  "subtitle_filter": "Subtitle files (*.srt *.ass *.ssa *.vtt)",
+  "eq_default": "Default",
+  "eq_bright": "Bright",
+  "eq_contrast": "High contrast",
+  "eq_saturation": "High saturation",
+  "eq_warm": "Warm"
+ },
+ "engine": {
+  "ffmpeg_unavailable": "ffmpeg engine unavailable",
+  "mpv_unavailable": "libmpv unavailable (explicit choice, no fallback)",
+  "mpv_needs_gl": "mpv requires GL rendering API (no downgrade, exiting)",
+  "mpv_render_failed": "mpv render_context creation failed (no downgrade, exiting)"
+ },
+ "lang": {
+  "zh_CN": "简体中文",
+  "zh_TW": "繁體中文",
+  "en_US": "English"
+ }
+}

@@ -43,6 +43,20 @@ public:
     long position() const;
     long duration() const;
     const char* aoBackend() const; // M2.1:当前 AO 后端(诊断/自测)
+    // M7:宽高/codec/码率/fps(open 时采集);hw/宽高/codec 再实时覆盖,
+    // 因为硬解失败会在首帧时回落到软解(cxffdec 会清 m_hwName),不能快照。
+    CxVideoInfo videoInfo() const
+    {
+        CxVideoInfo i = m_info;
+        const char* hw = hwName();
+        i.hw = hw != 0 ? QString::fromLatin1(hw) : QString();
+        if (m_dec != 0) {
+            if (m_dec->width() > 0)  i.width  = m_dec->width();
+            if (m_dec->height() > 0) i.height = m_dec->height();
+            if (!m_dec->codecName().isEmpty()) i.codec = m_dec->codecName();
+        }
+        return i;
+    }
 
     // M3-A 轨道/字幕
     int audioTrackCount() const { return m_aCount; }
@@ -115,6 +129,7 @@ private:
     double m_rateCur;  // 重启式换轨后重放(setRate/setVolume/setMute 落底)
     int m_volCur;
     bool m_muteCur;
+    CxVideoInfo m_info;        // M7:播放信息
     QString m_subFile;         // 外挂 SRT(open 重建后重挂)
     QString m_subCur;          // 当前已 emit 的字幕文本(变化才发)
     CxFFSubTimeline m_subTl;   // 内嵌 cue(open 清零重建)

@@ -27,6 +27,10 @@ QList36<VideoItem> searchList(cJSON* root, int page, bool* hasMore) {
         const cJSON* vd = jobj(it, "video_data");
         VideoItem vi;
         vi.id    = jstr(vd, "series_id");
+        // M7:详情页地址;系列页无发布时间字段 → publishMs 留 0
+        if (!vi.id.isEmpty())
+            vi.webUrl = qFromUtf8("https://hongguoduanju.com/detail?series_id=")
+                        + vi.id;
         vi.title = jstr(vd, "series_title");
         if (vi.title.isEmpty()) vi.title = jstr(it, "name");
         vi.cover = jstr(vd, "series_cover");

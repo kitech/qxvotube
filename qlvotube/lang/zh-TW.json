@@ -94,7 +94,10 @@
     "dark_label": "深色模式",
     "videoout_tab": "視訊輸出",
     "videoout_label": "輸出後端",
-    "videoout_hint": "auto = 無 GL 優先(xv→x11→sdl→raster→gl),變更下次啟動生效。"
+    "videoout_hint": "auto = 無 GL 優先(xv→x11→sdl→raster→gl),變更下次啟動生效。",
+    "quality_tab": "播放解析度",
+    "quality_label": "預設解析度",
+    "quality_hint": "預設 360P;auto = 各源預設。B站訪客上限 720P,YouTube 360P 走漸進流。"
   },
   "action": {
     "new": "新增",

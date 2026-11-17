@@ -1,0 +1,74 @@
+{
+ "app_title": "qskvotube",
+ "Slide": "滑动",
+ "2D": "2D",
+ "3D": "3D",
+ "Perspective": "透视",
+ "user": {
+  "not_login": "未登录",
+  "click_to_login": "点击登录",
+  "logged_in": "已登录",
+  "login_developing": "登录功能开发中"
+ },
+ "menu": {
+  "keep_screen_on": "保持屏幕常亮",
+  "settings": "设置",
+  "about": "关于"
+ },
+ "settings": {
+  "title": "设置",
+  "transition": "页面切换动画",
+  "theme": "主题",
+  "scheme": "颜色方案",
+  "light": "浅色",
+  "dark": "深色",
+  "font_size": "字号",
+  "engine": "播放引擎(重启生效)",
+  "debug_bg": "调试背景",
+  "language": "语言",
+  "lang_system": "跟随系统",
+  "size_s": "小",
+  "size_m": "中",
+  "size_l": "大",
+  "size_xl": "特大"
+ },
+ "about": {
+  "title": "关于",
+  "app": "应用",
+  "device": "设备",
+  "name": "名称",
+  "version": "版本",
+  "qt": "Qt",
+  "rhi": "渲染后端",
+  "arch": "架构",
+  "brand": "品牌",
+  "model": "型号",
+  "android": "Android",
+  "screen": "屏幕",
+  "dpi": "DPI",
+  "dpr": "像素比",
+  "kernel": "内核"
+ },
+ "player": {
+  "no_media": "无媒体",
+  "list_finished": "列表播完",
+  "subtitle_open": "加载外挂字幕",
+  "subtitle_filter": "字幕文件 (*.srt *.ass *.ssa *.vtt)",
+  "eq_default": "默认",
+  "eq_bright": "提亮",
+  "eq_contrast": "高对比",
+  "eq_saturation": "高饱和",
+  "eq_warm": "暖色"
+ },
+ "engine": {
+  "ffmpeg_unavailable": "ffmpeg 引擎不可用",
+  "mpv_unavailable": "libmpv 不可用(显式选择,不回退)",
+  "mpv_needs_gl": "mpv 需要窗口 GL 渲染 API,当前环境不支持(不降级,退出)",
+  "mpv_render_failed": "mpv render_context 创建失败(不降级,退出)"
+ },
+ "lang": {
+  "zh_CN": "简体中文",
+  "zh_TW": "繁體中文",
+  "en_US": "English"
+ }
+}

@@ -214,6 +214,28 @@ bool CXEngineFfmpeg::open(const QString& url)
 
     if (aoFallback)
         emit noticedError((int)CxErrAudio, m_url); // 非致命:silent 续播
+
+    // M7:采集播放信息(分辨率/codec/fps/码率),供顶栏与详情弹窗使用
+    m_info = CxVideoInfo();
+    m_info.url = m_url;
+    const char* hw = hwName();
+    if (hw != 0)
+        m_info.hw = QString::fromLatin1(hw);
+    m_info.bitrateKbps = fmt->bit_rate > 0 ? fmt->bit_rate / 1000 : 0;
+    if (m_vIdx >= 0 && (unsigned)m_vIdx < fmt->nb_streams) {
+        AVStream* vs = fmt->streams[m_vIdx];
+        if (vs->avg_frame_rate.den > 0)
+            m_info.fps = double(vs->avg_frame_rate.num) / vs->avg_frame_rate.den;
+        if (m_info.bitrateKbps == 0 && vs->codecpar->bit_rate > 0)
+            m_info.bitrateKbps = vs->codecpar->bit_rate / 1000;
+    }
+    if (m_dec != 0) {
+        m_info.width = m_dec->width();
+        m_info.height = m_dec->height();
+        m_info.codec = m_dec->codecName();
+    }
+    emit videoInfoChanged();
+
     emit started();
     if (m_durMs > 0)
         emit durationChanged(m_durMs);

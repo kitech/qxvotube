@@ -94,7 +94,10 @@
     "dark_label": "深色模式",
     "videoout_tab": "视频输出",
     "videoout_label": "输出后端",
-    "videoout_hint": "auto = 无 GL 优先(xv→x11→sdl→raster→gl),改动下次启动生效。"
+    "videoout_hint": "auto = 无 GL 优先(xv→x11→sdl→raster→gl),改动下次启动生效。",
+    "quality_tab": "播放分辨率",
+    "quality_label": "默认分辨率",
+    "quality_hint": "默认 360P;auto = 各源默认。B站游客上限 720P,YouTube 360P 走渐进流。"
   },
   "action": {
     "new": "新建",

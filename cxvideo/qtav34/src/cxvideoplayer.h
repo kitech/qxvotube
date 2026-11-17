@@ -52,6 +52,8 @@ public:
 
     long position() const;
     long duration() const;
+    // M7:播放信息(转发当前引擎;无引擎=全空)
+    CxVideoInfo videoInfo() const;
     double rate() const { return m_rate; }
     int volume() const { return m_volume; }
     bool isMuted() const { return m_muted; }
@@ -67,6 +69,7 @@ signals:
     void durationChanged(long ms);
     void seekFinished(long ms);
     void noticedError(int code, const QString& msg);
+    void videoInfoChanged();     // M7
     void subtitleChanged(const QString& text); // 空串 = 当前无
 
 private slots:

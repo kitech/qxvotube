@@ -60,6 +60,9 @@ Result detailFromView(cJSON* root, VideoItem* viOut, QList36<VideoItem>* partsOu
     vi.extra.insert(qFromUtf8("desc"), jstr(data, "desc"));
     vi.extra.insert(qFromUtf8("tname"), jstr(data, "tname"));
     vi.extra.insert(qFromUtf8("pubdate"), (long long)jint(data, "pubdate"));
+    vi.publishMs = (qint64)jint(data, "pubdate") * 1000;   // M7
+    if (!vi.id.isEmpty())                                  // M7
+        vi.webUrl = qFromUtf8("https://www.bilibili.com/video/") + vi.id;
     vi.extra.insert(qFromUtf8("view"),
                     (long long)jint(jobj(data, "stat"), "view"));
     vi.extra.insert(qFromUtf8("cid"), QString::number(jint(data, "cid")));
@@ -97,6 +100,9 @@ QList36<VideoItem> popular(cJSON* root, bool* hasMore) {
         vi.uid    = QString::number(jint(jobj(it, "owner"), "mid"));
         vi.cover  = picUrl(jstr(it, "pic"));
         vi.durationMs = jint(it, "duration") * 1000;
+        vi.publishMs = (qint64)jint(it, "pubdate") * 1000;          // M7
+        if (!vi.id.isEmpty())                                       // M7
+            vi.webUrl = qFromUtf8("https://www.bilibili.com/video/") + vi.id;
         vi.extra.insert(qFromUtf8("aid"), (long long)jint(it, "aid"));
         vi.extra.insert(qFromUtf8("tname"), jstr(it, "tname"));
         if (!vi.id.isEmpty()) items.append(vi);
@@ -118,6 +124,9 @@ QList36<VideoItem> newlist(cJSON* root, int page, bool* hasMore) {
         vi.uid    = QString::number(jint(jobj(it, "owner"), "mid"));
         vi.cover  = picUrl(jstr(it, "pic"));
         vi.durationMs = jint(it, "duration") * 1000;
+        vi.publishMs = (qint64)jint(it, "pubdate") * 1000;          // M7
+        if (!vi.id.isEmpty())                                       // M7
+            vi.webUrl = qFromUtf8("https://www.bilibili.com/video/") + vi.id;
         // 播放量:stat.view(部分响应为 0,UI 侧按 0 隐藏,不自造数据)
         vi.extra.insert(qFromUtf8("view"),
                         (long long)jint(jobj(it, "stat"), "view"));

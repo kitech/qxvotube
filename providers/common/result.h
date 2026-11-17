@@ -24,6 +24,9 @@ struct Stream {
 struct VideoItem {
     QString id, title, author, uid, cover;
     qint64 durationMs = 0;
+    // M7:发布时间(0=未知,UI 显示 --)与网页地址(空=该源不提供)
+    qint64 publishMs = 0;
+    QString webUrl;
     QVariantMap extra;      // 平台特有(如红果 series_id、B站 bvid/cid)
 };
 
