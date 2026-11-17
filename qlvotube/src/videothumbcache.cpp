@@ -24,8 +24,10 @@ namespace {
 
 QMap<QString, QPixmap> g_cache;     // GUI 线程
 QMap<QString, int> g_state;         // 1=在途 2=失败(其余=未请求)
+QStringList g_lru;                  // 命中/新增移到头部(容量上限用)
 int g_requested = 0;
 int g_failed = 0;
+const int kMaxThumbs = 300;         // 约几百 MB 上限内的安全值
 
 /* 图床防盗链:按封面域名给 Referer(取不到 → 空,不发无谓头) */
 QString refererFor(const QString& url)
@@ -119,6 +121,10 @@ void request(const QString& url, QWidget* target)
 
 QPixmap pixmap(const QString& url)
 {
+    if (g_cache.contains(url)) {          // 命中提升热度(LRU)
+        g_lru.removeAll(url);
+        g_lru.prepend(url);
+    }
     return g_cache.value(url);
 }
 
@@ -147,6 +153,21 @@ void accept(const QString& url, const QImage& image)
     g_cache.insert(url, QPixmap::fromImage(image));
 #endif
     g_state[url] = 3;
+    g_lru.removeAll(url);
+    g_lru.prepend(url);
+    while (g_lru.size() > kMaxThumbs) {
+        const QString victim = g_lru.last();
+        g_lru.removeLast();
+        g_cache.remove(victim);
+        g_state.remove(victim);
+        if (getenv("QLVOTUBE_DEBUG") != 0) {
+#if QT_VERSION >= 0x060000
+            qDebug() << "thumb: evicted" << victim;
+#else
+            qDebug("thumb: evicted %s", qToUtf8(victim).data());
+#endif
+        }
+    }
 }
 
 } // namespace thumbcache

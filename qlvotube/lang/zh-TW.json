@@ -22,7 +22,8 @@
   "cat_recommend": "推薦",
   "retry": "重試",
   "empty": "暫無內容",
-  "resolving": "正在解析播放位址…"
+  "resolving": "正在解析播放位址…",
+  "search_result": "搜尋：%1"
  },
  "num": {
   "wan": "萬",

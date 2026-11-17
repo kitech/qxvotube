@@ -67,6 +67,7 @@ void comboAdd(QComboBox* c, const QString& text)
 
 SideNav::SideNav(QWidget* parent)
     : QWidget(parent), m_search(0), m_user(0), m_siteLabel(0), m_site(0),
+      m_hasSite(false),
       m_scrollBar(0), m_scroll(0), m_contentH(0), m_current(-1), m_hover(-1)
 {
     setMouseTracking(true);
@@ -83,10 +84,28 @@ SideNav::SideNav(QWidget* parent)
     m_site->hide();
     connect(m_site, SIGNAL(activated(int)), this, SLOT(onSiteChanged(int)));
     m_search = new SearchLineEdit(this);
+    connect(m_search, SIGNAL(triggered(const QString&)),
+            this, SLOT(onSearchSubmitted(const QString&)));
     m_scrollBar = new LimeScrollBar(Qt::Vertical, this);
     m_scrollBar->hide();
     connect(m_scrollBar, SIGNAL(valueChanged(int)), this, SLOT(onNavScroll(int)));
     retranslateUi();
+}
+
+void SideNav::onSearchSubmitted(const QString& text)
+{
+#ifdef QT3_BUILD
+    const QString kw = text.stripWhiteSpace();
+#else
+    const QString kw = text.trimmed();
+#endif
+    if (kw.isEmpty()) return;
+#if QT_VERSION >= 0x060000
+    qDebug() << "search submitted:" << kw;
+#else
+    qDebug("search submitted: %s", qToUtf8(kw).data());
+#endif
+    emit searchSubmitted(kw);
 }
 
 void SideNav::setVideoSites(const QStringList& ids)
@@ -102,6 +121,7 @@ void SideNav::setVideoSites(const QStringList& ids)
         comboAdd(m_site, label);
     }
     comboSetIndex(m_site, 0);
+    m_hasSite = show;
     if (show) { m_siteLabel->show(); m_site->show(); }
     else { m_siteLabel->hide(); m_site->hide(); }
     resizeEvent(0);
@@ -320,7 +340,7 @@ void SideNav::resizeEvent(QResizeEvent* e)
     QWidget::resizeEvent(e);
     if (m_user)
         m_user->setGeometry(10, kTop, width() - 20, kUserH);
-    const bool hasSite = m_site && m_site->isVisible();
+    const bool hasSite = m_hasSite;
     if (m_siteLabel && hasSite) {
         m_siteLabel->setGeometry(10, kTop + kUserH + 6, 56, kSiteH);
         m_site->setGeometry(68, kTop + kUserH + 4, width() - 78, kSiteH);
@@ -363,7 +383,7 @@ void SideNav::paintEvent(QPaintEvent*)
     p.fillRect(rect(), pal.baseBg);
 
     const int topH = kTop + kUserH
-        + ((m_site && m_site->isVisible()) ? kSiteH + 4 : 0) + kSearchH + 4;
+        + (m_hasSite ? kSiteH + 4 : 0) + kSearchH + 4;
     p.setClipRect(QRect(0, topH, width(), height() - topH));
 
     QFont normal = font();

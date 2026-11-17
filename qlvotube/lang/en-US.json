@@ -22,7 +22,8 @@
   "cat_recommend": "Recommended",
   "retry": "Retry",
   "empty": "No content",
-  "resolving": "Resolving stream…"
+  "resolving": "Resolving stream…",
+  "search_result": "Search: %1"
  },
  "num": {
   "wan": "W",

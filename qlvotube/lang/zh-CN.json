@@ -22,7 +22,8 @@
   "cat_recommend": "推荐",
   "retry": "重试",
   "empty": "暂无内容",
-  "resolving": "正在解析播放地址…"
+  "resolving": "正在解析播放地址…",
+  "search_result": "搜索：%1"
  },
  "num": {
   "wan": "万",

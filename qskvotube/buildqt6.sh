@@ -48,11 +48,11 @@ make -j1
 
 ret=$?
 if [ x"$ret" = "x0" ] && [ -f "qskvotube" ]; then
-    cp -v qskvotube q6vtube
+    cp -v qskvotube q6votube
 fi
 ls -lh
 if [ "$(uname)" = "Darwin" ]; then
-    echo "=== done: DYLD_LIBRARY_PATH=$PWD:$QSKINNY/lib/qskinny:$QTDIR/lib ./build/q6vtube ==="
+    echo "=== done: DYLD_LIBRARY_PATH=$PWD:$QSKINNY/lib/qskinny:$QTDIR/lib ./build/q6votube ==="
 else
-    echo "=== done: LD_LIBRARY_PATH=$QTDIR/lib:$QSKINNY/lib/qskinny ./build/q6vtube ==="
+    echo "=== done: LD_LIBRARY_PATH=$QTDIR/lib:$QSKINNY/lib/qskinny ./build/q6votube ==="
 fi

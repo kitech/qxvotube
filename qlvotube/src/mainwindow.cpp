@@ -162,6 +162,10 @@ MainWindow::MainWindow(QWidget* parent)
     , m_gridPage(1)
     , m_gridHasMore(false)
     , m_gridLoading(false)
+    , m_gridGen(0)
+    , m_gridIsSearch(false)
+    , m_videoIdx(-1)
+    , m_videoMode(false)
     , m_subIdx(-1)
     , m_curPlaylistId(0)
     , m_curTrackIndex(-1)
@@ -331,6 +335,8 @@ void MainWindow::buildCentralWidget()
                      this, SLOT(onVideoActivated(const QString&)));
     QObject::connect(contentView, SIGNAL(loadMoreRequested()),
                      this, SLOT(onGridLoadMore()));
+    QObject::connect(sideNav, SIGNAL(searchSubmitted(const QString&)),
+                     this, SLOT(onSearchSubmitted(const QString&)));
 
     /* 侧栏左上用户区（登录占位） */
     QObject::connect(sideNav, SIGNAL(loginRequested()),
@@ -1003,6 +1009,7 @@ void MainWindow::onSiteChanged(const QString&) {}
 void MainWindow::onChipActivated(const QString&) {}
 void MainWindow::onVideoActivated(const QString&) {}
 void MainWindow::onGridLoadMore() {}
+void MainWindow::onSearchSubmitted(const QString&) {}
 void MainWindow::showVideoError(const QString&, const QString&, qxv::Err) {}
 #else
 void MainWindow::setupVideoProviders()
@@ -1065,19 +1072,30 @@ void MainWindow::onSiteChanged(const QString& providerId)
 
     m_curProv->cancel();
     m_videoTitles.clear();
+    m_videoCards.clear();
+    m_videoIds.clear();
+    m_videoQueue.clear();
+    m_videoIdx = -1;
+    m_videoMode = false;
     m_gridChip = QString();
+    m_chipList.clear();
     m_gridPage = 1;
     m_gridHasMore = true;
     m_gridLoading = false;
+    m_gridIsSearch = false;
+    m_gridSearchKw = QString();
+    ++m_gridGen;                       /* 作废在途请求 */
     const QString siteKey = QString::fromUtf8("site.") + providerId;
     QString siteName = _(qToUtf8(siteKey).data());
     if (siteName.isEmpty() || siteName == siteKey) siteName = providerId;
     contentView->showVideoGrid(siteName, std::vector<CategoryChip>(), QString());
 
     qxv::VideoProvider* p = m_curProv;
-    p->categories([this, providerId](const qxv::Result& r,
+    const int gen = m_gridGen;
+    p->categories([this, providerId, gen](const qxv::Result& r,
                                      const QList<qxv::CategoryItem>& cats) {
         VideoUiEvent* ev = new VideoUiEvent(VideoUiEvent::Categories);
+        ev->gen = gen;
         ev->text = providerId;
         if (r.code == qxv::Err::Ok) {
             for (int i = 0; i < cats.size(); ++i) {
@@ -1099,18 +1117,23 @@ void MainWindow::loadVideoPage(int page)
     qxv::VideoProvider* p = m_curProv;
     const QString chip = m_gridChip;
     const QString site = p->id();
+    const int gen = ++m_gridGen;        /* 最新请求胜出,旧响应必丢弃 */
+    const bool isSearch = m_gridIsSearch;
+    const QString kw = m_gridSearchKw;
     if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
-        qDebug() << "grid:" << site << "chip" << chip << "page" << page;
+        qDebug() << "grid:" << site << "chip" << chip << "page" << page
+                 << "search" << isSearch;
 #else
-        qDebug("grid: %s chip '%s' page %d", qToUtf8(site).data(),
-               qToUtf8(chip).data(), page);
+        qDebug("grid: %s chip '%s' page %d search %d", qToUtf8(site).data(),
+               qToUtf8(chip).data(), page, int(isSearch));
 #endif
     }
-    p->categoryFeed(chip, page, [this, page, chip, site, p](
+    qxv::SearchCb done = [this, page, chip, site, gen](
                         const qxv::Result& r,
                         const QList<qxv::VideoItem>& items, bool hasMore) {
         VideoUiEvent* ev = new VideoUiEvent(VideoUiEvent::Page);
+        ev->gen = gen;
         ev->page = page;
         ev->chipKey = chip;
         ev->hasMore = hasMore;
@@ -1144,8 +1167,9 @@ void MainWindow::loadVideoPage(int page)
 #endif
         }
         QApplication::postEvent(this, ev);
-        Q_UNUSED(p);
-    });
+    };
+    if (isSearch) p->search(kw, page, done);
+    else p->categoryFeed(chip, page, done);
 }
 
 void MainWindow::showVideoError(const QString& where, const QString& serverMsg,
@@ -1165,15 +1189,48 @@ void MainWindow::showVideoError(const QString& where, const QString& serverMsg,
     SharedStatusBar::instance()->showMessage(text, 6000);
 }
 
+void MainWindow::onSearchSubmitted(const QString& kw)
+{
+    if (!m_curProv) return;
+    if (getenv("QLVOTUBE_DEBUG") != 0) {
+#if QT_VERSION >= 0x060000
+        qDebug() << "search:" << kw << "on" << m_curProv->id();
+#else
+        qDebug("search: %s on %s", qToUtf8(kw).data(),
+               qToUtf8(m_curProv->id()).data());
+#endif
+    }
+    m_curProv->cancel();
+    ++m_gridGen;
+    m_gridIsSearch = true;
+    m_gridSearchKw = kw;
+    m_gridChip = QString();
+    m_gridPage = 1;
+    m_gridHasMore = true;
+    m_gridLoading = false;
+    m_videoCards.clear();
+    m_videoIds.clear();
+    m_videoQueue.clear();
+    m_videoMode = false;
+    m_videoIdx = -1;
+    contentView->showVideoGrid(
+        _A("content.search_result", QStringList() << kw),
+        m_chipList, QString());
+    loadVideoPage(1);
+}
+
 void MainWindow::onChipActivated(const QString& key)
 {
     if (!m_curProv || key == m_gridChip) return;
     m_gridChip = key;
     m_gridPage = 1;
     m_gridHasMore = true;
+    m_gridIsSearch = false;
+    ++m_gridGen;                       /* 作废旧分类在途响应 */
     m_curProv->cancel();
-    contentView->setActiveChip(key);   /* 先高亮，列表保留 */
-    contentView->clearVideoCards();
+    contentView->setActiveChip(key);   /* 先高亮，旧卡片继续显示 */
+    contentView->setVideoGridLoading(true);
+    m_gridLoading = false;
     loadVideoPage(1);
 }
 
@@ -1186,18 +1243,76 @@ void MainWindow::onGridLoadMore()
 void MainWindow::onVideoActivated(const QString& id)
 {
     if (!m_curProv) return;
+    int idx = -1;
+    for (int i = 0; i < (int)m_videoCards.size(); ++i)
+        if (m_videoCards[i].id == id) { idx = i; break; }
+    enterVideoMode(idx < 0 ? 0 : idx);
+}
+
+void MainWindow::enterVideoMode(int index)
+{
+    if (m_videoCards.empty()) return;
+    if (index < 0) index = 0;
+    if (index >= (int)m_videoCards.size()) index = (int)m_videoCards.size() - 1;
+
+    m_videoQueue.clear();
+    m_videoIds.clear();
+    for (int i = 0; i < (int)m_videoCards.size(); ++i) {
+        const VideoCard& c = m_videoCards[i];
+        Track t;
+        t.id = i;
+        t.title = c.title;
+        t.artist = c.author;
+        t.album = QString();
+        t.durationMs = (int)c.durationMs;
+        t.coverSeed = QString();
+        t.coverUrl = c.cover;
+        t.url = QString();              /* 待 resolve */
+        t.ncmId = 0;
+        t.albumId = 0;
+        t.playable = true;
+        m_videoQueue.push_back(t);
+        m_videoIds.push_back(c.id);
+    }
+    m_videoMode = true;
+    m_videoIdx = index;
+    if (queuePanel) {
+        queuePanel->setQueue(m_videoQueue, m_videoIdx);
+        queuePanel->setCurrentTrack(m_videoQueue[m_videoIdx]);
+    }
     if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
-        qDebug() << "video activated" << id;
+        qDebug() << "video queue:" << int(m_videoQueue.size())
+                 << "start" << m_videoIdx;
 #else
-        qDebug("video activated %s", qToUtf8(id).data());
+        qDebug("video queue: %d start %d", int(m_videoQueue.size()), m_videoIdx);
+#endif
+    }
+    playVideoAt(m_videoIdx);
+}
+
+void MainWindow::playVideoAt(int index)
+{
+    if (!m_curProv || index < 0 || index >= (int)m_videoIds.size()) return;
+    m_videoIdx = index;
+    const QString id = m_videoIds[index];
+    if (queuePanel) queuePanel->setCurrentTrack(m_videoQueue[index]);
+    if (playerBar) playerBar->setTrack(m_videoQueue[index]);
+    if (getenv("QLVOTUBE_DEBUG") != 0) {
+#if QT_VERSION >= 0x060000
+        qDebug() << "video activated" << id << "idx" << index;
+#else
+        qDebug("video activated %s idx %d", qToUtf8(id).data(), index);
 #endif
     }
     SharedStatusBar::instance()->showMessage(_("content.resolving"), 3000);
     qxv::VideoProvider* p = m_curProv;
-    p->resolve(id, [this, id](const qxv::Result& r, const qxv::PlayResult& pr) {
+    p->resolve(id, [this, index](const qxv::Result& r,
+                                 const qxv::PlayResult& pr) {
         VideoUiEvent* ev = new VideoUiEvent(VideoUiEvent::Status);
-        ev->chipKey = id;
+        ev->gen = m_gridGen;
+        ev->page = index;
+        ev->chipKey = m_videoIds[index];
         if (r.code != qxv::Err::Ok || pr.streams.isEmpty()) {
             ev->text = qFromUtf8("|err|") + QString::number((int)r.code)
                        + qFromUtf8("|") + r.message;
@@ -1549,6 +1664,13 @@ void MainWindow::onSeekRequested(int ms)
 
 void MainWindow::onPrev()
 {
+#if QT_VERSION >= 0x050000
+    if (m_videoMode && !m_videoIds.empty()) {
+        const int n = (int)m_videoIds.size();
+        playVideoAt((m_videoIdx - 1 + n) % n);   /* 回绕,与音频一致 */
+        return;
+    }
+#endif
     if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
         playArgvAt(m_argvIdx - 1);   /* 到头回绕 */
         return;
@@ -1564,6 +1686,16 @@ void MainWindow::onPrev()
 
 void MainWindow::onNext()
 {
+#if QT_VERSION >= 0x050000
+    if (m_videoMode && !m_videoIds.empty()) {
+        if (m_videoIdx + 1 >= (int)m_videoIds.size()) {
+            if (playerBar) playerBar->setPlaying(false);   /* 播完停 */
+            return;
+        }
+        playVideoAt(m_videoIdx + 1);
+        return;
+    }
+#endif
     if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
         playArgvAt(m_argvIdx + 1);
         return;
@@ -1673,6 +1805,18 @@ void MainWindow::customEvent(CustomEventBase* event)
 #if QT_VERSION >= 0x050000
     if (event->type() == VideoUiEventType) {
         VideoUiEvent* e = static_cast<VideoUiEvent*>(event);
+        if (e->gen != m_gridGen) {          /* 切源/切分类后旧响应 */
+            if (getenv("QLVOTUBE_DEBUG") != 0) {
+#if QT_VERSION >= 0x060000
+                qDebug() << "stale event dropped: kind" << int(e->kind)
+                         << "gen" << e->gen << "!=" << m_gridGen;
+#else
+                qDebug("stale event dropped: kind %d gen %d != %d",
+                       int(e->kind), e->gen, m_gridGen);
+#endif
+            }
+            return;
+        }
         if (e->kind == VideoUiEvent::Categories) {
             QString site = e->text;
             const int sep = site.indexOf(qFromUtf8("|err|"));
@@ -1702,6 +1846,7 @@ void MainWindow::customEvent(CustomEventBase* event)
 #endif
             }
             m_gridChip = chips.front().key;
+            m_chipList = chips;
             contentView->setVideoChips(chips, m_gridChip);
             m_gridPage = 1;
             m_gridLoading = false;
@@ -1734,7 +1879,15 @@ void MainWindow::customEvent(CustomEventBase* event)
                 if (!c.id.isEmpty())
                     m_videoTitles.insert(c.id, c.title);
             }
-            contentView->appendVideoCards(cards, e->hasMore);
+            if (e->page <= 1) {
+                /* 第 1 页:整体替换(切分类/搜索首屏),旧卡片保留到此刻 */
+                m_videoCards = cards;
+                contentView->replaceVideoCards(cards, e->hasMore);
+            } else {
+                for (size_t i = 0; i < cards.size(); ++i)
+                    m_videoCards.push_back(cards[i]);
+                contentView->appendVideoCards(cards, e->hasMore);
+            }
             m_gridHasMore = e->hasMore;
             m_gridPage = e->page + 1;
             m_gridLoading = false;
@@ -1753,14 +1906,20 @@ void MainWindow::customEvent(CustomEventBase* event)
                 return;
             }
             Track t;
-            t.id = -1;
-            t.title = m_videoTitles.value(e->chipKey, e->chipKey);
-            t.url = e->text;
-            t.playable = true;
-            t.durationMs = 0;
-            t.ncmId = 0;
-            t.albumId = 0;
-            if (playerBar) playerBar->setTrack(t);
+            if (m_videoMode && m_videoIdx >= 0
+                && m_videoIdx < (int)m_videoQueue.size()) {
+                t = m_videoQueue[m_videoIdx];   /* 保留标题/时长/封面/队列语义 */
+                t.url = e->text;
+                t.playable = true;
+            } else {
+                t.id = -1;
+                t.title = m_videoTitles.value(e->chipKey, e->chipKey);
+                t.url = e->text;
+                t.playable = true;
+                t.durationMs = 0;
+                t.ncmId = 0;
+                t.albumId = 0;
+            }
             tryPlayTrack(t);
             switchToPlayerView(true);
             return;

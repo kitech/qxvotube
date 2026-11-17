@@ -76,8 +76,9 @@ int main(int argc, char** argv) {
         bool allOk = true;
         for (const CategoryItem& c : regs)
             if (c.key.isEmpty() || c.name.isEmpty()
-                || c.key.toLongLong() <= 0) allOk = false;
-        check(allOk, "bilibili regions key=numeric tid & name 非空");
+                || c.key.section(QLatin1Char('|'), 0, 0).toLongLong() <= 0
+                || c.key.section(QLatin1Char('|'), 1).isEmpty()) allOk = false;
+        check(allOk, "bilibili regions key=tid|tname 且均非空");
     }
     {
         JRoot r(load(QString::fromUtf8("bilibili_newlist.json")));

@@ -73,6 +73,7 @@ private slots:
     void onChipActivated(const QString& key);
     void onVideoActivated(const QString& id);
     void onGridLoadMore();
+    void onSearchSubmitted(const QString& kw);
     void onPlayPause();
     void onPrev();
     void onNext();
@@ -140,6 +141,8 @@ private:
 
     void setupVideoProviders();
     void loadVideoPage(int page);
+    void playVideoAt(int index);
+    void enterVideoMode(int index);      /* 网格 → 播放队列 */
     void showVideoError(const QString& where, const QString& serverMsg,
                         qxv::Err code);
     void showTrackStub(int playlistId, int trackIndex);
@@ -187,6 +190,15 @@ private:
     bool m_gridLoading;
     QString m_gridChip;                    /* 当前分类 key(空=推荐) */
     QMap<QString, QString> m_videoTitles;  /* 点播时补标题(不额外请求 detail) */
+    int m_gridGen;                         /* 代际:切源/切分类/新请求自增 */
+    bool m_gridIsSearch;                   /* 当前网格是搜索结果 */
+    QString m_gridSearchKw;
+    std::vector<VideoCard> m_videoCards;   /* 当前网格全量(播放队列来源) */
+    std::vector<CategoryChip> m_chipList;  /* 当前站点分类(搜索时保留可回切) */
+    std::vector<QString> m_videoIds;       /* 与 m_videoQueue 平行 */
+    std::vector<Track> m_videoQueue;
+    int m_videoIdx;
+    bool m_videoMode;                      /* true=播放/上一首/下一首走视频队列 */
     int m_subIdx;            /* 当前字幕轨枚举序(-1=关) */
     std::vector<Playlist> m_library;
     int m_curPlaylistId;

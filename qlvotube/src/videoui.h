@@ -25,7 +25,7 @@ public:
     enum Kind { Categories, Page, Error, Status };
     VideoUiEvent(Kind k)
         : CustomEventBase(VideoUiEventType), kind(k), hasMore(false),
-          loading(false), page(0) {}
+          loading(false), page(0), gen(0) {}
     Kind kind;
     QStringList catKeys, catNames;   /* Categories */
     std::vector<VideoCardData> cards;      /* Page */
@@ -34,6 +34,7 @@ public:
     bool hasMore;
     bool loading;
     int page;
+    int gen;            /* 请求代际:与 MainWindow::m_gridGen 不符即丢弃 */
 };
 
 #endif // VIDEOUI_H

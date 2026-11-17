@@ -178,16 +178,36 @@ void BilibiliProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
         return;
     }
     if (page < 1) page = 1;
+    /* key = "<tid>|<tname>"(categories() 产出,UI 不解释)。
+     * 二级分区 tid 在 newlist 常为空 → 用分区名走站内搜索兜底(可翻页)。 */
+    QString rid = key, tname;
+    const int bar = key.indexOf(qFromUtf8("|"));
+    if (bar >= 0) { rid = key.left(bar); tname = key.mid(bar + 1); }
+    const bool hasRid = rid.toLongLong() > 0;
+
+    if (!hasRid) {
+        if (tname.isEmpty()) {
+            DBG_P(kMod, Warn, "categoryFeed: 非法 key='%s'", qPrintable(key));
+            cb(Result::fail(Err::Unsupported,
+               qFromUtf8("bilibili: 分类 key 无效")), {}, false);
+            return;
+        }
+        DBG_P(kMod, Info, "categoryFeed: '%s' 无 rid → 搜索兜底 p%d",
+              qPrintable(tname), page);
+        search(tname, page, cb);
+        return;
+    }
+
     QUrlQuery q;
-    q.addQueryItem("rid", key);
+    q.addQueryItem("rid", rid);
     q.addQueryItem("pn", QString::number(page));
     q.addQueryItem("ps", "20");
-    DBG_P(kMod, Info, "categoryFeed: rid=%s p%d", qPrintable(key), page);
+    DBG_P(kMod, Info, "categoryFeed: rid=%s p%d", qPrintable(rid), page);
     apiGet("/x/web-interface/newlist", q.toString(QUrl::FullyEncoded),
-           [this, cb, key, page](const NetResponse& r) {
+           [this, cb, rid, tname, key, page](const NetResponse& r) {
         if (!r.ok()) {
             DBG_P(kMod, Warn, "categoryFeed rid=%s p%d http=%d err=%s",
-                  qPrintable(key), page, r.status, qPrintable(r.error));
+                  qPrintable(rid), page, r.status, qPrintable(r.error));
             cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
                    ? qFromUtf8("http %1").arg(r.status) : r.error),
                    r.status, QString(), QString::fromUtf8(r.body.left(200))),
@@ -198,7 +218,7 @@ void BilibiliProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
         const Result res = checkApi(r.body, root, credContext(m_cred));
         if (res.code != Err::Ok) {
             DBG_P(kMod, Warn, "categoryFeed rid=%s p%d code=%d",
-                  qPrintable(key), page, (int)res.code);
+                  qPrintable(rid), page, (int)res.code);
             cb(res, {}, false);
             return;
         }
@@ -206,10 +226,17 @@ void BilibiliProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
         const QList<VideoItem> items =
             bilibili::parse::newlist(root.p, page, &hasMore);
         DBG_P(kMod, Debug, "categoryFeed rid=%s p%d -> %d items (hasMore=%d)",
-              qPrintable(key), page, items.size(), int(hasMore));
+              qPrintable(rid), page, items.size(), int(hasMore));
+        if (items.isEmpty() && !tname.isEmpty()) {
+            DBG_P(kMod, Warn,
+                  "categoryFeed rid=%s p%d empty → '%s' 搜索兜底(key=%s)",
+                  qPrintable(rid), page, qPrintable(tname), qPrintable(key));
+            search(tname, page, cb);
+            return;
+        }
         if (items.isEmpty())
             DBG_P(kMod, Warn, "categoryFeed rid=%s p%d empty (无内容/rid 失效)",
-                  qPrintable(key), page);
+                  qPrintable(rid), page);
         cb(Result::ok(), items, hasMore);
     });
 }

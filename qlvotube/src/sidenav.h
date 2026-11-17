@@ -36,6 +36,7 @@ public:
 public slots:
     void onNavScroll(int v);
     void onSiteChanged(int index);
+    void onSearchSubmitted(const QString& text);
 
 signals:
     void playlistSelected(int playlistId);
@@ -43,6 +44,7 @@ signals:
     void actionTriggered(int actionId);
     void loginRequested();
     void siteChanged(const QString& providerId);
+    void searchSubmitted(const QString& kw);
 
 protected:
     void paintEvent(QPaintEvent* e);
@@ -80,6 +82,7 @@ private:
     QLabel* m_siteLabel;      /* "视频站点" */
     QComboBox* m_site;
     QStringList m_siteIds;    /* 索引 → provider id（不按文本匹配） */
+    bool m_hasSite;           /* 显式标志:构造期 isVisible() 还不可靠 */
     LimeScrollBar* m_scrollBar;
     int m_scroll;
     int m_contentH;

@@ -57,6 +57,7 @@ public:
                        const QString& activeKey);
     void setActiveChip(const QString& key);   /* 仅切高亮，不动列表 */
     void appendVideoCards(const std::vector<VideoCard>& cards, bool hasMore);
+    void replaceVideoCards(const std::vector<VideoCard>& cards, bool hasMore);
     void clearVideoCards();
     void setVideoGridLoading(bool loading);
     void setVideoGridError(const QString& text);   // 空=清错
@@ -103,6 +104,7 @@ private:
     QRect loadMoreRect() const;
     QRect retryRect() const;
     QRect chipRect(int i) const;
+    int   chipContentWidth() const;
     QRect cardRect(int i) const;
     int    gridCols() const;
     int    gridCardH() const;
@@ -117,6 +119,7 @@ private:
     QString m_activeChip;
     QString m_gridErr;
     int m_lastMoreAt;      /* 触底翻页节流(time(0),1s) */
+    int m_chipScroll;      /* chips 横向偏移(滚轮横向滚动) */
     QStringList m_gridCats;
     LimeScrollBar* m_scrollBar;
     int m_scrollY;

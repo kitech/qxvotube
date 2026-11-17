@@ -129,7 +129,7 @@ QList<CategoryItem> popularRegions(cJSON* root) {
         const long long tid = jint(it, "tid", 0);
         const QString tname = jstr(it, "tname");
         if (tid <= 0 || tname.isEmpty()) continue;
-        const QString k = QString::number(tid);
+        const QString k = QString::number(tid) + qFromUtf8("|") + tname;
         if (!hits.contains(k)) order.append(k);
         hits[k] += 1;
         names[k] = tname;
