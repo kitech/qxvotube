@@ -169,6 +169,10 @@ while(!stop):
 | CXRendererGL | Qt4: QGLWidget;Qt5.4+: QOpenGLWidget;首版逐帧 `glTexSubImage2D`(不做 PBO),shader yuv2rgb/EQ 属 M4 加成 | Qt4/5/6 条件编译 | Qt3 跳过 |
 | CXRendererProbe | 无窗口:最近帧以 30ms 节流经 frameReady 信号外发 QImage | 全 Qt | qskvotube(QSkinny/Quick)M5 独占入口;自测比对亦用 |
 
+> 后端选择策略（`auto` 链 / 平台矩阵 / 回退规则 / SDL2·3 二选一 / 实测边界）见
+> [cxvideo-vo.md](cxvideo-vo.md)；新增 `renderer_base`、`renderer_x11`、`renderer_xv`、
+> `renderer_sdl`、`renderer_d3d11`、`renderer_metal`。
+
 ## 7. CXEngineMpv(libmpv)集成细节
 
 - `mpv_create()` → 设定 `vo=libmpv`;音频直走系统后端(依探测选 `ao=pulse` 或 `ao=alsa`);渲染渠道按宿主能力:

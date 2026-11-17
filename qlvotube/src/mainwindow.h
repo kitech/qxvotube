@@ -24,6 +24,7 @@ class ContentView;
 class QueuePanel;
 class PlayerBar;
 class CXVideoPlayer;
+class CXVideoRenderer;
 class CXRendererGl;
 class VideoPane;
 class CXVideoEqDialog;
@@ -177,7 +178,8 @@ private:
     QSplitter* bodySplitter;
     StackedWidget* centerStack;   /* 列表页/播放页切换(M5-A;compat34 别名) */
     VideoPane* videoPane;
-    CXRendererGl* m_glRenderer;
+    QWidget*         m_rendererWidget;   /* 输出后端控件(auto = 无 GL 优先) */
+    CXVideoRenderer* m_videoRenderer;    /* 交给 CXVideoPlayer */
     CXVideoEqDialog* m_eqDialog;
     QString m_curUrl;        /* 当前播放源(引擎切换后重开) */
     /* 视频源网格状态 */

@@ -26,6 +26,7 @@ SOURCES = src/main.cpp src/mainwindow.cpp src/appearance.cpp src/config.cpp \
           src/eqdialog.cpp \
           src/userinfopanel.cpp \
           src/videothumbcache.cpp \
+          src/videorendererfactory.cpp \
           ../qlappcom/eventpoller.cpp
 
 HEADERS = src/mainwindow.h src/appearance.h src/config.h src/globaluiutil.h \
@@ -39,6 +40,7 @@ HEADERS = src/mainwindow.h src/appearance.h src/config.h src/globaluiutil.h \
           src/userinfopanel.h \
           src/videoui.h \
           src/videothumbcache.h \
+          src/videorendererfactory.h \
           ../qlappcom/eventpoller.h
 
 include(../qlcomp/qlite.pri)

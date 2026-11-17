@@ -35,6 +35,7 @@
 #include "cxvideoplayer.h"
 #include "cxengine.h"
 #include "renderer_gl.h"     /* M5-A:ffmpeg 路 GL 渲染器 */
+#include "videorendererfactory.h"   /* M6:输出后端可配置(cxvideo-vo.md) */
 #include "appearance.h"
 #include <qlabel.h>
 #include <qpushbutton.h>
@@ -152,7 +153,8 @@ MainWindow::MainWindow(QWidget* parent)
     , bodySplitter(0)
     , centerStack(0)
     , videoPane(0)
-    , m_glRenderer(0)
+    , m_rendererWidget(0)
+    , m_videoRenderer(0)
     , m_eqDialog(0)
     , m_curProv(0)
     , m_gridPage(1)
@@ -367,9 +369,26 @@ void MainWindow::buildCentralWidget()
 
     /* 播放引擎接线(掌面延迟:首次选曲时真正 setEngine) */
     m_player = new CXVideoPlayer(this);
-    /* M5-A:嵌入播放页；ffmpeg 路渲染器(GL)由 M4-A 提供 */
-    m_glRenderer = new CXRendererGl(videoPane->surface());
-    videoPane->setRendererWidget(m_glRenderer);
+    /* M6:输出后端可配置(默认 auto = 无 GL 优先,gl 最后;见 docs/cxvideo-vo.md)
+     * 优先级:QLVOTUBE_VO_OUT(env) > config.json video.out > auto */
+    {
+        const char* envOut = getenv("QLVOTUBE_VO_OUT");
+        CxVideoOut vo = cxCreateVideoOut(videoPane->surface(),
+                                         Config::value("video.out"),
+                                         envOut != 0 ? qFromUtf8(envOut) : QString());
+        m_rendererWidget = vo.widget;
+        m_videoRenderer = vo.renderer;
+        if (vo.widget != 0)
+            videoPane->setRendererWidget(vo.widget);
+        if (getenv("QLVOTUBE_DEBUG") != 0) {
+#if QT_VERSION >= 0x060000
+            qDebug() << "video out:" << vo.name << "(" << vo.why << ")";
+#else
+            qDebug("video out: %s (%s)", qToUtf8(vo.name).data(),
+                   qToUtf8(vo.why).data());
+#endif
+        }
+    }
     QObject::connect(videoPane, SIGNAL(backRequested()),
                      this, SLOT(onVideoBackRequested()));
 
@@ -796,7 +815,7 @@ void MainWindow::ensurePlayerReady()
         m_player->setEngine(CxEngineAuto);
     }
     m_player->setHostWidget(videoPane->surface());
-    m_player->setRenderer(m_glRenderer);
+    m_player->setRenderer(m_videoRenderer);
     if (m_player->engine() != 0) {
         videoPane->setEngineLabel(
             QString::fromLatin1(m_player->engine()->name()));
@@ -1385,6 +1404,25 @@ void MainWindow::openSettings()
     dlg->registerConfigItem(langItem);
     dlg->registerConfigItem(darkItem);
 
+    /* —— 视频输出页(M6):选择播放渲染后端 ——
+     * 列表按当前构建实际可用的后端生成(cxAvailableVideoOuts),
+     * 选项文本就是后端名,无需翻译键;改动在下次启动生效。 */
+    CategoryPage* vpage = new CategoryPage(_("settings.videoout_tab"), dlg);
+    SelectConfigItem* voutItem = new SelectConfigItem(
+        "video/out", cxResolveVideoOut(Config::value("video.out"), QString()), "",
+        cxAvailableVideoOuts(), vpage);
+    vpage->addLabeledControl(_("settings.videoout_label"), voutItem->comboBox());
+    QLabel* vhint = new QLabel(_("settings.videoout_hint"), vpage);
+#if QT_VERSION >= 0x040000
+    vhint->setWordWrap(true);
+#else
+    vhint->setAlignment(Qt::WordBreak | Qt::AlignLeft);   /* Qt3 无 setWordWrap */
+    vhint->setMinimumHeight(44);                          /* 换行文本给两行高度 */
+#endif
+    vpage->addWidget(vhint);
+    dlg->addCategory(_("settings.videoout_tab"), vpage);
+    dlg->registerConfigItem(voutItem);
+
     /* —— 关于页 —— */
     CategoryPage* about = new CategoryPage(_("menu.help"), dlg);
     QLabel* aboutLabel = new QLabel(
@@ -1415,6 +1453,13 @@ void MainWindow::onSettingsSaved(const SettingsChangedMap& changed)
         bool on = (changed["ui/dark"].toString() == _("theme_dark"));
         if (on != ThemeManager::isDarkMode())
             ThemeManager::applyTheme(on);
+    }
+    if (changed.contains("video/out")) {
+        /* 后端在启动时创建(挂到 surface),运行期替换涉及引擎重挂,
+         * 统一提示重启生效(与 QXVOTUBE_VO_OUT 的语义一致)。 */
+        Config::setValue("video.out", changed["video/out"].toString());
+        SharedStatusBar::instance()->showMessage(
+            _("settings.videoout_hint"), 3000);
     }
 }
 
@@ -1598,7 +1643,7 @@ void MainWindow::onToggleEngine()
         return;
     }
     m_player->setHostWidget(videoPane->surface());
-    m_player->setRenderer(m_glRenderer);
+    m_player->setRenderer(m_videoRenderer);
     videoPane->setEngineLabel(QString::fromLatin1(m_player->engine()->name()));
     if (!m_curUrl.isEmpty()) {
         m_player->open(m_curUrl);

@@ -1,8 +1,8 @@
 #include "renderer_software.h"
 #include "cxeq.h"
+#include "renderer_base.h"   // cxScaleRgb
 #include <qpainter.h>
 #include <qimage.h>
-#include <stdio.h>
 
 CXRendererSoftware::CXRendererSoftware(QWidget* parent)
 #ifdef QT3_BUILD
@@ -41,10 +41,7 @@ bool CXRendererSoftware::saveScreenshot(const QString& path)
     if (m_img.isNull() || path.isEmpty())
         return false;
     QImage img = cxEqApply(m_img); // 所见即所得(LUT 后)
-#ifdef QT3_BUILD
-    if (img.depth() != 32)
-        img = img.convertDepth(32);
-#endif
+img = cxToRgb32(img);
     return img.save(path, "PNG");
 }
 
@@ -71,12 +68,9 @@ void CXRendererSoftware::paintEvent(QPaintEvent*)
     if (m_img.isNull())
         return;
     QImage img = m_img;
-#ifdef QT3_BUILD
-    if (img.depth() != 32)
-        img = img.convertDepth(32);
-#endif
     if (m_eqOn)
         img = cxEqApply(img); // 每次重绘均为 LUT 后画面(缩放照旧)
+img = cxToRgb32(img);
     // letterbox:等比缩入控件矩形,不足留黑边
     QSize s = size();
     int iw = img.width();
@@ -89,14 +83,13 @@ void CXRendererSoftware::paintEvent(QPaintEvent*)
         scale = scaleH;
     int dw = int(iw * scale);
     int dh = int(ih * scale);
+    if (dw < 1) dw = 1;
+    if (dh < 1) dh = 1;
     int dx = (s.width() - dw) / 2;
     int dy = (s.height() - dh) / 2;
-#ifdef QT3_BUILD
-    // Qt3 的 drawImage 无目标矩形重载,先 smoothScale 再按点绘制
+    // 缩放走 sws(cxScaleRgb):Qt3 下 32bpp 图像经 QImage 缩放/QPainter 变换
+    // 实测会整体变黑,而"未缩放 drawImage"正常 —— 见 renderer_base.h 注释。
     if (dw != iw || dh != ih)
-        img = img.smoothScale(dw, dh);
+        img = cxScaleRgb(img, dw, dh);
     p.drawImage(dx, dy, img);
-#else
-    p.drawImage(QRect(dx, dy, dw, dh), img);
-#endif
 }

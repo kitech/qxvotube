@@ -20,7 +20,12 @@ public:
 static inline QImage cxNewImage(int w, int h)
 {
 #ifdef QT3_BUILD
-    return QImage(w, h, 32);
+    // Qt3 的 32bit QImage 带 alpha 通道:解码/转换只写 RGB,alpha 字节为 0,
+    // 直接 drawImage 会被当成全透明(表现为纯黑)。关闭 alpha buffer 让 Qt3
+    // 忽略该字节(软渲/截图路径都需要;GL/X11/Xv/SDL 不受影响)。
+    QImage img(w, h, 32);
+    img.setAlphaBuffer(false);
+    return img;
 #else
     return QImage(w, h, QImage::Format_RGB32);
 #endif

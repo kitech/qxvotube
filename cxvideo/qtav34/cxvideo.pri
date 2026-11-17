@@ -25,7 +25,13 @@ CXVIDEO_CPP = \
     $$CXVIDEO/src/renderer_software.cpp \
     $$CXVIDEO/src/renderer_gl.cpp \
     $$CXVIDEO/src/renderer_mpvgl.cpp \
-    $$CXVIDEO/src/renderer_probe.cpp
+    $$CXVIDEO/src/renderer_probe.cpp \
+    $$CXVIDEO/src/cxsdl_audio.cpp \
+    $$CXVIDEO/src/renderer_base.cpp \
+    $$CXVIDEO/src/renderer_x11.cpp \
+    $$CXVIDEO/src/renderer_xv.cpp \
+    $$CXVIDEO/src/renderer_sdl.cpp \
+    $$CXVIDEO/src/renderer_d3d11.cpp
 
 # M5-B:Quick 渲染器(仅 Qt6;Qt3 不编;宿主须接受 QT += quick)
 greaterThan(QT_MAJOR_VERSION, 5) {
@@ -62,6 +68,13 @@ CXVIDEO_HDR = \
     $$CXVIDEO/src/renderer_gl.h \
     $$CXVIDEO/src/renderer_mpvgl.h \
     $$CXVIDEO/src/renderer_probe.h \
+    $$CXVIDEO/src/cxplatform.h \
+    $$CXVIDEO/src/cxsdl_compat.h \
+    $$CXVIDEO/src/renderer_base.h \
+    $$CXVIDEO/src/renderer_x11.h \
+    $$CXVIDEO/src/renderer_xv.h \
+    $$CXVIDEO/src/renderer_sdl.h \
+    $$CXVIDEO/src/renderer_d3d11.h \
     $$CXVIDEO/src/cxengine.h \
     $$CXVIDEO/src/eng_mpv_cmd.h \
     $$CXVIDEO/src/eng_mpv.h \
@@ -123,10 +136,46 @@ FF_DEPS = $$system(pkg-config --libs libavformat libavcodec libswscale libswresa
         LIBS += $$FF_AO_ALSA
         DEFINES += WITH_CX_FF_AO_ALSA
     }
-    FF_AO_SDL = $$system(pkg-config --libs sdl2 2>/dev/null)
-    !isEmpty(FF_AO_SDL) {
+    # SDL2/SDL3 二选一:两者导出同名符号(ABI 不兼容),不能同时链接。
+    # 选择顺序:QXVOTUBE_SDL=2|3 强制 → pkg-config sdl3 → sdl2。
+    # 音频(cffao_sdl)与视频(renderer_sdl)共用同一个 CX_SDL_MAJOR。
+    SDL3_VER = $$system(pkg-config --modversion sdl3 2>/dev/null)
+    SDL2_VER = $$system(pkg-config --modversion sdl2 2>/dev/null)
+    SDL_WANT = $$(QXVOTUBE_SDL)
+    isEqual(SDL_WANT, 2): SDL3_VER =
+    isEqual(SDL_WANT, 3): SDL2_VER =
+    !isEmpty(SDL3_VER) {
+        message("cxvideo: SDL 3 $$SDL3_VER")
+        QMAKE_CXXFLAGS += $$system(pkg-config --cflags sdl3 2>/dev/null)
+        LIBS += $$system(pkg-config --libs sdl3 2>/dev/null)
+        DEFINES += CX_SDL_MAJOR=3
+        DEFINES += WITH_CX_FF_AO_SDL WITH_CX_RENDERER_SDL
+    } else:!isEmpty(SDL2_VER) {
+        message("cxvideo: SDL 2 $$SDL2_VER")
         QMAKE_CXXFLAGS += $$system(pkg-config --cflags sdl2 2>/dev/null)
-        LIBS += $$FF_AO_SDL
-        DEFINES += WITH_CX_FF_AO_SDL
+        LIBS += $$system(pkg-config --libs sdl2 2>/dev/null)
+        DEFINES += CX_SDL_MAJOR=2
+        DEFINES += WITH_CX_FF_AO_SDL WITH_CX_RENDERER_SDL
     }
+}
+
+# ── X11 直渲(无 GL):MIT-SHM 需 libXext;Xv 需 libXv ──
+unix:!macx {
+    LIBS += -lXext
+    DEFINES += WITH_CX_RENDERER_X11
+    XV_LIBS = $$system(pkg-config --libs xv 2>/dev/null)
+    !isEmpty(XV_LIBS) {
+        LIBS += $$XV_LIBS
+        DEFINES += WITH_CX_RENDERER_XV
+    }
+}
+win32 {
+    LIBS += -ld3d11 -ldxgi
+    DEFINES += WITH_CX_RENDERER_D3D11
+}
+macx {
+    OBJECTIVE_SOURCES += $$CXVIDEO/src/renderer_metal.mm
+    HEADERS += $$CXVIDEO/src/renderer_metal.h
+    LIBS += -framework Metal -framework QuartzCore -framework AppKit
+    DEFINES += WITH_CX_RENDERER_METAL
 }
