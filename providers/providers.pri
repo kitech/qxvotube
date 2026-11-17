@@ -65,6 +65,8 @@ greaterThan(QT_MAJOR_VERSION, 4) {
         $$QXV_PROVIDERS_DIR/xiaohongshu/xiaohongshuprovider.cpp \
         $$QXV_PROVIDERS_DIR/xiaohongshu/parse.cpp \
         $$QXV_PROVIDERS_DIR/xiaohongshu/ssr.cpp \
+        $$QXV_PROVIDERS_DIR/xiaohongshu/sign.cpp \
+        $$QXV_PROVIDERS_DIR/xiaohongshu/api.cpp \
         $$QXV_PROVIDERS_DIR/factory.cpp
 
     HEADERS += \
@@ -79,7 +81,10 @@ greaterThan(QT_MAJOR_VERSION, 4) {
     !contains(DEFINES, QXV_PROVIDERS_NO_QLCOMP) {
         SOURCES += $$QXV_QLCOMP_DIR/compatcore34.cpp
         SOURCES += $$QXV_QLCOMP_DIR/cJSON.c
+        SOURCES += $$QXV_QLCOMP_DIR/md5.c   # xhs 签名器(纯 C,Qt3 亦可编)
     }
+    # xhs 签名器 RC4(公有领域,纯 C)
+    SOURCES += $$QXV_PROVIDERS_DIR/../vendor/wjcryptlib/WjCryptLib_Rc4.c
 
     LIBS += -lssl -lcrypto -lz -lpthread
 } else {

@@ -28,6 +28,8 @@ endif()
 add_library(qxvproviders STATIC
     ../qlcomp/cJSON.c                # 全仓唯一份(qlvotube 同源,避免双份符号)
     ../qlcomp/compatcore34.cpp       # qFromUtf8/qbaFromCharptr 等(Qt6 需 Qt6::Gui)
+    ../qlcomp/md5.c                  # xhs 签名器 MD5(纯 C,qlcomp 复用)
+    ../vendor/wjcryptlib/WjCryptLib_Rc4.c  # xhs 签名器 RC4(公有领域)
     common/debuglog.cpp
     common/result.cpp
     common/netclient.cpp
@@ -46,6 +48,8 @@ add_library(qxvproviders STATIC
     xiaohongshu/xiaohongshuprovider.cpp
     xiaohongshu/ssr.cpp
     xiaohongshu/parse.cpp
+    xiaohongshu/sign.cpp
+    xiaohongshu/api.cpp
     youtube/parse.cpp
     common/hgcenc/spade.cpp
     common/hgcenc/mp4box.cpp

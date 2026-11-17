@@ -1,0 +1,19 @@
+{"code":0,"success":true,"data":{"items":[{
+  "id":"66fad51c000000001b0224b8",
+  "xsec_token":"AB3rTOKEN","xsec_source":"pc_feed",
+  "note_card":{
+    "note_id":"66fad51c000000001b0224b8","type":"video","display_title":"示例视频笔记",
+    "desc":"d","user":{"user_id":"5eb8e1d400000000010075ae","nickname":"作者A"},
+    "cover":{"url_default":"https://sns-img-bd.xhscdn.com/cover1"},
+    "interact_info":{"liked_count":"1234"},
+    "video":{
+      "capa":{"duration":15234},
+      "media":{"stream":{
+        "h264":[{"master_url":"https://sns-video-bd.xhscdn.com/stream/1",
+                 "backup_urls":["https://sns-video-qc.xhscdn.com/stream/1"],
+                 "width":1920,"height":1080}],
+        "h265":[{"master_url":"https://sns-video-bd.xhscdn.com/stream/h265"}]
+      }}
+    }
+  }
+}]}}

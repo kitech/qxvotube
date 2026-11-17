@@ -3,15 +3,23 @@
 #include "common/qcjson.h"
 #include "common/debuglog.h"
 #include "common/fingerprint.h"
+#include "common/quality.h"
+#include "api.h"
 #include "parse.h"
+#include "sign.h"
 #include "ssr.h"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QTimer>
 #include <QUrlQuery>
 
 #include <cmath>
 #include <random>
+#include <string>
+#include <utility>
+#include <vector>
 
 // 口径:docs/providers/xiaohongshu-research.md
 // 关键实测:
@@ -29,6 +37,25 @@ static const char* kSite = "https://www.xiaohongshu.com";
 namespace {
 
 qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
+
+// std::string ⇄ QString(显式长度,Qt3/Qt6 同源)
+QString qsFromStd(const std::string& s) {
+    return QString::fromUtf8(s.data(), (int)s.size());
+}
+
+VideoItem toVideoItem(const xhsapi::NoteItem& n) {
+    VideoItem vi;
+    vi.id = qsFromStd(n.id);
+    vi.title = qsFromStd(n.title.empty() ? n.desc : n.title);
+    vi.author = qsFromStd(n.author);
+    vi.uid = qsFromStd(n.authorId);
+    vi.cover = qsFromStd(n.cover);
+    vi.extra.insert(qFromUtf8("xsecToken"), qsFromStd(n.xsecToken));
+    vi.extra.insert(qFromUtf8("xsecSource"), qsFromStd(n.xsecSource));
+    vi.extra.insert(qFromUtf8("type"), qsFromStd(n.type));
+    vi.extra.insert(qFromUtf8("likedCount"), n.likedCount);
+    return vi;
+}
 
 // 首页频道(翻页替代):page1 用默认,page>=2 依次换频道
 const char* kChannels[] = {
@@ -64,6 +91,33 @@ long long jitterDelayMs(int meanMs) {
 } // namespace
 
 XiaohongshuProvider::XiaohongshuProvider() = default;
+
+XiaohongshuProvider::~XiaohongshuProvider() { delete m_signer; }
+
+// ── 凭证 / 登录态 ───────────────────────────────────────────────────
+void XiaohongshuProvider::setCredentials(const QVariantMap& c) {
+    m_cred = c;
+    m_authOk = false;           // 凭证变更 → 重新探测
+    m_authCheckedAt = 0;
+    m_dryRun = QXV_ENV("QXVOTUBE_XHS_DRYRUN") == qFromUtf8("1");
+    if (!hasSession()) {
+        if (credContext(m_cred).provided)
+            DBG_P(kMod, Warn, "cookie 缺 web_session/a1,登录态不可用");
+        return;
+    }
+    if (!m_signer) m_signer = new xhssign::Signer();
+    DBG_P(kMod, Info, "cookie 登录态就绪 (a1=%s)",
+          xhssign::cookieA1(cookieStr()).c_str());
+}
+
+std::string XiaohongshuProvider::cookieStr() const {
+    const QString ck = m_cred.value(qFromUtf8("cookie")).toString();
+    return std::string(ck.toUtf8().constData());
+}
+
+bool XiaohongshuProvider::hasSession() const {
+    return xhssign::hasWebSession(cookieStr());
+}
 
 void XiaohongshuProvider::cancel() {
     m_net.cancel();
@@ -214,17 +268,184 @@ void XiaohongshuProvider::fetchPage(
     });
 }
 
+// ── 服务端错误 → Result(认证/风控/其它;原始响应入 detail)─────────────
+Result XiaohongshuProvider::mapApiFailure(int httpStatus,
+                                          const QByteArray& body) {
+    const AuthContext ctx = credContext(m_cred);
+    QString code, msg;
+    {
+        JRoot root(body);
+        if (root.ok()) {
+            code = QString::number(jint(root.p, "code", 0));
+            msg = jstr(root.p, "msg");
+            if (msg.isEmpty()) msg = jstr(root.p, "message");
+        }
+    }
+    if (code == qFromUtf8("-101") || httpStatus == 401) {
+        AuthContext c = ctx;
+        c.expired = ctx.provided;
+        return authFail(Err::AuthExpired, c,
+                        qFromUtf8("xiaohongshu: 登录态失效(-101)"),
+                        httpStatus, code, msg);
+    }
+    if (httpStatus == 461 || httpStatus == 406 || httpStatus == 429) {
+        onSoftBlock();
+        QVariantMap extra;
+        extra.insert(qFromUtf8("retryAfterMs"), m_cooldownUntil - nowMs());
+        return authFail(Err::RateLimit, ctx,
+                        qFromUtf8("xiaohongshu: API 风控(%1)").arg(httpStatus),
+                        httpStatus, code, msg, extra);
+    }
+    const QString raw = QString::fromUtf8(body.left(200));
+    return withServer(
+        Result::fail(Err::Network,
+                     qFromUtf8("xiaohongshu: API %1").arg(httpStatus)),
+        httpStatus, code, msg.isEmpty() ? raw : msg);
+}
+
+// ── 带签名的 API 请求(edith.xiaohongshu.com)────────────────────────
+void XiaohongshuProvider::apiRequest(
+    const QByteArray& method, const QString& path, const QByteArray& body,
+    std::function<void(const Result&, const QByteArray&)> cb) {
+    const AuthContext ctx = credContext(m_cred);
+    if (!hasSession() || !m_signer) {
+        cb(authFail(Err::NeedAuth, ctx,
+                    ctx.provided
+                        ? qFromUtf8("xiaohongshu: cookie 缺 web_session/a1,"
+                                    "无法生成 x-s 签名")
+                        : qFromUtf8("xiaohongshu: 未设置登录凭证")),
+           QByteArray());
+        return;
+    }
+    if (nowMs() < m_cooldownUntil) {
+        Result r = authFail(Err::RateLimit, ctx,
+                            qFromUtf8("xiaohongshu: 风控冷却中"));
+        r.detail.insert(qFromUtf8("retryAfterMs"), m_cooldownUntil - nowMs());
+        cb(r, QByteArray());
+        return;
+    }
+    const bool isPost = method.toUpper() == "POST";
+    // 签名(纯 C++;uri 不含 query)
+    const std::string uriStd(path.toUtf8().constData());
+    const std::string a1 = xhssign::cookieA1(cookieStr());
+    const std::string payloadStd =
+        isPost ? std::string(body.constData(), (size_t)body.size())
+               : std::string();
+    const std::string xs =
+        m_signer->signXs(isPost ? "POST" : "GET", uriStd, a1, payloadStd);
+    const std::string xsc = m_signer->signXsCommon(a1);
+    char xtBuf[32];
+    snprintf(xtBuf, sizeof(xtBuf), "%lld",
+             (long long)(nowMs() > 0 ? nowMs() : 0));
+    const std::string xt = xtBuf;
+    const std::string b3 = m_signer->b3TraceId();
+    if (m_dryRun)
+        DBG_P(kMod, Info, "DRYRUN sig x-s=%zuB x-s-common=%zuB (%.12s…)",
+              xs.size(), xsc.size(), xs.c_str());
+
+    gate([this, isPost, path, body, xs, xsc, xt, b3, cb]() {
+        NetRequest req;
+        req.url = qFromUtf8("https://edith.xiaohongshu.com%1").arg(path);
+        req.method = isPost ? qFromUtf8("POST") : qFromUtf8("GET");
+        if (!body.isEmpty()) req.body = body;
+        for (const auto& h : Fingerprint::chromeWeb(qFromUtf8("zh-CN,zh;q=0.9"))
+                                 .headers)
+            req.headers.append(h);
+        req.headers.append(qMakePair(qFromUtf8("x-s"),
+                                     QString::fromUtf8(xs.c_str())));
+        req.headers.append(qMakePair(qFromUtf8("x-s-common"),
+                                     QString::fromUtf8(xsc.c_str())));
+        req.headers.append(qMakePair(qFromUtf8("x-t"),
+                                     QString::fromUtf8(xt.c_str())));
+        req.headers.append(qMakePair(qFromUtf8("x-b3-traceid"),
+                                     QString::fromUtf8(b3.c_str())));
+        req.headers.append(qMakePair(qFromUtf8("x-mns"),
+                                     qFromUtf8("unload")));
+        req.headers.append(qMakePair(qFromUtf8("Content-Type"),
+                                     qFromUtf8("application/json;charset=UTF-8")));
+        req.headers.append(qMakePair(qFromUtf8("Origin"),
+                                     qFromUtf8("https://www.xiaohongshu.com")));
+        req.headers.append(qMakePair(qFromUtf8("Referer"),
+                                     qFromUtf8("https://www.xiaohongshu.com/")));
+        req.autoCookie = true;
+        req.timeoutSec = 25;
+        req.maxAttempts = 1;      // 签名请求不盲目重试
+        if (m_proxy.enabled)
+            req.proxy = qFromUtf8("http://%1:%2")
+                            .arg(m_proxy.host).arg(m_proxy.port);
+        DBG_P(kMod, Debug, "API %s %s", qPrintable(req.method),
+              qPrintable(req.url));
+        m_net.send(req, [this, cb](const NetResponse& r) {
+            const QString cap = QXV_ENV("QXVOTUBE_XHS_CAPTURE");
+            if (!cap.isEmpty() && !r.body.isEmpty()) {
+                QDir().mkpath(cap);
+                QFile f(cap + qFromUtf8("/%1_%2.json")
+                                  .arg(r.status).arg(nowMs()));
+                if (f.open(QIODevice::WriteOnly)) f.write(r.body);
+            }
+            if (r.status == 200) {
+                JRoot root(r.body);
+                if (root.ok() && (int)jint(root.p, "code", 0) == 0) {
+                    cb(Result::ok(), r.body);
+                    return;
+                }
+            }
+            cb(mapApiFailure(r.status, r.body), QByteArray());
+        });
+    });
+}
+
+// ── 登录态探测:GET /api/sns/web/v1/user/selfinfo(游客 → -101)────────
+void XiaohongshuProvider::ensureAuth(std::function<void(const Result&)> cb) {
+    if (m_authOk && nowMs() - m_authCheckedAt < 5 * 60 * 1000) {
+        cb(Result::ok());
+        return;
+    }
+    apiRequest(qFromUtf8("GET").toUtf8(),
+               qFromUtf8("/api/sns/web/v1/user/selfinfo"), QByteArray(),
+               [this, cb](const Result& r, const QByteArray& body) {
+        Q_UNUSED(body);
+        if (r.code == Err::Ok) {
+            m_authOk = true;
+            m_authCheckedAt = nowMs();
+        }
+        cb(r);
+    });
+}
+
 // ── search:必须登录(无免登录通道)─────────────────────────────────
 void XiaohongshuProvider::search(const QString& kw, int page, SearchCb cb) {
     Q_UNUSED(kw);
     Q_UNUSED(page);
     const AuthContext ctx = credContext(m_cred);
-    cb(authFail(Err::NeedAuth, ctx,
-       ctx.provided
-           ? qFromUtf8("xiaohongshu: 已设置凭证但搜索仍被拒(需登录态 API)")
-           : qFromUtf8("xiaohongshu: 搜索需登录(官方 web API -101);"
-                       "游客可用首页/用户页/笔记详情"),
-       200, qFromUtf8("-101"), qFromUtf8("无登录信息")), {}, false);
+    if (!hasSession()) {   // 游客:免登录无通道(实测 -101)
+        cb(authFail(Err::NeedAuth, ctx,
+           ctx.provided
+               ? qFromUtf8("xiaohongshu: 已设置凭证但缺 web_session/a1")
+               : qFromUtf8("xiaohongshu: 搜索需登录(官方 web API -101);"
+                           "游客可用首页/用户页/笔记详情"),
+           200, qFromUtf8("-101"), qFromUtf8("无登录信息")), {}, false);
+        return;
+    }
+    // 登录态:探测后走 web API(schema 派生解析,见 api.h 说明)
+    ensureAuth([this, kw, page, cb](const Result& a) {
+        if (a.code != Err::Ok) { cb(a, {}, false); return; }
+        const std::string body = xhsapi::buildSearchBody(
+            std::string(kw.toUtf8().constData()), page, 20, xhsapi::searchId(),
+            "general", 0);
+        apiRequest(qFromUtf8("POST").toUtf8(),
+                   qFromUtf8("/api/sns/web/v1/search/notes"),
+                   QByteArray(body.c_str(), (int)body.size()),
+                   [cb](const Result& r, const QByteArray& b) {
+            if (r.code != Err::Ok) { cb(r, {}, false); return; }
+            const xhsapi::PagedNotes p = xhsapi::parseSearch(
+                std::string(b.constData(), (size_t)b.size()));
+            QList<VideoItem> out;
+            for (size_t i = 0; i < p.items.size(); ++i)
+                out.append(toVideoItem(p.items[i]));
+            cb(Result::ok(), out, p.hasMore);
+        });
+    });
 }
 
 // ── homeFeed:explore + 频道轮转 ────────────────────────────────────
@@ -293,8 +514,22 @@ void XiaohongshuProvider::detail(const QString& id, DetailCb cb) {
     q.addQueryItem(qFromUtf8("xsec_source"), qFromUtf8("pc_feed"));
     const QString path = qFromUtf8("/explore/%1?%2")
                              .arg(noteId, q.toString(QUrl::FullyEncoded));
-    fetchPage(path, [this, cb, noteId](const Result& r, const QByteArray& body) {
-        if (r.code != Err::Ok) { cb(r, {}, {}); return; }
+    fetchPage(path, [this, cb, noteId, token](const Result& r,
+                                              const QByteArray& body) {
+        auto apiFallback = [this, cb, noteId, token]() {
+            resolveByApi(noteId, token,
+                         [cb](const Result& ar, const PlayResult* pr) {
+                if (ar.code != Err::Ok || !pr) { cb(ar, {}, {}); return; }
+                QList<VideoItem> parts;
+                parts.append(pr->item);
+                cb(Result::ok(), pr->item, parts);
+            });
+        };
+        if (r.code != Err::Ok) {
+            if (hasSession()) { apiFallback(); return; }
+            cb(r, {}, {});
+            return;
+        }
         JRoot root;
         if (!xiaohongshu::ssr::extractInitialState(body, root)) {
             onSoftBlock();
@@ -349,12 +584,28 @@ void XiaohongshuProvider::resolve(const QString& id, ResolveCb cb) {
     q.addQueryItem(qFromUtf8("xsec_source"), qFromUtf8("pc_feed"));
     const QString path = qFromUtf8("/explore/%1?%2")
                              .arg(noteId, q.toString(QUrl::FullyEncoded));
-    fetchPage(path, [this, cb, noteId, ckey](const Result& r,
-                                             const QByteArray& body) {
-        if (r.code != Err::Ok) { cb(r, {}); return; }
+    fetchPage(path, [this, cb, noteId, token, ckey](const Result& r,
+                                                    const QByteArray& body) {
+        // SSR 链路失败且登录态 → API feed 兜底(错误语义不变,只多一次机会)
+        auto apiFallback = [this, cb, noteId, token, ckey]() {
+            resolveByApi(noteId, token,
+                         [this, cb, ckey](const Result& ar,
+                                          const PlayResult* pr) {
+                if (ar.code != Err::Ok || !pr) { cb(ar, {}); return; }
+                m_cache.put(ckey, *pr, 10 * 60 * 1000);
+                DBG_P(kMod, Info, "resolve %s via api -> 1 stream", "api");
+                cb(Result::ok(), *pr);
+            });
+        };
+        if (r.code != Err::Ok) {
+            if (hasSession()) { apiFallback(); return; }
+            cb(r, {});
+            return;
+        }
         JRoot root;
         if (!xiaohongshu::ssr::extractInitialState(body, root)) {
             onSoftBlock();
+            if (hasSession()) { apiFallback(); return; }
             cb(Result::fail(Err::RateLimit,
                             qFromUtf8("xiaohongshu: 详情无 SSR(风控)")), {});
             return;
@@ -365,6 +616,7 @@ void XiaohongshuProvider::resolve(const QString& id, ResolveCb cb) {
             xiaohongshu::parse::noteDetail(root.p, noteId, &vi, &streams);
         if (res.code == Err::Parse) {
             onSoftBlock();
+            if (hasSession()) { apiFallback(); return; }
             cb(Result::fail(Err::RateLimit,
                             qFromUtf8("xiaohongshu: 详情为空(token 过期或风控)")),
                {});
@@ -381,6 +633,44 @@ void XiaohongshuProvider::resolve(const QString& id, ResolveCb cb) {
     });
 }
 
+// ── 登录态 feed 兜底(SSR 拿不到时)──────────────────────────────────
+void XiaohongshuProvider::resolveByApi(
+    const QString& noteId, const QString& token,
+    std::function<void(const Result&, const PlayResult*)> cb) {
+    const std::string body = xhsapi::buildFeedBody(
+        std::string(noteId.toUtf8().constData()), "pc_feed",
+        std::string(token.toUtf8().constData()));
+    apiRequest(qFromUtf8("POST").toUtf8(), qFromUtf8("/api/sns/web/v1/feed"),
+               QByteArray(body.c_str(), (int)body.size()),
+               [cb](const Result& r, const QByteArray& b) {
+        if (r.code != Err::Ok) { cb(r, nullptr); return; }
+        const xhsapi::NoteDetail d = xhsapi::parseFeed(
+            std::string(b.constData(), (size_t)b.size()));
+        if (d.streamUrl.empty()) {
+            cb(withServer(Result::fail(Err::Unsupported,
+                   qFromUtf8("xiaohongshu: 无视频流(图文笔记或结构变更)")),
+                   200, QString(), QString()), nullptr);
+            return;
+        }
+        PlayResult pr;
+        pr.item = toVideoItem(d.note);
+        pr.item.durationMs = d.durationMs;
+        Stream st;
+        st.url = qsFromStd(d.streamUrl);
+        st.kind = qFromUtf8("mp4");
+        st.quality = quality::labelFor(d.height);
+        QStringList backup;
+        for (size_t i = 0; i < d.backupUrls.size(); ++i)
+            backup.append(qsFromStd(d.backupUrls[i]));
+        st.extra.insert(qFromUtf8("backupUrls"), backup);
+        st.extra.insert(qFromUtf8("referer"),
+                        qFromUtf8("https://www.xiaohongshu.com/"));
+        st.extra.insert(qFromUtf8("source"), qFromUtf8("api"));
+        pr.streams.append(st);
+        cb(Result::ok(), &pr);
+    });
+}
+
 void XiaohongshuProvider::resolveQuality(const QString& id,
                                          const QString& quality,
                                          ResolveCb cb) {
@@ -391,7 +681,44 @@ void XiaohongshuProvider::resolveQuality(const QString& id,
 
 // ── userVideos:用户页 SSR(可能无 id,见调研)───────────────────────
 void XiaohongshuProvider::userVideos(const QString& uid, int page, SearchCb cb) {
-    if (page > 1) {   // SSR 首屏 30 条,无分页参数
+    if (hasSession()) {   // 登录态:GET /user_posted,游标分页
+        if (page <= 1) m_userCursor.clear();
+        std::vector<std::pair<std::string, std::string> > kv;
+        kv.push_back(std::make_pair(std::string("num"), std::string("30")));
+        kv.push_back(std::make_pair(
+            std::string("cursor"),
+            std::string(m_userCursor.toUtf8().constData())));
+        kv.push_back(std::make_pair(std::string("user_id"),
+                                    std::string(uid.toUtf8().constData())));
+        kv.push_back(std::make_pair(std::string("image_formats"),
+                                    std::string("jpg,webp,avif")));
+        kv.push_back(std::make_pair(std::string("xsec_source"),
+                                    std::string("pc_feed")));
+        const std::string qs = xhsapi::queryEncode(kv);
+        ensureAuth([this, qs, cb](const Result& a) {
+            if (a.code != Err::Ok) { cb(a, {}, false); return; }
+            apiRequest(qFromUtf8("GET").toUtf8(),
+                       qFromUtf8("/api/sns/web/v1/user_posted?")
+                           .append(qsFromStd(qs)),
+                       QByteArray(),
+                       [this, cb](const Result& r, const QByteArray& b) {
+                if (r.code != Err::Ok) { cb(r, {}, false); return; }
+                const xhsapi::PagedNotes p = xhsapi::parseUserPosted(
+                    std::string(b.constData(), (size_t)b.size()));
+                m_userCursor = qsFromStd(p.cursor);
+                QList<VideoItem> out;
+                for (size_t i = 0; i < p.items.size(); ++i) {
+                    const VideoItem vi = toVideoItem(p.items[i]);
+                    rememberToken(vi.id,
+                        vi.extra.value(qFromUtf8("xsecToken")).toString());
+                    out.append(vi);
+                }
+                cb(Result::ok(), out, p.hasMore);
+            });
+        });
+        return;
+    }
+    if (page > 1) {   // 游客:SSR 首屏 30 条,无分页参数
         cb(Result::ok(), {}, false);
         return;
     }
@@ -426,11 +753,56 @@ void XiaohongshuProvider::userVideos(const QString& uid, int page, SearchCb cb) 
 // ── comments:SSR 首屏(若有)───────────────────────────────────────
 void XiaohongshuProvider::comments(const QString& id, const QString& cursor,
                                    CommentsCb cb) {
-    Q_UNUSED(id);
-    Q_UNUSED(cursor);
-    cb(Result::fail(Err::Unsupported,
-       qFromUtf8("xiaohongshu: 评论仅详情 SSR 首屏,未单独提供(需登录 API)")),
-       {}, QString());
+    QString noteId = id, token;
+    if (id.contains(QLatin1Char('@'))) {
+        const int at = id.indexOf(QLatin1Char('@'));
+        noteId = id.left(at);
+        token = id.mid(at + 1);
+    } else if (id.startsWith(qFromUtf8("http"))) {
+        QString t;
+        xiaohongshu::parse::parseShareUrl(id, &noteId, &t);
+        token = t;
+    }
+    if (token.isEmpty()) token = pickToken(noteId);
+    if (!hasSession() || noteId.isEmpty()) {   // 游客:SSR 首屏已在 detail
+        cb(Result::fail(Err::Unsupported,
+           qFromUtf8("xiaohongshu: 评论仅详情 SSR 首屏;"
+                     "单独评论列表需登录态")),
+           {}, QString());
+        return;
+    }
+    std::vector<std::pair<std::string, std::string> > kv;
+    kv.push_back(std::make_pair(std::string("note_id"),
+                                std::string(noteId.toUtf8().constData())));
+    kv.push_back(std::make_pair(std::string("cursor"),
+                                std::string(cursor.toUtf8().constData())));
+    kv.push_back(std::make_pair(std::string("top_comment_id"), std::string()));
+    kv.push_back(std::make_pair(std::string("image_formats"),
+                                std::string("jpg,webp,avif")));
+    kv.push_back(std::make_pair(std::string("xsec_token"),
+                                std::string(token.toUtf8().constData())));
+    const std::string q = xhsapi::queryEncode(kv);
+    ensureAuth([this, q, cb](const Result& a) {
+        if (a.code != Err::Ok) { cb(a, {}, QString()); return; }
+        apiRequest(qFromUtf8("GET").toUtf8(),
+                   qFromUtf8("/api/sns/web/v2/comment/page?").append(qsFromStd(q)),
+                   QByteArray(),
+                   [cb](const Result& r, const QByteArray& b) {
+            if (r.code != Err::Ok) { cb(r, {}, QString()); return; }
+            const xhsapi::CommentPageLite p = xhsapi::parseComments(
+                std::string(b.constData(), (size_t)b.size()));
+            QList<CommentItem> out;
+            for (size_t i = 0; i < p.items.size(); ++i) {
+                CommentItem ci;
+                ci.id = qsFromStd(p.items[i].id);
+                ci.author = qsFromStd(p.items[i].author);
+                ci.text = qsFromStd(p.items[i].content);
+                ci.time = p.items[i].createTime;
+                out.append(ci);
+            }
+            cb(Result::ok(), out, qsFromStd(p.cursor));
+        });
+    });
 }
 
 } // namespace qxv

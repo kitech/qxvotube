@@ -1,0 +1,6 @@
+{"code":0,"success":true,"data":{"cursor":"CUR2","has_more":true,"comments":[
+  {"id":"c1","content":"第一条评论","user_info":{"nickname":"用户甲"},
+   "like_count":"12","create_time":1731900000},
+  {"id":"c2","content":"第二条","user_info":{"nickname":"用户乙"},
+   "like_count":3,"create_time":1731900100}
+]}}

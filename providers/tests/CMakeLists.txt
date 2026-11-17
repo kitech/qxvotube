@@ -74,3 +74,14 @@ target_compile_definitions(xhs PRIVATE
 add_executable(autherr autherror.test.cpp)
 target_link_libraries(autherr PRIVATE qxvproviders)
 add_test(NAME providers_autherror COMMAND autherr)
+
+# xhs 签名器(离线,进 ctest;fixture 目录传 argv[1])
+add_executable(xhssign xhssign.test.cpp)
+target_link_libraries(xhssign PRIVATE qxvproviders)
+add_test(NAME providers_xhssign COMMAND xhssign ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+
+# xhs web API 解析(离线,合成 fixture)
+add_executable(xhsapi xhsapi.test.cpp)
+target_link_libraries(xhsapi PRIVATE qxvproviders)
+add_test(NAME providers_xhsapi COMMAND xhsapi
+         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/xhs_api)

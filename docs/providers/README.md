@@ -130,9 +130,10 @@ provs[0]->search("travel", 1, [](qxv::Result res,
 
 | 层 | 入口 | 是否需要外网 | 说明 |
 |---|---|---|---|
-| 离线单测 | `ctest` → `providers_parse` / `providers_reliability` / `providers_hgcenc` / `providers_errortext` | ❌ 不需要 | fixture 回放解析 + 重试/取消/缓存 + CENC 向量 |
+| 离线单测 | `ctest` → `providers_parse` / `providers_reliability` / `providers_hgcenc` / `providers_errortext` / `providers_autherror` / `providers_xhssign` / `providers_xhsapi` | ❌ 不需要 | fixture 回放解析 + 重试/取消/缓存 + CENC 向量 + 认证错误模型 + xhs 签名器(1000 组差分) |
 | 联网自检 | `./pvsmoke [平台] [-q 720p]` | ✅ | search→detail→resolve→流头 1MB |
 | 专项 | `./paging` `./homefeed` `./detail` `./quality` `./hgapp` `./hgstream` | ✅ | 分页/homeFeed/详情/清晰度/红果 E2E/本地代理 |
+| Qt3 纯 C++ 件 | `providers/tests/qt3sign/build.sh` | ❌ 不需要 | 用 Qt 3.3.8sh 构建 sign+api 并跑 KAT/1000 组差分/API 解析 |
 
 ### fixture 重录
 ```bash
