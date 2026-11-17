@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 #include "compat.h"
 #include "mp4box.h"
 

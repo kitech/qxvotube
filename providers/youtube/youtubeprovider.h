@@ -42,11 +42,9 @@ private:
     // visitorId:X-Goog-Visitor-Id 头(与 body 里 client.visitorData 同值)。
     // 实测:缺此头时 search/player 一律 backgroundPromoRenderer(空结果/需登录),
     // 有它 + Origin/Referer 即正常(WEB 游客态)。
-#if QT_VERSION >= 0x050000
     // 高清晰度(DASH)路径:yt-dlp 取 adaptive 直链 + ffmpeg 合流(异步)
     void resolveDash(const QString& id, const QString& quality, int wantHeight,
                      ResolveCb cb);
-#endif
     // progressive 路径(itag18 360p;原逻辑)
     void resolveProgressive(const QString& id, const QString& quality,
                             ResolveCb cb);

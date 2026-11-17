@@ -172,6 +172,8 @@ include(../providers/providers.pri)
 - **Qt3/Qt4/Qt6 均编译真实源**(2026-11-17 起):传输层换成
   `qlappcom/EventPoller`(libcurl),不再依赖 cpp-httplib。
   容器用 `QList36`(Qt3=QValueList) / `NetHeaders`,Qt5+ 专有 API 由 qlcomp 垫片补齐。
-- 能力边界:Qt3/Qt4 不编 `hgcenc/hgapp/hgstream/localstream/ytdlp`
-  (红果走 web 360p、YouTube 走 progressive);Qt5+ 为全能力。
+- 能力边界(2026-11-17 起三档同能力):`hgcenc/hgapp/hgstream/localstream/ytdlp`
+  已移植到 Qt3/Qt4(容器用 `QList36`、字节操作走 `qba*`、`QProcess` 双分支)。
+  红果 App 1080p 依赖服务端 `multi_video_model`(当前偶发 200/空包 → 自动回落 web 360p);
+  YouTube DASH 依赖本机 yt-dlp,缺失时回落 progressive。
 - 接入验证:`providers/tests/`(CMake/ctest) + `qlvotube/buildqt3.sh` 真机运行。

@@ -87,7 +87,7 @@ QLVOTUBE_DEBUG=1 QXVOTUBE_PROXY=http://127.0.0.1:10809 xvfb-run -a ./qlvotube/bu
 
 ## 7. 已知限制
 
-- Qt3/Qt4 不启用视频源 UI（providers 仅 Qt>=5 实现）。
+- Qt3/Qt4/Qt6 均启用视频源 UI（三档编真实 providers，2026-11-17 起）。
 - 抖音分类榜需 `a_bogus/Argus` 签名（见 `protocols/bytedance.md` §13）。
 - 小红书频道字段名需登录态真实 SSR 才能确认；当前探测不到即不显示。
 - YouTube 分类需可达代理（当前出口为空壳页），翻页还需 continuation 样本。
@@ -120,3 +120,20 @@ B站等站点的媒体直链绑定「请求出口 IP + Referer/UA」，缺一即
   未显式指定 proxy 时沿用 `QXVOTUBE_PROXY`（与 API 同出口）。
 
 Qt3 实测：`pos=0→29000ms` 连续推进，无 `HTTP error 403`；Qt4 同样通过。
+
+## 10. hg\* / localstream / yt-dlp 的 Qt3/Qt4 移植（2026-11-17）
+
+| 模块 | 关键改法 |
+|---|---|
+| `hgcenc` | `quint*`→`uint*_t`；`QVector`→`std::vector`；`QByteArray` 切片走 `qbaMid/qIndexOf/qbaFromData` |
+| `hgapp` | `QUrlQuery` 用 qlcomp 同名实现；`currentMSecsSinceEpoch`→`wallMs`；`toUtf8/constData`→`qToUtf8/qba*` |
+| `hgstream`/`localstream` | 保留 httplib（纯 C++）；`nowMs`→`wallMs`；`fromHex/replace` 本地实现 |
+| `ytdlp` | `QStandardPaths`→PATH 扫描；`QProcess` 双分支（Qt3 `readyReadStdout/processExited`，Qt4+ `readyReadStandardOutput/finished`）；`YtdlpProc` 移入头文件供 moc |
+
+验证：
+- Qt3 `providers/tests/qt3sign/` 新增第三 target `qt3hgc`（spade KAT + mp4box 空输入 + 链接 ytdlp/localstream），all green；
+- Qt3 红果实测：`device_register` 200 → `multi_video_model` 请求发出 → 服务端空包时显式
+  `app chain failed(空响应/风控) → web fallback`，web 360p 正常播放（pos 连续推进）。
+- Qt3 运行级验证（qt3hgc）：
+  - `localstream` 真实起服务 → `Range: bytes=2-5` 返回 **206 + "2345"**；
+  - `ytdlp::fetch`（`QXVOTUBE_TEST_YTDLP=<url>` 开启）→ `formats>0`（Qt3 QProcess 分支 + PATH 扫描 + 代理）。

@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include "localstream.h"
 
 #include "common/debuglog.h"
@@ -23,7 +24,7 @@ namespace {
 
 const char* kMod = "localstream";
 
-qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
+qint64 nowMs() { return wallMs(); }
 
 std::mt19937& randGen() {
     static std::mt19937 g(static_cast<unsigned>(
@@ -33,10 +34,10 @@ std::mt19937& randGen() {
 
 QString randHex(int n) {
     static const char* kHex = "0123456789abcdef";
-    QByteArray s;
-    s.reserve(n);
-    for (int i = 0; i < n; ++i) s.append(kHex[randGen()() % 16]);
-    return QString::fromLatin1(s);
+    std::string out;
+    out.reserve((size_t)n);
+    for (int i = 0; i < n; ++i) out.push_back(kHex[randGen()() % 16]);
+    return qFromUtf8(out.data(), (int)out.size());
 }
 
 // 新变量名优先,兼容旧 QXVOTUBE_HG_* 口径
@@ -171,19 +172,18 @@ struct Server::Impl {
                 if (s->refs == 0) s->refs = 1;   // 播放器续播:临时计数防回收
                 ++s->active;
             }
-            DBG_P(kMod, Debug, "GET %s offset=%s", qPrintable(token.left(8)),
+            DBG_P(kMod, Debug, "GET %s offset=%s", qToUtf8(token.left(8)).data(),
                   req.has_header("Range")
-                      ? qPrintable(QString::fromUtf8(
-                            req.get_header_value("Range").c_str()))
+                      ? qToUtf8(qFromUtf8(req.get_header_value("Range").c_str())).data()
                       : "0");
             res.set_content_provider(
-                size_t(s->src->total()), s->src->contentType().toUtf8().constData(),
+                size_t(s->src->total()), qToUtf8(s->src->contentType()).data(),
                 [this, s](size_t offset, size_t length, httplib::DataSink& sink) {
                 QByteArray buf;
-                if (!s->src->read(quint64(offset), quint64(length), &buf))
+                if (!s->src->read(uint64_t(offset), uint64_t(length), &buf))
                     return false;
                 if (!buf.isEmpty()
-                    && !sink.write(buf.constData(), size_t(buf.size())))
+                    && !sink.write(buf.data(), size_t(buf.size())))
                     return false;
                 return true;   // 不要调 sink.done():由 httplib 负责
             },

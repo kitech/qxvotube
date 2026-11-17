@@ -7,10 +7,8 @@
 #include "parse.h"
 #include "common/quality.h"
 #include "common/autherror.h"
-#if QT_VERSION >= 0x050000
 #include "common/hgapp/hgapp.h"
 #include "common/hgstream/hgstream.h"
-#endif
 
 #include <functional>
 
@@ -238,7 +236,6 @@ void HongguoProvider::detail(const QString& id, DetailCb cb) {
         const Result dres = hongguo::parse::seriesDetail(root.p, &vi, &parts);
         DBG_P(kMod, Debug, "detail %s -> %d episodes", qToUtf8(id).data(),
               parts.size());
-#if QT_VERSION >= 0x050000
         // 预热前 N 集 tracks(默认 3;QXVOTUBE_HG_PREFETCH=0 关闭)
         if (dres.code == Err::Ok && !parts.isEmpty()) {
             int n = 3;
@@ -251,10 +248,9 @@ void HongguoProvider::detail(const QString& id, DetailCb cb) {
                 hgapp::videoModels(vids, [](const Result& r,
                                             const QMap<QString, QList36<hgapp::Track>>& m) {
                     DBG_P(kMod, Debug, "prefetch -> %d/%d (%s)", m.size(),
-                          qPrintable(QString::number(1)), qToUtf8(r.message).data());
+                          qToUtf8(QString::number(1)).data(), qToUtf8(r.message).data());
                 });
         }
-#endif
         cb(dres, vi, parts);
 
     });
@@ -267,10 +263,8 @@ void HongguoProvider::detail(const QString& id, DetailCb cb) {
 //           ② web 公开口 360p 明文(fallback-play-info)
 // App 链失败(风控/只有 bytevc2/代理起不来)一律显式回退 web,不静默失败。
 HongguoProvider::~HongguoProvider() {
-#if QT_VERSION >= 0x050000
     if (!m_streamVid.isEmpty())
         hgstream::Server::instance().release(m_streamVid, m_streamQuality);
-#endif
 }
 
 void HongguoProvider::resolve(const QString& id, ResolveCb cb) {
@@ -393,7 +387,6 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
         return;
     }
 
-#if QT_VERSION >= 0x050000
     // 通道②:App 协议(零签名 H3a)+ 本地流式解密代理(H2b)。
     // 只有 bytevc1(HEVC 通用可播)才走;bytevc2 私有编码 → web 保底并留说明。
     auto tryApp = [this, cb, seriesId, playInfo, quality, ckey](
@@ -485,15 +478,6 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
         if (res.code != Err::Ok || parts.isEmpty()) { cb(res, {}); return; }
         tryApp(parts.first().id);   // 首集
     });
-#else
-    /* Qt3:App 1080p 链路(hgcenc/hgstream)暂不编译 → 直接 web 360p 明文 */
-    if (!vid.isEmpty()) { playInfo(vid, cb); return; }
-    detail(seriesId, [cb, playInfo](Result res, const VideoItem&,
-                                    const QList36<VideoItem>& parts) {
-        if (res.code != Err::Ok || parts.isEmpty()) { cb(res, {}); return; }
-        playInfo(parts.first().id, cb);
-    });
-#endif
 }
 
 } // namespace qxv

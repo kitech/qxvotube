@@ -3,7 +3,11 @@
 
 #include <qlist.h>
 #include <qstring.h>
+#include <qobject.h>
 #include <functional>
+#include <string>
+
+class QProcess;
 
 // yt-dlp 可选后端(2026-11-15):
 //   本机实测 TVHTML5/WEB 全口径都过不了 bot 校验,但 yt-dlp 能拿到完整
@@ -42,6 +46,25 @@ bool enabled();
 // 异步执行 `yt-dlp -J`(回调在调用方线程;需事件循环)
 void fetch(const QString& url, const QString& proxy,
            std::function<void(const Info&)> cb);
+
+// 进程壳(Qt3/Qt4+ QProcess 命名差异封装;回调在发起线程)
+class YtdlpProc : public QObject {
+    Q_OBJECT
+public:
+    YtdlpProc(const QString& exe, const QStringList& args,
+              std::function<void(const Info&)> cb);
+    ~YtdlpProc() override;
+    bool start();
+private slots:
+    void drain();
+    void exited();
+private:
+    QProcess* m_p;
+    std::function<void(const Info&)> m_cb;
+    std::string m_out, m_err;
+    QStringList m_args;
+    bool m_done;
+};
 
 } // namespace ytdlp
 } // namespace qxv

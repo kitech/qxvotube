@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 #include "common/compat.h"
 #include "common/result.h"
 
@@ -25,9 +26,9 @@ namespace localstream {
 class Source {
 public:
     virtual ~Source() {}
-    virtual quint64 total() const = 0;
+    virtual uint64_t total() const = 0;
     // 读 [off, off+len) 的明文;失败返回 false。可返回少于 len(EOF)。
-    virtual bool read(quint64 off, quint64 len, QByteArray* out) = 0;
+    virtual bool read(uint64_t off, uint64_t len, QByteArray* out) = 0;
     virtual QString contentType() const { return qFromUtf8("video/mp4"); }
 };
 
@@ -37,11 +38,12 @@ public:
     BufferSource(const QByteArray& data,
                  const QString& contentType = qFromUtf8("video/mp4"))
         : data_(data), contentType_(contentType) {}
-    quint64 total() const override { return quint64(data_.size()); }
-    bool read(quint64 off, quint64 len, QByteArray* out) override {
-        if (off >= quint64(data_.size())) { out->clear(); return true; }
-        const quint64 n = qMin(len, quint64(data_.size()) - off);
-        *out = data_.mid(int(off), int(n));
+    uint64_t total() const override { return uint64_t(data_.size()); }
+    bool read(uint64_t off, uint64_t len, QByteArray* out) override {
+        if (off >= uint64_t(data_.size())) { *out = QByteArray(); return true; }
+        const uint64_t left = uint64_t(data_.size()) - off;
+        const uint64_t n = len < left ? len : left;
+        *out = qbaMid(data_, int(off), int(n));
         return true;
     }
     QString contentType() const override { return contentType_; }

@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 #include "compat.h"
 
 // 红果 CENC 密文 mp4 的 box 解析(手写,禁字符串搜索——流式对齐需偏移精确)。
@@ -12,18 +13,18 @@ namespace hgcenc {
 
 struct TrackInfo {
     bool isVideo = false;       // hdlr == 'vide'
-    quint32 ivSize = 0;         // tenc.default_IV_size(8/16)
+    uint32_t ivSize = 0;         // tenc.default_IV_size(8/16)
     QByteArray kid;             // tenc.default_KID(16B)
-    quint64 baseIv = 0;         // 本轨 senc 首样本 IV 前 8 字节(BE)
-    QList36<quint32> sampleSizes; // stsz
-    QList36<quint64> sampleOffsets; // stco/co64 + stsc 展开后的样本绝对偏移
+    uint64_t baseIv = 0;         // 本轨 senc 首样本 IV 前 8 字节(BE)
+    QList36<uint32_t> sampleSizes; // stsz
+    QList36<uint64_t> sampleOffsets; // stco/co64 + stsc 展开后的样本绝对偏移
 };
 
 // 遍历 [off,end) 内的一层 box;cb(type 四字符, box 内容区起始偏移, 内容长度)。
 // 返回 false 中止。size==0(到末尾)/size==1(64 位扩展)按 ISO 14496-12 处理。
-typedef bool (*BoxCb)(quint32 type, quint64 contentOff, quint64 contentSize,
+typedef bool (*BoxCb)(uint32_t type, uint64_t contentOff, uint64_t contentSize,
                       void* ud);
-bool walkBoxes(const QByteArray& buf, quint64 off, quint64 end, BoxCb cb,
+bool walkBoxes(const QByteArray& buf, uint64_t off, uint64_t end, BoxCb cb,
                void* ud);
 
 // 解析全部加密轨(视频/音频)。只处理带 senc 的轨;未加密轨跳过。

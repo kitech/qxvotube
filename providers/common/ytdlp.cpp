@@ -3,27 +3,154 @@
 #include "common/debuglog.h"
 #include "common/qcjson.h"
 
+#ifdef QT3_BUILD
+#include <qapplication.h>      // Qt3:QCoreApplication 不存在
+#else
 #include <qcoreapplication.h>
+#endif
 #include <qfileinfo.h>
 #include <qprocess.h>
-#include <qstandardpaths.h>
 
-// 说明见 ytdlp.h。用 QProcess + finished 信号(不阻塞调用线程);
-// 未安装/失败时 Info.ok=false,调用方回落 itag18。
+// 说明见 ytdlp.h。用 QProcess(不阻塞调用线程);未安装/失败时 Info.ok=false,
+// 调用方回落 progressive(itag18)。
+//
+// Qt3/Qt4+ 差异:
+//   Qt3   start() 返回 bool;信号 readyReadStdout/processExited;
+//         读取 readStdout/readStderr;无 exitCode(normalExit 判定)
+//   Qt4+  start(exe,args) 无返回;信号 readyReadStandardOutput/finished;
+//         读取 readAllStandardOutput/readAllStandardError
 
 namespace qxv {
 namespace ytdlp {
 
 static const char* kMod = "ytdlp";
 
+// PATH 扫描(Qt3 无 QStandardPaths)
+static QString findInPath(const QString& exe) {
+    const QStringList dirs = qStrSplit(qenv("PATH"), qFromUtf8(":"), true);
+    for (int i = 0; i < dirs.size(); ++i) {
+        const QString f = dirs[i] + qFromUtf8("/") + exe;
+        if (QFileInfo(f).isExecutable()) return f;
+    }
+    return QString();
+}
+
 bool enabled() {
     const QString v = qenv("QXVOTUBE_YT_YTDLP");
     if (v == qFromUtf8("0")) return false;
     if (v == qFromUtf8("1")) return true;
-    // 自动探测
-    static const bool probe = !QStandardPaths::findExecutable(
-                                   qFromUtf8("yt-dlp")).isEmpty();
+    static const bool probe = !findInPath(qFromUtf8("yt-dlp")).isEmpty();
     return probe;
+}
+
+static void parseJson(const QByteArray& out, Info* r) {
+    JRoot root(out);
+    if (!root.ok()) { r->err = qFromUtf8("yt-dlp JSON 解析失败"); return; }
+    r->title = jstr(root.p, "title");
+    cJSON* formats = jarr(root.p, "formats");
+    for (int i = 0; i < jsize(formats); ++i) {
+        const cJSON* f = jat(formats, i);
+        Format fmt;
+        fmt.id = jstr(f, "format_id");
+        fmt.height = int(jint(f, "height"));
+        fmt.ext = jstr(f, "ext");
+        fmt.proto = jstr(f, "protocol");
+        fmt.vcodec = jstr(f, "vcodec");
+        fmt.acodec = jstr(f, "acodec");
+        fmt.abr = double(jint(f, "abr"));
+        fmt.tbr = double(jint(f, "tbr"));
+        fmt.url = jstr(f, "url");
+        if (r->hlsMaster.isEmpty()) r->hlsMaster = jstr(f, "manifest_url");
+        if (fmt.hasUrl()) r->formats.append(fmt);
+    }
+    r->ok = !r->formats.isEmpty() || !r->hlsMaster.isEmpty();
+    if (!r->ok) r->err = qFromUtf8("yt-dlp 未返回可播 URL");
+}
+
+// YtdlpProc 实现(Qt3/Qt4+ 命名差异见头文件注释)
+YtdlpProc::YtdlpProc(const QString& exe, const QStringList& args,
+                     std::function<void(const Info&)> cb)
+    : m_p(0), m_cb(cb), m_done(false)
+{
+    m_p = new QProcess();
+#ifndef QT3_BUILD
+    m_p->setProcessChannelMode(QProcess::SeparateChannels);
+#endif
+#ifdef QT3_BUILD
+    QStringList all;
+    all << exe;
+    for (int i = 0; i < args.size(); ++i) all << args[i];
+    m_p->setArguments(all);
+    QObject::connect(m_p, SIGNAL(readyReadStdout()), this, SLOT(drain()));
+    QObject::connect(m_p, SIGNAL(readyReadStderr()), this, SLOT(drain()));
+    QObject::connect(m_p, SIGNAL(processExited()), this, SLOT(exited()));
+#else
+    m_args << exe << args;
+    QObject::connect(m_p, SIGNAL(readyReadStandardOutput()),
+                     this, SLOT(drain()));
+    QObject::connect(m_p, SIGNAL(readyReadStandardError()),
+                     this, SLOT(drain()));
+    QObject::connect(m_p, SIGNAL(finished(int, QProcess::ExitStatus)),
+                     this, SLOT(exited()));
+#endif
+}
+
+YtdlpProc::~YtdlpProc() { delete m_p; }
+
+bool YtdlpProc::start()
+{
+#ifdef QT3_BUILD
+    return m_p->start();
+#else
+    m_p->start(m_args.first(), m_args.mid(1));
+    return m_p->state() != QProcess::NotRunning;
+#endif
+}
+
+void YtdlpProc::drain()
+{
+    QByteArray chunk;
+#ifdef QT3_BUILD
+    chunk = m_p->readStdout();
+    if (!chunk.isEmpty()) m_out.append(chunk.data(), (size_t)chunk.size());
+    chunk = m_p->readStderr();
+    if (!chunk.isEmpty()) m_err.append(chunk.data(), (size_t)chunk.size());
+#else
+    chunk = m_p->readAllStandardOutput();
+    if (!chunk.isEmpty()) m_out.append(chunk.constData(), (size_t)chunk.size());
+    chunk = m_p->readAllStandardError();
+    if (!chunk.isEmpty()) m_err.append(chunk.constData(), (size_t)chunk.size());
+#endif
+}
+
+void YtdlpProc::exited()
+{
+    if (m_done) return;
+    m_done = true;
+    drain();
+    Info r;
+#ifdef QT3_BUILD
+    const int code = m_p->normalExit() ? 0 : -1;
+#else
+    const int code = m_p->exitStatus() == QProcess::NormalExit
+                         ? m_p->exitCode() : -1;
+#endif
+    if (code != 0 || m_out.empty()) {
+        const int n = (int)m_err.size() > 300 ? 300 : (int)m_err.size();
+        r.err = qFromUtf8("yt-dlp exit=%1 %2")
+                    .arg(code).arg(qFromUtf8(m_err.data(), n));
+        DBG_P(kMod, Warn, "%s", qToUtf8(r.err).data());
+    } else {
+        parseJson(qbaFromData(m_out.data(), (int)m_out.size()), &r);
+        if (r.ok)
+            DBG_P(kMod, Info, "yt-dlp ok formats=%d", r.formats.size());
+        else
+            DBG_P(kMod, Warn, "yt-dlp failed: %s", qToUtf8(r.err).data());
+    }
+    std::function<void(const Info&)> cb = m_cb;
+    m_cb = std::function<void(const Info&)>();
+    if (cb) cb(r);
+    deleteLater();
 }
 
 void fetch(const QString& url, const QString& proxy,
@@ -34,77 +161,30 @@ void fetch(const QString& url, const QString& proxy,
         cb(fail);
         return;
     }
+    #ifdef QT3_BUILD
+    if (!qApp) {
+#else
     if (!QCoreApplication::instance()) {
+#endif
         fail.err = qFromUtf8("yt-dlp 需要 QCoreApplication 事件循环");
         cb(fail);
         return;
     }
-
-    auto* p = new QProcess();
-    p->setProcessChannelMode(QProcess::SeparateChannels);
-    QStringList args = { qFromUtf8("-J"), qFromUtf8("--no-warnings"),
-                         qFromUtf8("--no-playlist"),
-                         qFromUtf8("--skip-download") };
+    QStringList args;
+    args << qFromUtf8("-J") << qFromUtf8("--no-warnings")
+         << qFromUtf8("--no-playlist") << qFromUtf8("--skip-download");
     if (!proxy.isEmpty())
         args << qFromUtf8("--proxy") << proxy;
     args << url;
 
-    QObject::connect(p, &QProcess::errorOccurred, p,
-                     [p, cb](QProcess::ProcessError) {
+    YtdlpProc* p = new YtdlpProc(findInPath(qFromUtf8("yt-dlp")), args, cb);
+    if (!p->start()) {
         Info r;
-        r.err = qFromUtf8("yt-dlp 启动失败: %1").arg(p->errorString());
+        r.err = qFromUtf8("yt-dlp 启动失败");
         DBG_P(kMod, Warn, "%s", qToUtf8(r.err).data());
-        p->deleteLater();
+        delete p;
         cb(r);
-    });
-    QObject::connect(
-        p, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), p,
-        [p, cb](int code, QProcess::ExitStatus) {
-        Info r;
-        const QByteArray out = p->readAllStandardOutput();
-        const QByteArray errOut = p->readAllStandardError();
-        if (code != 0 || out.isEmpty()) {
-            r.err = qFromUtf8("yt-dlp exit=%1 %2")
-                        .arg(code)
-                        .arg(QString::fromUtf8(errOut.left(300)));
-            DBG_P(kMod, Warn, "%s", qToUtf8(r.err).data());
-            p->deleteLater();
-            cb(r);
-            return;
-        }
-        JRoot root(out);
-        if (!root.ok()) {
-            r.err = qFromUtf8("yt-dlp JSON 解析失败");
-            p->deleteLater();
-            cb(r);
-            return;
-        }
-        r.title = jstr(root.p, "title");
-        cJSON* formats = jarr(root.p, "formats");
-        for (int i = 0; i < jsize(formats); ++i) {
-            const cJSON* f = jat(formats, i);
-            Format fmt;
-            fmt.id = jstr(f, "format_id");
-            fmt.height = int(jint(f, "height"));
-            fmt.ext = jstr(f, "ext");
-            fmt.proto = jstr(f, "protocol");
-            fmt.vcodec = jstr(f, "vcodec");
-            fmt.acodec = jstr(f, "acodec");
-            fmt.abr = double(jint(f, "abr"));
-            fmt.tbr = double(jint(f, "tbr"));
-            fmt.url = jstr(f, "url");
-            if (r.hlsMaster.isEmpty())
-                r.hlsMaster = jstr(f, "manifest_url");
-            if (fmt.hasUrl()) r.formats.append(fmt);
-        }
-        r.ok = !r.formats.isEmpty() || !r.hlsMaster.isEmpty();
-        if (!r.ok) r.err = qFromUtf8("yt-dlp 未返回可播 URL");
-        DBG_P(kMod, Info, "yt-dlp formats=%d (title=%s)", r.formats.size(),
-              qPrintable(r.title.left(20)));
-        p->deleteLater();
-        cb(r);
-    });
-    p->start(qFromUtf8("yt-dlp"), args);
+    }
 }
 
 } // namespace ytdlp

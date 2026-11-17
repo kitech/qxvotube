@@ -8,10 +8,8 @@
 #include "common/qcjson.h"
 #include "parse.h"
 #include "common/quality.h"
-#if QT_VERSION >= 0x050000
 #include "common/ytdlp.h"
 #include "common/localstream/localstream.h"
-#endif
 #include "common/autherror.h"
 
 #include <functional>
@@ -570,7 +568,6 @@ void YoutubeProvider::resolveQuality(const QString& id, const QString& quality,
         }
     }
     const int want = quality::heightOf(quality);
-#if QT_VERSION >= 0x050000
     // >360p 且 yt-dlp 可用 → DASH 合流;其余走 progressive(itag18)
     if (want > 360 && ytdlp::enabled()) {
         resolveDash(id, quality, want, [this, id, quality, cb, ckey](
@@ -587,29 +584,29 @@ void YoutubeProvider::resolveQuality(const QString& id, const QString& quality,
         });
         return;
     }
-#endif
     resolveProgressive(id, quality, cb);
 }
 
-#if QT_VERSION >= 0x050000
 // 拉 HLS 主播放列表并按请求高度裁剪(保留 #EXT-X-MEDIA 音频轨)
+// Qt3 的 QByteArray 无 split/trimmed/startsWith:统一转 QString 处理,末尾回 UTF-8。
 static QByteArray trimHlsMaster(const QByteArray& master, int wantHeight) {
-    const QList36<QByteArray> lines = master.split('\n');
-    QByteArray chosenInf, chosenUri;
+    const QString text = qFromUtf8(master.data(), (int)master.size());
+    const QStringList lines = qStrSplit(text, qFromUtf8("\n"), false);
+    QString chosenInf, chosenUri;
     int best = -1, lowest = -1;
-    QByteArray lowestInf, lowestUri;
+    QString lowestInf, lowestUri;
     for (int i = 0; i + 1 < lines.size(); ++i) {
-        const QByteArray l = lines[i].trimmed();
-        if (!l.startsWith("#EXT-X-STREAM-INF")) continue;
-        const int rp = qIndexOf(l, "RESOLUTION=");
+        const QString l = qTrim(lines[i]);
+        if (!l.startsWith(qFromUtf8("#EXT-X-STREAM-INF"))) continue;
+        const int rp = qIndexOf(l, qFromUtf8("RESOLUTION="));
         int h = 0;
         if (rp >= 0) {
             const int x = qIndexOf(l, qFromUtf8("x"), rp);
             int e = x + 1;
-            while (e < l.size() && l[e] >= '0' && l[e] <= '9') ++e;
+            while (e < l.length() && l.at(e) >= QChar('0') && l.at(e) <= QChar('9')) ++e;
             if (x > 0 && e > x + 1) h = l.mid(x + 1, e - x - 1).toInt();
         }
-        const QByteArray uri = lines[i + 1].trimmed();
+        const QString uri = qTrim(lines[i + 1]);
         if (h > 0 && (lowest < 0 || h < lowest)) {
             lowest = h;
             lowestInf = l;
@@ -627,14 +624,13 @@ static QByteArray trimHlsMaster(const QByteArray& master, int wantHeight) {
         chosenUri = lowestUri;
     }
     // 重建:所有非 STREAM-INF 行(头/音频声明)+ 选中的 variant
-    QByteArray out;
+    QString out;
     for (int i = 0; i < lines.size(); ++i) {
-        const QByteArray l = lines[i].trimmed();
-        if (!l.startsWith("#EXT-X-STREAM-INF"))
-            out += lines[i] + '\n';
+        if (!qTrim(lines[i]).startsWith(qFromUtf8("#EXT-X-STREAM-INF")))
+            out += lines[i] + qFromUtf8("\n");
     }
-    out += chosenInf + '\n' + chosenUri + '\n';
-    return out;
+    out += chosenInf + qFromUtf8("\n") + chosenUri + qFromUtf8("\n");
+    return qToUtf8(out);
 }
 
 void YoutubeProvider::resolveDash(const QString& id, const QString& quality,
@@ -698,8 +694,6 @@ void YoutubeProvider::resolveDash(const QString& id, const QString& quality,
         });
     });
 }
-
-#endif  // resolveDash/trimHlsMaster(Qt4+)
 
 void YoutubeProvider::resolveProgressive(const QString& id, const QString& quality,
                                         ResolveCb cb) {

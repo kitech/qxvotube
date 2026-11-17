@@ -800,8 +800,13 @@ void MainWindow::ensurePlayerReady()
     if (m_player->engine() != 0) {
         videoPane->setEngineLabel(
             QString::fromLatin1(m_player->engine()->name()));
-        if (getenv("QLVOTUBE_DEBUG") != 0)
-            fprintf(stderr, "engine=%s\n", m_player->engine()->name());
+        if (getenv("QLVOTUBE_DEBUG") != 0) {
+#if QT_VERSION >= 0x060000
+            qDebug() << "engine=" << m_player->engine()->name();
+#else
+            qDebug("engine=%s", m_player->engine()->name());
+#endif
+        }
     }
 }
 
@@ -909,9 +914,15 @@ void MainWindow::onQaStepPause()
 
 void MainWindow::onQaStepPlay()
 {
-    fprintf(stderr, "qa: step=pause ok=%d state=%d\n",
-            (int)(m_player != 0 && m_player->state() == CxPaused),
-            (int)(m_player != 0 ? m_player->state() : 0));
+#if QT_VERSION >= 0x060000
+    qDebug() << "qa: step=pause ok="
+             << int(m_player != 0 && m_player->state() == CxPaused)
+             << "state" << int(m_player != 0 ? m_player->state() : 0);
+#else
+    qDebug("qa: step=pause ok=%d state=%d",
+           (int)(m_player != 0 && m_player->state() == CxPaused),
+           (int)(m_player != 0 ? m_player->state() : 0));
+#endif
     if (m_player != 0) m_player->play();
 }
 
@@ -919,21 +930,33 @@ void MainWindow::onQaStepSeek()
 {
     if (m_player == 0) return;
     m_player->seek(5000);
-    fprintf(stderr, "qa: step=seek issued=1 pos=%ld\n", m_player->position());
+#if QT_VERSION >= 0x060000
+    qDebug() << "qa: step=seek issued=1 pos=" << (long)m_player->position();
+#else
+    qDebug("qa: step=seek issued=1 pos=%ld", (long)m_player->position());
+#endif
 }
 
 void MainWindow::onQaStepRate()
 {
     if (m_player == 0) return;
     m_player->setRate(1.5);
-    fprintf(stderr, "qa: step=rate ok=1 pos=%ld\n", m_player->position());
+#if QT_VERSION >= 0x060000
+    qDebug() << "qa: step=rate ok=1 pos=" << (long)m_player->position();
+#else
+    qDebug("qa: step=rate ok=1 pos=%ld", (long)m_player->position());
+#endif
 }
 
 void MainWindow::onQaStepCc()
 {
     int n = m_player != 0 ? m_player->subtitleTrackCount() : 0;
     bool ok = (n <= 0) || m_player->setSubtitleTrack(0);
-    fprintf(stderr, "qa: step=cc tracks=%d ok=%d\n", n, (int)ok);
+#if QT_VERSION >= 0x060000
+    qDebug() << "qa: step=cc tracks=" << n << "ok" << int(ok);
+#else
+    qDebug("qa: step=cc tracks=%d ok=%d", n, (int)ok);
+#endif
 }
 
 void MainWindow::onQaStepEq()
@@ -942,13 +965,21 @@ void MainWindow::onQaStepEq()
     CXVideoEq eq;
     eq.brightness = 60;
     m_player->setEq(eq);
-    fprintf(stderr, "qa: step=eq ok=1\n");
+#if QT_VERSION >= 0x060000
+    qDebug() << "qa: step=eq ok=1";
+#else
+    qDebug("qa: step=eq ok=1");
+#endif
 }
 
 void MainWindow::onQaStepShot()
 {
     if (m_player == 0 || m_player->engine() == 0) {
-        fprintf(stderr, "qa: step=shot ok=0 path=\n");
+#if QT_VERSION >= 0x060000
+        qWarning() << "qa: step=shot ok=0 path=";
+#else
+        qWarning("qa: step=shot ok=0 path=");
+#endif
         return;
     }
     const QString dir = cxShotDir();
@@ -967,8 +998,13 @@ void MainWindow::onQaStepShot()
     QByteArray pathBa = path.toLatin1();
     const char* pathC = pathBa.constData();
 #endif
-    fprintf(stderr, "qa: step=shot ok=%d path=%s\n",
-            (int)m_player->saveScreenshot(path), pathC);
+#if QT_VERSION >= 0x060000
+    qDebug() << "qa: step=shot ok=" << int(m_player->saveScreenshot(path))
+             << "path" << path;
+#else
+    qDebug("qa: step=shot ok=%d path=%s",
+           (int)m_player->saveScreenshot(path), pathC);
+#endif
 }
 
 void MainWindow::tryPlayTrack(const Track& t)
@@ -1464,8 +1500,18 @@ void MainWindow::onPlayerFinished()
 
 void MainWindow::onPlayerPosition(long ms)
 {
-    if (getenv("QLVOTUBE_DEBUG") != 0 && (ms % 1000) < 100)
-        fprintf(stderr, "pos=%ld\n", ms);
+    if (getenv("QLVOTUBE_DEBUG") != 0) {
+        static long lastSec = -1;          /* 1 秒一条,避免 33ms 刷屏 */
+        const long sec = ms / 1000;
+        if (sec != lastSec) {
+            lastSec = sec;
+#if QT_VERSION >= 0x060000
+            qDebug() << "pos=" << ms;
+#else
+            qDebug("pos=%ld", ms);
+#endif
+        }
+    }
     if (playerBar) playerBar->setProgress((int)ms);
 }
 
@@ -1528,7 +1574,11 @@ void MainWindow::onTakeScreenshot()
     const char* pathC = pathBa.constData();
 #endif
     if (getenv("QLVOTUBE_DEBUG") != 0)
-        fprintf(stderr, "shot: %s ok=%d\n", pathC, (int)ok);
+#if QT_VERSION >= 0x060000
+        qDebug() << "shot:" << path << "ok" << int(ok);
+#else
+        qDebug("shot: %s ok=%d", pathC, (int)ok);
+#endif
     if (ok)
         SharedStatusBar::instance()->showMessage(qFromUtf8("截图: ") + path, 4000);
     else
@@ -1575,7 +1625,11 @@ void MainWindow::onCycleSubtitle()
     if (m_subIdx >= n)
         m_subIdx = -1;
     if (getenv("QLVOTUBE_DEBUG") != 0)
-        fprintf(stderr, "sub-cycle: n=%d idx=%d\n", n, m_subIdx);
+#if QT_VERSION >= 0x060000
+        qDebug() << "sub-cycle: n=" << n << "idx" << m_subIdx;
+#else
+        qDebug("sub-cycle: n=%d idx=%d", n, m_subIdx);
+#endif
     m_player->setSubtitleTrack(m_subIdx);
     SharedStatusBar::instance()->showMessage(
         m_subIdx < 0 ? qFromUtf8("字幕: 关")
@@ -1611,7 +1665,11 @@ void MainWindow::onQaAutoSub()
 {
     int n = m_player != 0 ? m_player->subtitleTrackCount() : 0;
     if (getenv("QLVOTUBE_DEBUG") != 0)
-        fprintf(stderr, "autosub: n=%d\n", n);
+#if QT_VERSION >= 0x060000
+        qDebug() << "autosub: n=" << n;
+#else
+        qDebug("autosub: n=%d", n);
+#endif
     if (n > 0) {
         m_subIdx = 0;
         m_player->setSubtitleTrack(0);
@@ -1627,7 +1685,11 @@ void MainWindow::onSubtitleText(const QString& text)
     const char* textC = textBa.constData();
 #endif
     if (getenv("QLVOTUBE_DEBUG") != 0)
-        fprintf(stderr, "subtitle-text: [%s]\n", textC);
+#if QT_VERSION >= 0x060000
+        qDebug() << "subtitle-text: [" << text << "]";
+#else
+        qDebug("subtitle-text: [%s]", textC);
+#endif
     if (videoPane != 0)
         videoPane->setSubtitleText(text);
 }

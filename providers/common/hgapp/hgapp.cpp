@@ -33,20 +33,21 @@ QList36<std::function<void(const Result&, const Device&)>> g_waiters;
 
 std::mt19937& randGen() {
     static std::mt19937 g(static_cast<unsigned>(
-        std::random_device{}() ^ static_cast<unsigned>(QDateTime::currentMSecsSinceEpoch())));
+        std::random_device{}() ^ static_cast<unsigned>(wallMs())));
     return g;
 }
 
 QString randHex(int n) {
     static const char* kHex = "0123456789abcdef";
     QByteArray s;
-    s.reserve(n);
+    std::string out;
+    out.reserve((size_t)n);
     for (int i = 0; i < n; ++i)
-        s.append(kHex[randGen()() % 16]);
-    return QString::fromLatin1(s);
+        out.push_back(kHex[randGen()() % 16]);
+    return qFromUtf8(out.data(), (int)out.size());
 }
 
-qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
+qint64 nowMs() { return wallMs(); }
 
 // 公共 query(游客画像;device_id/install_id 来自 ensureDevice 缓存或 env)
 QString commonQuery(const Device& d) {
@@ -84,9 +85,9 @@ NetClient& net() {
 
 // ── device_register(信封格式,无签名)────────────────────────────────
 void doRegister(std::function<void(const Result&, const Device&)> cb) {
-    const QByteArray openudid = randHex(16).toUtf8();
-    const QByteArray clientudid = randHex(16).toUtf8();
-    const QByteArray cdid = randHex(32).toUtf8();
+    const QByteArray openudid = qToUtf8(randHex(16));
+    const QByteArray clientudid = qToUtf8(randHex(16));
+    const QByteArray cdid = qToUtf8(randHex(32));
 
     cJSON* root = cJSON_CreateObject();
     cJSON* hdr = cJSON_CreateObject();
@@ -116,14 +117,14 @@ void doRegister(std::function<void(const Result&, const Device&)> cb) {
     cJSON_AddStringToObject(hdr, "aid", "8662");
     cJSON_AddStringToObject(hdr, "device_platform", "android");
     cJSON_AddStringToObject(hdr, "user_agent", kUa);
-    cJSON_AddStringToObject(hdr, "openudid", openudid.constData());
-    cJSON_AddStringToObject(hdr, "clientudid", clientudid.constData());
-    cJSON_AddStringToObject(hdr, "cdid", cdid.constData());
+    cJSON_AddStringToObject(hdr, "openudid", openudid.data());
+    cJSON_AddStringToObject(hdr, "clientudid", clientudid.data());
+    cJSON_AddStringToObject(hdr, "cdid", cdid.data());
     cJSON_AddItemToObject(root, "header", hdr);
     cJSON_AddStringToObject(root, "magic_tag", "ss_app_log");
     cJSON_AddNumberToObject(root, "_gen_time", static_cast<double>(nowMs()));
     char* s = cJSON_PrintUnformatted(root);
-    const QByteArray body(s);
+    const QByteArray body = qbaFromCharptr(s);
     cJSON_free(s);
     cJSON_Delete(root);
 
@@ -279,11 +280,11 @@ void videoModels(const QStringList& vids,
         cJSON* map = cJSON_CreateObject();
         cJSON* arr = cJSON_CreateArray();
         for (int i = 0; i < vids.size(); ++i)
-            cJSON_AddItemToArray(arr, cJSON_CreateString(vids[i].toUtf8().constData()));
+            cJSON_AddItemToArray(arr, cJSON_CreateString(qToUtf8(vids[i]).data()));
         cJSON_AddItemToObject(map, "1", arr);
         cJSON_AddItemToObject(root, "mixed_video_id_map", map);
         char* s = cJSON_PrintUnformatted(root);
-        const QByteArray body(s);
+        const QByteArray body = qbaFromCharptr(s);
         cJSON_free(s);
         cJSON_Delete(root);
 
@@ -322,7 +323,7 @@ void videoModels(const QStringList& vids,
             QMap<QString, QList36<Track>> out;
             const cJSON* data = jobj(root.p, "data");
             for (int i = 0; i < vids.size(); ++i) {
-                const cJSON* vd = jobj(data, vids[i].toUtf8().constData());
+                const cJSON* vd = jobj(data, qToUtf8(vids[i]).data());
                 if (!vd) continue;
                 QList36<Track> tracks;
                 QString err;
@@ -345,9 +346,9 @@ void videoModel(const QString& vid,
         QMap<QString, TrackCacheEntry>& c = trackCache();
         auto it = c.find(vid);
         if (it != c.end()) {
-            if (nowMs() < it->expiresAt) {
+            if (nowMs() < (*it).expiresAt) {
                 DBG_P(kMod, Debug, "video_model cache hit %s", qToUtf8(vid).data());
-                cb(Result::ok(), it->tracks);
+                cb(Result::ok(), (*it).tracks);
                 return;
             }
             c.erase(it);
@@ -364,11 +365,11 @@ void videoModel(const QString& vid,
         cJSON_AddItemToObject(root, "biz_param", bp);
         cJSON* map = cJSON_CreateObject();
         cJSON* arr = cJSON_CreateArray();
-        cJSON_AddItemToArray(arr, cJSON_CreateString(qToUtf8(vid).constData()));
+        cJSON_AddItemToArray(arr, cJSON_CreateString(qToUtf8(vid).data()));
         cJSON_AddItemToObject(map, "1", arr);
         cJSON_AddItemToObject(root, "mixed_video_id_map", map);
         char* s = cJSON_PrintUnformatted(root);
-        const QByteArray body(s);
+        const QByteArray body = qbaFromCharptr(s);
         cJSON_free(s);
         cJSON_Delete(root);
 
@@ -414,7 +415,7 @@ void videoModel(const QString& vid,
                     200, QString::number(code), jstr(root.p, "message")), {});
                 return;
             }
-            const cJSON* vd = jobj(jobj(root.p, "data"), qToUtf8(vid).constData());
+            const cJSON* vd = jobj(jobj(root.p, "data"), qToUtf8(vid).data());
             if (!vd) {
                 cb(Result::fail(Err::Parse,
                    qFromUtf8("hongguo-app: no data[%1]").arg(vid)), {});

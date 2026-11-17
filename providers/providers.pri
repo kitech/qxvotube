@@ -60,9 +60,7 @@ SOURCES += \
     $$QXV_PROVIDERS_DIR/xiaohongshu/xhs_api.cpp \
     $$QXV_PROVIDERS_DIR/factory.cpp
 
-greaterThan(QT_MAJOR_VERSION, 4) {
-    # Qt5+:红果 App(hgcenc/hgapp/hgstream)/localstream/yt-dlp 依赖 Qt5 字节 API
-
+# 三档全编(2026-11-17 完成 Qt3/Qt4 兼容移植)
 SOURCES += \
     $$QXV_PROVIDERS_DIR/common/hgcenc/spade.cpp \
     $$QXV_PROVIDERS_DIR/common/hgcenc/mp4box.cpp \
@@ -71,12 +69,12 @@ SOURCES += \
     $$QXV_PROVIDERS_DIR/common/localstream/localstream.cpp \
     $$QXV_PROVIDERS_DIR/common/ytdlp.cpp \
     $$QXV_PROVIDERS_DIR/common/hgstream/hgstream.cpp
-}
 
 HEADERS += \
     $$QXV_PROVIDERS_DIR/common/provider.h \
     $$QXV_PROVIDERS_DIR/common/result.h \
     $$QXV_PROVIDERS_DIR/common/netclient.h \
+        $$QXV_PROVIDERS_DIR/common/ytdlp.h \
     $$QXV_PROVIDERS_DIR/common/quality.h \
     $$QXV_PROVIDERS_DIR/common/streamcache.h \
     $$QXV_PROVIDERS_DIR/common/qcjson.h

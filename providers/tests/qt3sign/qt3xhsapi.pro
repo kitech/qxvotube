@@ -18,7 +18,7 @@ INCLUDEPATH += /opt/qt338sh/include
 # 用 Qt3 qmake 是为了证明"Qt3 工具链下可编可跑"。
 SOURCES += \
     ../xhsapi.test.cpp \
-    ../../xiaohongshu/api.cpp \
+    ../../xiaohongshu/xhs_api.cpp \
     ../../../../qlcomp/md5.c \
     ../../../../qlcomp/cJSON.c \
     ../../../../vendor/wjcryptlib/WjCryptLib_Rc4.c

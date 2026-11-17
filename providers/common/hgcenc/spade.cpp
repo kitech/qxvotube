@@ -1,6 +1,8 @@
+#include <stdint.h>
+#include <string>
 #include "spade.h"
 
-#include <qvector.h>
+#include <vector>
 
 // 口径与 zhangbaio/hongguo frida/unwrap_spade.py 逐行对齐:
 //   bVar5 = spade[0]^spade[1]^spade[2]      初级种子
@@ -53,7 +55,7 @@ QString Spade::unwrapV1(const QByteArray& spade, int flag) {
     if (typeLen < 1) return QString();
     const int workLen = (L - bVar5) + 0x2f;    // 工作缓冲长度
     if (workLen < 1 || 1 + workLen > L) return QString();
-    QVector<quint8> dest(workLen);
+    std::vector<uint8_t> dest((size_t)workLen, 0);
     for (int i = 0; i < workLen; ++i)
         dest[i] = static_cast<unsigned char>(spade[1 + i]);
 
@@ -61,7 +63,7 @@ QString Spade::unwrapV1(const QByteArray& spade, int flag) {
     {
         const int b16 = static_cast<unsigned char>(spade[L - typeLen - 2]);
         const int b14 = static_cast<unsigned char>(spade[L - typeLen - 1]);
-        QByteArray type(typeLen, '\0');
+        QByteArray type(qbaFromData(std::string((size_t)typeLen, '\0').data(), typeLen));
         for (int i = 0; i < typeLen; ++i) {
             const int c = static_cast<unsigned char>(spade[i + (L - typeLen)]);
             type[i] = static_cast<char>(b14 ^ b16 ^ c);
@@ -73,12 +75,12 @@ QString Spade::unwrapV1(const QByteArray& spade, int flag) {
     // ver1 字节变换
     int b14 = 0x55, b16 = 0xfa;
     for (int i = 0; i < workLen; ++i) {
-        const quint8 b6 = dest[i];
+        const uint8_t b6 = dest[i];
         const int u18 = popcount32(static_cast<unsigned>(i));
         int b3 = b6, b7 = b14;
         if (i & 1) { b3 = b16; b7 = b6; b16 = b14; }
         const int cVar4 = flag ? (u18 + 0x15) : s8(-0x15 - u18);
-        dest[i] = static_cast<quint8>((cVar4 + (b16 ^ b6)) & 0xff);
+        dest[i] = static_cast<uint8_t>((cVar4 + (b16 ^ b6)) & 0xff);
         b14 = b7;
         b16 = b3;
     }
@@ -94,17 +96,20 @@ QString Spade::unwrapV1(const QByteArray& spade, int flag) {
 
     // dest[1..keyLen) 即 32 hex 字符(直接作为返回;不逐位转 hex——
     // 依据 Python 实现 bytes(dest[1:iv9]).decode("latin1") 即 hex 字符串本身)
-    QByteArray out;
-    out.reserve(keyLen - 1);
+    std::string out;
+    out.reserve((size_t)(keyLen - 1));
     for (int i = 1; i < keyLen; ++i)
-        out.append(static_cast<char>(dest[i]));
-    const QString key = QString::fromLatin1(out);
+        out.push_back(static_cast<char>(dest[i]));
+    const QString key = qFromUtf8(out.data(), (int)out.size());
     // 结构自证: 必须是 32 hex
-    if (key.size() != 32) return QString();
-    for (const QChar ch : key)
-        if (!(ch >= '0' && ch <= '9') && !(ch >= 'a' && ch <= 'f')
-            && !(ch >= 'A' && ch <= 'F'))
+    if (key.length() != 32) return QString();
+    for (int i = 0; i < key.length(); ++i) {
+        const QChar ch = key.at(i);
+        if (!(ch >= QChar('0') && ch <= QChar('9'))
+            && !(ch >= QChar('a') && ch <= QChar('f'))
+            && !(ch >= QChar('A') && ch <= QChar('F')))
             return QString();
+    }
     return key;
 }
 
