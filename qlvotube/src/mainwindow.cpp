@@ -1970,11 +1970,12 @@ void MainWindow::customEvent(CustomEventBase* event)
                 m_player->setNetOptions(no);
                 if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
-                    qDebug() << "media net: referer" << no.referer
-                             << "ua" << (no.userAgent.isEmpty() ? "-" : "+")
-                             << "proxy" << no.proxy;
+                    /* 字段名与 Qt3 分支保持一致（Qt6 删除 printf 重载,只能流式） */
+                    qDebug() << "media net: referer=" << no.referer
+                             << "ua=" << (no.userAgent.isEmpty() ? "0" : "1")
+                             << "proxy=" << no.proxy;
 #else
-                    qDebug("media net: referer %s ua %d proxy %s",
+                    qDebug("media net: referer='%s' ua=%d proxy='%s'",
                            qToUtf8(no.referer).data(),
                            int(!no.userAgent.isEmpty()),
                            qToUtf8(no.proxy).data());

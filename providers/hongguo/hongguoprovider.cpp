@@ -319,7 +319,13 @@ void HongguoProvider::resolveQuality(const QString& id, const QString& quality,
             st.url = url;
             static const QString kUA =
                 Fingerprint::chromeWeb(qFromUtf8("zh-CN,en-US")).headers[0].second;
-            st.extra.insert(qFromUtf8("referer"), qFromUtf8(kSite));
+            // 直链只带 UA,刻意不带 Referer:
+            //   字节短剧 CDN(qznovel/fqnovelvod 等)启用 Referer 防盗链,
+            //   带第三方 Referer → 403;不带 Referer → 200 可播。
+            //   来源:ucmao/media-parser docs/parsers/fanqie.md(2026-11 核对)。
+            //   注:本节只约束媒体直链;webGet() 的 API 请求仍需 Referer(kSite)。
+            // 原实现(带 Referer,会触发 CDN 403),保留注释便于回溯:
+            // st.extra.insert(qFromUtf8("referer"), qFromUtf8(kSite));
             st.extra.insert(qFromUtf8("userAgent"), kUA);
             st.quality = qFromUtf8("360P");   // 公开回退档固定
             st.kind = qFromUtf8("mp4");       // 明文渐进(fallback 口)

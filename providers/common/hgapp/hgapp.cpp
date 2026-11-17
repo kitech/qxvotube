@@ -238,6 +238,57 @@ QMap<QString, TrackCacheEntry>& trackCache() {
 }
 const qint64 kTrackTtlMs = 10 * 60 * 1000;
 
+// ── App 链条熔断(2026-11-17 加)──────────────────────────────────────
+// 背景:multi_video_model 稳定返回 200 + 0 字节 = 服务端对匿名/游客身份静默关闭。
+//   依据 docs/providers/ui-integration.md §11 的 5 组对照(身份/字段/body/端点/
+//   出口全试过都是空),以及同源社区 2026-10-21 用"公开游客画像"短暂恢复、
+//   2026-11 又全空的记录。所以这不是本地参数能修的问题。
+// 动机:每次点播都先打一遍必然空的请求,白付 1~2 个往返;代理抖动时还会叠加
+//   detail/fallback-play-info 的超时(实测单次点播最长 35s)。首个空包后熔断
+//   10 分钟,provider 收到失败立即走 web 360p 兜底,不再等 App 链条。
+// 恢复探测:QXVOTUBE_HG_APP_PROBE=1 时,熔断期内仍放行"一次"探针请求
+//   (仍只有 1 次,不重试)。拿到轨道就解锁;再空则维持熔断,本会话不再探。
+// 边界:只对"空包"熔断;传输错误/5xx 不触发,由 maxAttempts 正常重试。
+const qint64 kAppBlockMs = 10 * 60 * 1000;   // 10 分钟
+qint64 g_appBlockUntil = 0;                  // 0 = 未熔断
+int g_probeState = 0;                        // 0 未用过 / 1 已放行 / 2 已用尽
+
+bool probeEnabled() {
+    const QString v = qenv("QXVOTUBE_HG_APP_PROBE");
+    return !v.isEmpty() && v != qFromUtf8("0");
+}
+
+// true = 熔断生效,本次直接失败(不发任何请求,含 device_register)
+bool appBlocked() {
+    if (g_appBlockUntil == 0 || nowMs() >= g_appBlockUntil) return false;
+    if (g_probeState == 0 && probeEnabled()) {
+        g_probeState = 1;   // 本次放行作为探针
+        DBG_P(kMod, Info, "app chain 熔断中,放行一次探针(剩余 %lld ms)",
+              (long long)(g_appBlockUntil - nowMs()));
+        return false;
+    }
+    DBG_P(kMod, Debug, "app chain 熔断中,跳过 App 取流(剩余 %lld ms)",
+          (long long)(g_appBlockUntil - nowMs()));
+    return true;
+}
+
+void appBlockTrip() {
+    const bool wasBlocked = (g_appBlockUntil != 0 && nowMs() < g_appBlockUntil);
+    g_appBlockUntil = nowMs() + kAppBlockMs;
+    if (wasBlocked) return;    // 熔断期内的重复空包(并发在飞/探针失败):不续期日志、不重发探针
+    g_probeState = 0;          // 新一轮熔断:允许(若 env 开启)一次探针
+    // 并发在飞的多个请求会各回一个空包,只记一次,避免刷屏
+    DBG_P(kMod, Warn,
+          "app chain 熔断 10 分钟(200+空包);QXVOTUBE_HG_APP_PROBE=1 可复探");
+}
+
+void appBlockClear() {
+    if (g_appBlockUntil == 0) return;
+    g_appBlockUntil = 0;
+    g_probeState = 2;
+    DBG_P(kMod, Info, "app chain 探针成功,解除熔断");
+}
+
 // 从 video_model JSON 字符串解析轨道列表
 bool parseTracks(const QString& vmStr, QList36<Track>* out, QString* err) {
     JRoot vm(qToUtf8(vmStr));
@@ -269,6 +320,11 @@ void videoModels(const QStringList& vids,
                  std::function<void(const Result&,
                                     const QMap<QString, QList36<Track>>&)> cb) {
     if (vids.isEmpty()) { cb(Result::ok(), QMap<QString, QList36<Track>>()); return; }
+    if (appBlocked()) {
+        cb(Result::fail(Err::RateLimit,
+           qFromUtf8("hongguo-app: 熔断中(端点已关闭,直接走 web 兜底)")), {});
+        return;
+    }
     ensureDevice([vids, cb](const Result& dr, const Device& d) {
         if (dr.code != Err::Ok) { cb(dr, {}); return; }
         cJSON* root = cJSON_CreateObject();
@@ -299,10 +355,13 @@ void videoModels(const QStringList& vids,
         req.body = body;
         req.timeoutSec = 30;
         req.maxAttempts = 2;
-        req.retryOnEmpty = true;
+        // 200+空包 = 服务端风控/端点关闭,重试无意义(1s 内会打 6 次);
+        // 仅传输错误/5xx 仍按 maxAttempts 重试。
+        req.retryOnEmpty = false;
         DBG_P(kMod, Debug, "video_models %d vids", vids.size());
         net().send(req, [cb, vids](const NetResponse& r) {
             if (r.status == 200 && r.body.isEmpty()) {
+                appBlockTrip();   // 端点关闭:后续点播别再等这一跳
                 cb(Result::fail(Err::RateLimit,
                    qFromUtf8("hongguo-app: 空响应(风控)")), {});
                 return;
@@ -354,6 +413,11 @@ void videoModel(const QString& vid,
             c.erase(it);
         }
     }
+    if (appBlocked()) {
+        cb(Result::fail(Err::RateLimit,
+           qFromUtf8("hongguo-app: 熔断中(端点已关闭,直接走 web 兜底)")), {});
+        return;
+    }
     ensureDevice([vid, cb](const Result& dr, const Device& d) {
         if (dr.code != Err::Ok) { cb(dr, {}); return; }
 
@@ -386,9 +450,11 @@ void videoModel(const QString& vid,
         };
         req.body = body;
         req.timeoutSec = 25;
-        req.maxAttempts = 3;      // 200 空包=字节系风控,退避重试
+        req.maxAttempts = 3;      // 传输错误/5xx 退避重试(空包不重试)
         req.retryDelayMs = 500;
-        req.retryOnEmpty = true;
+        // 200+空包 = 服务端风控/端点关闭,重试无意义(1s 内会打 6 次);
+        // 仅传输错误/5xx 仍按 maxAttempts 重试。
+        req.retryOnEmpty = false;
         DBG_P(kMod, Debug, "video_model vid=%s", qToUtf8(vid).data());
 
         net().send(req, [cb, vid](const NetResponse& r) {
@@ -400,6 +466,7 @@ void videoModel(const QString& vid,
             }
             if (r.body.isEmpty()) {
                 // 200 + 空 body = 风控/接口关闭(单集端点的现状)
+                appBlockTrip();
                 cb(Result::fail(Err::RateLimit,
                    qFromUtf8("hongguo-app: 空响应(风控或端点关闭)")), {});
                 return;
@@ -434,6 +501,7 @@ void videoModel(const QString& vid,
                 e.expiresAt = nowMs() + kTrackTtlMs;
                 trackCache().insert(vid, e);
             }
+            appBlockClear();   // 探针拿到轨道 → 解除熔断
             DBG_P(kMod, Info, "video_model %s -> %d tracks (first %s/%s)",
                   qToUtf8(vid).data(), out.size(), qToUtf8(out[0].definition).data(),
                   qToUtf8(out[0].codecType).data());

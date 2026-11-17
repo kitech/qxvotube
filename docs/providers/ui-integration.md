@@ -88,6 +88,8 @@ QLVOTUBE_DEBUG=1 QXVOTUBE_PROXY=http://127.0.0.1:10809 xvfb-run -a ./qlvotube/bu
 ## 7. 已知限制
 
 - Qt3/Qt4/Qt6 均启用视频源 UI（三档编真实 providers，2026-11-17 起）。
+- 红果 App 取流端点关闭（200+0B），首个空包后熔断 10 分钟直接走 web 360p；
+  720p/1080p 需端点恢复（§11.1），其中 720p 还额外需要 bvc2 解码（§11.2）。
 - 抖音分类榜需 `a_bogus/Argus` 签名（见 `protocols/bytedance.md` §13）。
 - 小红书频道字段名需登录态真实 SSR 才能确认；当前探测不到即不显示。
 - YouTube 分类需可达代理（当前出口为空壳页），翻页还需 continuation 样本。
@@ -103,6 +105,13 @@ QLVOTUBE_DEBUG=1 QXVOTUBE_PROXY=http://127.0.0.1:10809 xvfb-run -a ./qlvotube/bu
   在 `wheelEvent/onScroll` 共同调用（Qt3 实测 `near bottom -> loadMore` → p2 20 条）。
 - **Qt3 静态 QPixmap**：`QMap<QString,QPixmap>` 改为函数内静态，否则
   Qt3 在 QApplication 创建前构造 QPixmap 直接 `qFatal`。
+- **红果 App 链条重试噪音**：`hgapp` 的 `multi_video_model` 两处请求
+  （`videoModels` 预取 / `videoModel` 单片）把 `retryOnEmpty` 关掉。
+  200+空包是服务端风控/端点关闭的稳定结果，重试无意义（Qt3 实测原为
+  1 秒内 6 次 POST + `retry 2/2`/`3/3` 两条 Warn），现只发 1 次；
+  `maxAttempts` 仍保留，仅对传输错误/5xx 生效。
+- **日志排版**：`media net:` 改为 `referer='%s' ua=%d proxy='%s'`，
+  空 referer 时显示 `referer=''` 而不是双空格（Qt6 分支同字段名）。
 
 ## 9. 播放直链网络选项（2026-11-17 追加）
 
@@ -137,3 +146,77 @@ Qt3 实测：`pos=0→29000ms` 连续推进，无 `HTTP error 403`；Qt4 同样�
 - Qt3 运行级验证（qt3hgc）：
   - `localstream` 真实起服务 → `Range: bytes=2-5` 返回 **206 + "2345"**；
   - `ytdlp::fetch`（`QXVOTUBE_TEST_YTDLP=<url>` 开启）→ `formats>0`（Qt3 QProcess 分支 + PATH 扫描 + 代理）。
+
+## 11. 外部阻塞调研结论（2026-11-17 网搜核对 + 本机实测）
+
+### 11.1 红果 `multi_video_model` 200+空包：已确认是服务端关闭，不是本地参数问题
+
+社区同源案例：`waligoraamodio288-rgb/hongguo-desktop-releases` issue **#742**（2026-10-21，已关闭）。
+作者给出的定位与我们的现象完全一致，且踩到了同一个坑：
+
+> `/multi_video_model/v1/`、`/video_model/v1/`、`/multi_video_model/preload/v1/` 在签名/配置正确时
+> 全部 **HTTP 200 + 0 字节**；同期 `multi_video_detail/v1/` 正常 → 是播放类接口对「审计游客」
+> 身份静默返回空。换成公开游客画像（`7.3.5.32 / channel=update_64 / 无签名`）后旧路径恢复 5 档轨道；
+> **preload 路径在两种身份下都是 0 字节，不要按「改路径」修**。
+
+我们据此取到对方参考实现 `desktop_public_player.py`，与 `providers/common/hgapp` 逐项对比：
+
+| 项 | 参考实现（当时可用） | 我们的实现 |
+|---|---|---|
+| 版本画像 | 73532 / 7.3.5.32 / update_64 | 一致 |
+| 签名 | 无 | 一致 |
+| device_id / iid | 随机 **19 位数字**（`10^18~9·10^18`） | `device_register` 返回的 16 位 |
+| 标识字段名 | `iid` | `install_id` |
+| openudid / cdid | **不发送** | 发 `hglive0000000001` / `hglivecdid…`（占位假值） |
+| `_rticket` | 仅多集接口带 | 两个都带 |
+| 空 200 处理 | 原请求重试 3 次，间隔 0/5/12s | 不重试（见 §8） |
+
+**2026-11-17 本机对照实测**（真实 vid `7704532501426867224`，取自 detail 页 `vid_list`）：
+
+| 变体 | 结果 |
+|---|---|
+| 参考画像（19 位 id + `iid` + 原版 UA/headers + 最小 body） | 200 / **0 B** |
+| 同上 + `dr_scene=preload` + `biz_param` | 200 / **0 B** |
+| 单集 `/video_model/v1/` | 200 / **0 B** |
+| 走代理 vs 直连 | 都是 200 / **0 B** |
+| 再补 `passport-sdk-version` / `x-tt-store-region` / `openudid` / `cdid` | 200 / **0 B** |
+
+响应头确认是边缘节点主动给空体（不是压缩/解析问题）：
+`HTTP/2 200`、`content-type: application/json`、`content-length: 0`、`server: TLB`、带 `x-tt-logid`。
+旁证：该仓库 2026-11 的 issue #747、#918 仍是「播放失败 / 进度条不动」。
+
+**结论**：社区 10-21 的修复在 11 月已失效，端点对匿名/游客身份再次全空。我们不改协议参数
+（改了也无法验证，属无依据改动），改为**熔断 + 兜底**：
+
+- `hgapp` 首个空包后熔断 10 分钟（`providers/common/hgapp/hgapp.cpp` 的 `appBlocked/appBlockTrip`）；
+  熔断期内 `videoModels/videoModel` 直接返回失败，连 `device_register` 都不发，provider 立即走
+  web 360p 兜底。Qt3 实测（连播 3 集）：第 1 集 `multi_video_model` 2 次 POST 后熔断，
+  第 2 集 **0 次**、第 3 集 **0 次**；`fallback-play-info` 直接 200（1.7~5.3s）并正常起播。
+- `QXVOTUBE_HG_APP_PROBE=1` 时熔断期内放行**一次**探针请求（不重试）：实测第 2 集
+  POST 计数 2→3（只放行 1 次）、同批并发的单集请求同时被跳过，探针再空不重复告警，
+  第 3 集恢复为 0 次。拿到轨道时会自动解锁。用于端点将来恢复时无需改代码即可发现。
+- 恢复时优先核对两处历史差异：标识字段名 `install_id` vs 参考实现的 `iid`、以及 `openudid/cdid`
+  的 `hglive…` 占位值是否会被判为异常画像。
+
+### 11.2 红果 720p 的 bytevc2 不是死路（1080p 本来就不需要）
+
+- 参考实现与 issue #742 实测：**1080p = bytevc1**（解密重封装后是标准 HEVC，普通 ffmpeg/PyAV 可解）；
+  **360p~720p = bytevc2**（字节私有编码，≈VVC 衍生）。
+- `wxyzh/ffmpeg-bvc2` 提供现成解码：基于 jellyfin-ffmpeg，叠加约 **107 行 patch** 把 librempeg 的
+  bvc2 支持移植过来——`isom_tags` 映射 `bvc2` 四字码 + 新增 `cbs_type_bvc2`（按 4 字节长度前缀
+  切 NAL，不做 VVCC 解析）+ 一个 `ff_bvc2_decoder` 入口，实际解码复用上游 `libavcodec/vvc/*`。
+  许可 **GPLv3**（bvc2 代码来自 librempeg，且含 x264）。
+- 因此我们的策略不变、也不需要改码：`Track::playable()` 只认 bytevc1、`pickBest()` 优先 bytevc1
+  （最高档即可播）。若将来要支持 720p 降档，需要换用带 bvc2 的 ffmpeg 构建并承担 GPLv3 分发义务，
+  不引入到默认依赖里。
+
+### 11.3 其余三项维持原判（补充实测证据）
+
+| 阻塞 | 结论 | 处置 |
+|---|---|---|
+| 抖音 `a_bogus` | `ylcangel/a_bogus` 明确「**只提供 js 版本**，其他语言请自行实现」；其余教程均为补环境 / JSVMP 还原 | 暂不移植（纯 C++ 需移植 JS VM 或重写 SM3+VM 逻辑），分类榜保持 Unsupported |
+| 小红书频道 | 官方开放平台只开放 OAuth + `basic_info`；频道/笔记列表仅第三方付费 API（TikHub / Rnote / EveryInfra）或登录态 SSR | 维持 SSR 探测，拿不到即 Unsupported；等 cookie 再补真实验证 |
+| YouTube 分类/翻页 | 无服务端分类列表 API；实测当前出口下 ANDROID `browse FEwhat_to_watch` 也回新 UI 壳（0 renderer），`FEtrending` 400。追测 `yt-dlp 2026.10.26`：`feed/trending` 直接报 `redirected to youtube.com home page`；频道页与 `ytsearch10` 可用但耗时 **13.6s/10 条**，做列表兜底不划算 | 维持「仅推荐」，搜索走自有 innertube；不引入 yt-dlp 作为列表兜底 |
+
+> 备注：红果媒体直链的 Referer 结论仍是**第三方资料 + 代码路径自证**（去掉 Referer 后 web 360p
+> 可播；带 Referer 的 403 未能在本机复现到同一 CDN 域名），注释里保留了来源与适用范围。

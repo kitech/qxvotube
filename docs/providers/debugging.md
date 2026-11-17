@@ -7,6 +7,7 @@
 | `QXVOTUBE_DEBUG` | 模块/级别过滤:`"http"` / `"http,youtube:debug"` / `"bilibili:trace"`;级别 err/warn/info/debug/trace |
 | `QXVOTUBE_DEBUG_FULL` | 打开全量(含敏感字段,自动 mask 脱敏) |
 | `QXVOTUBE_PROXY` | `http://host:port`,YouTube/TikTok 等被墙源必须;本机测试口径 `http://127.0.0.1:10809` |
+| `QXVOTUBE_HG_APP_PROBE` | `1` = 红果 App 取流熔断期内仍放行**一次**探针请求（端点恢复时自动解锁）；默认关闭 |
 
 ## 输出格式
 

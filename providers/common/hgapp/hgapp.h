@@ -49,6 +49,9 @@ void ensureDevice(std::function<void(const Result&, const Device&)> cb);
 
 // 取某集全部清晰度轨道(已解出 video_model JSON 字符串嵌套)。
 // 内置 10 分钟 tracks 缓存(命中即时回调)。
+// 200+空包 = 端点关闭(见 docs/providers/ui-integration.md §11):首个空包后熔断
+// 10 分钟,期间直接返回失败让 provider 走 web 兜底;QXVOTUBE_HG_APP_PROBE=1
+// 可放行一次探针请求,成功即解锁。
 void videoModel(const QString& vid,
                 std::function<void(const Result&, const QList36<Track>&)> cb);
 

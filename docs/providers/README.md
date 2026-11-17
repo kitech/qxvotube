@@ -53,8 +53,11 @@ provs[0]->search("travel", 1, [](qxv::Result res,
 // 取消:provider->cancel() 精确作废本源在途/重试/待投递回调
 // 单飞:同 method+url+body+jar 的并发请求只发一次,响应扇出(NetRequest.singleFlight)
 // 限流:QXVOTUBE_QPS(默认 12,0=关)按 host 最小间隔,防突发被风控
-// 红果 ≤720p:走官网明文 360P(bytevc2 不可播);1080p 走 App+H2b 本地解密
+// 红果 ≤720p:bytevc2 私有编码(现网 ffmpeg 解不了;可选 GPLv3 构建见 ui-integration.md §11.2)
+//   1080p 走 App+H2b 本地解密(bytevc1=标准 HEVC,无需 bvc2)
 // 红果详情后按 QXVOTUBE_HG_PREFETCH(默认 3)后台预热前 N 集
+// 红果 App 取流(multi_video_model)200+空包=端点关闭:熔断 10 分钟,直接走 web 360p;
+//   QXVOTUBE_HG_APP_PROBE=1 可在熔断期内放行一次探针(端点恢复自动解锁)
 // YouTube 高清晰度:yt-dlp(可选,自动探测)+ HLS master 裁剪 → 本地 hls 流
 //   QXVOTUBE_YT_YTDLP=0/1 强制关/开;缺失自动回落 itag18 360p
 // 缓存:resolve/resolveQuality 命中未过期直链直接返回,过期自动重解析
