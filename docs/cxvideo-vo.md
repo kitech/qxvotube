@@ -81,6 +81,8 @@ mpv 官方也把 `gpu/gpu-next` 之外的 vo 标为"兼容/特殊用途"。我�
 | 全部 | **不要在构造期取 `winId()`**：Qt3 下子件尚未 reparent/show 时取 `winId()` 会把它变成独立顶层窗，随后 SDL 包装报 `X Error: BadWindow`。X11/Xv/SDL 后端一律在首帧 `present()` 惰性建原生资源。 |
 | `x11` | SHM 生命周期（`XShmCreateImage`→`XShmAttach`→`XShmDetach`+`shmdt`+`shmctl`）；双缓冲 + `ShmCompletion` 计数（`send_event=True`）；SHM 不可用**整组**回退普通 `XImage`；Qt 侧不绘制（Qt3 `setBackgroundMode(NoBackground)` + 构造 flags `WNoAutoErase`，Qt5+ `WA_PaintOnScreen`+`WA_NativeWindow`） |
 | `xv` | `XvGrabPort`/`XvUngrabPort`；格式优先 YUY2 再 UYVY；`XvCreateImage(...,0,w,h)` 后按 `data_size` 自备缓冲；**合成窗口管理器下可能黑屏**（日志提示换 `x11`/`gl`）；letterbox 交给 `XvPutImage` 目标矩形 |
+| `xv`（可用性） | **`libXv` 装上 ≠ Xv 可用**：需要 server 扩展 + 驱动 adaptor。本机 `:0`（Intel）实测 2 个 adaptor / 32 port / YUY2 `0x32595559`；`:99`（Xvfb）为 `no adaptors present`。失败原因分类进日志：`no-display / no-adaptor / no-yuv-format / port-busy / visual-mismatch`。 |
+| `xv`（初始化时机） | 构造期**只**开 Display + 选 adaptor + `XvGrabPort`（不碰 `winId()`）；`winId()` 与 visual 兼容检查放到首帧 `present()`，避免 Qt3 子件提前变顶层窗。历史上此处漏调 `initXv()`，导致 `ready()` 恒 false、真机也被丢弃（已修）。 |
 | `sdl` | `SDL_CreateWindowFrom`/properties 包装宿主窗口；Qt 侧不绘制；backend 名进日志 |
 | `d3d11` | `D3D11_CREATE_DEVICE_BGRA_SUPPORT`；HARDWARE→WARP；`DXGI_SWAP_EFFECT_DISCARD` + 单缓冲才能 `CopyResource` 进后台缓冲；`ResizeBuffers` 前释放引用；Qt 必须停止绘制否则覆盖 D3D 内容；DPI 用 `devicePixelRatio` |
 | `metal` | `CAMetalLayer` 挂 `NSView`（`QWidget::winId()`），`framebufferOnly=NO` 才能 blit；`contentsScale=backingScaleFactor`；Qt5+ 限定；`.mm` 走 `OBJECTIVE_SOURCES` |
@@ -91,7 +93,8 @@ mpv 官方也把 `gpu/gpu-next` 之外的 vo 标为"兼容/特殊用途"。我�
 
 | 平台 | 状态 |
 |---|---|
-| Linux/X11 | **实测**：默认 `auto` → `x11 (auto:xv 不可用)` 出画；`QLVOTUBE_VO_OUT=x11/raster/sdl/gl` 逐个复查均出画；`xv` 显式选择时回退 `raster` 且日志写明原因；配置页选择写入 `config.json: video.out`，重启日志 `video out: x11 (config/env)` |
+| Linux/X11（真机 `:0`，Intel） | **实测**：`xv` 直接生效 —— 日志 `adaptor=Intel(R) Textured Video port=72 base=72 fmt=0x32595559 ports=32`、`window depth=24 visual=0x20 compatible`、`video out: xv (config/env)`，截图出画；默认 `auto` 落到 `xv (auto)` |
+| Linux/X11（Xvfb `:99`） | **实测**：`auto` → `x11 (auto:xv(no-adaptor))` 出画；`QLVOTUBE_VO_OUT=x11/raster/sdl/gl` 逐个复查均出画；`xv` 显式选择 → `raster (回退:xv(no-adaptor))`；配置页选择写入 `config.json: video.out`，重启 `video out: x11 (config/env)` |
 | Linux/Wayland | **未实测**（无会话）；只保证编译期条件成立、X11 下不会被选中 |
 | Windows | **未实测**：`d3d11`/`sdl` 代码未在本机编译 |
 | macOS | **未实测**：`metal`/`sdl` 代码未在本机编译 |

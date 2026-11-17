@@ -6,6 +6,7 @@
 #include <qevent.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 extern "C" {
 #include <libavutil/pixfmt.h>
@@ -38,6 +39,12 @@ bool CXRendererXv::isAvailable()
     return ok;
 }
 
+void CXRendererXv::setErr(const char* why)
+{
+    m_err = QString::fromLatin1(why);
+    fprintf(stderr, "[cxvideo-xv] %s\n", why);
+}
+
 CXRendererXv::CXRendererXv(QWidget* parent)
 #ifdef QT3_BUILD
     : QWidget(parent, 0, WNoAutoErase), m_dpy(0), m_screen(0), m_win(0), m_gc(0),
@@ -45,8 +52,10 @@ CXRendererXv::CXRendererXv(QWidget* parent)
     : QWidget(parent), m_dpy(0), m_screen(0), m_win(0), m_gc(0),
 #endif
       m_port(0), m_formatId(0), m_xvImg(0), m_buf(0), m_vw(0), m_vh(0),
-      m_sws(0)
+      m_sws(0), m_fmtCount(0), m_visualChecked(false)
 {
+    ::memset(m_fmtDepth, 0, sizeof(m_fmtDepth));
+    ::memset(m_fmtVisual, 0, sizeof(m_fmtVisual));
     setMinimumSize(320, 180);
 #ifdef QT3_BUILD
     setBackgroundMode(NoBackground);   /* Qt3:无 setAttribute */
@@ -56,6 +65,10 @@ CXRendererXv::CXRendererXv(QWidget* parent)
     setAttribute(Qt::WA_NativeWindow, true);
 #endif
     setTargetSize(size());
+    /* 这里只开 Display + 查 adaptor + XvGrabPort,不碰 winId():
+     * 构造期取 winId() 会让 Qt3 子件提前变成顶层窗口(见 cxvideo-vo.md §6)。
+     * 历史 bug:此处原本没有调用,导致 ready() 恒 false,xv 在真机上也被丢弃。 */
+    initXv();
 }
 
 CXRendererXv::~CXRendererXv()
@@ -65,13 +78,18 @@ CXRendererXv::~CXRendererXv()
 
 bool CXRendererXv::initXv()
 {
-    if (m_dpy != 0)
-        return m_port != 0;
-    m_dpy = XOpenDisplay(0);
-    if (m_dpy == 0)
-        return false;
-    m_screen = DefaultScreen(m_dpy);
-    m_gc = XCreateGC(m_dpy, DefaultRootWindow(m_dpy), 0, 0);
+    if (m_port != 0)
+        return true;
+    if (m_dpy == 0) {
+        m_dpy = XOpenDisplay(0);
+        if (m_dpy == 0) {
+            setErr("no-display");
+            return false;
+        }
+        m_screen = DefaultScreen(m_dpy);
+        m_gc = XCreateGC(m_dpy, DefaultRootWindow(m_dpy), 0, 0);
+    }
+    m_err = QString();
 
     unsigned int n = 0;
     XvAdaptorInfo* ai = 0;
@@ -79,6 +97,7 @@ bool CXRendererXv::initXv()
         || n == 0) {
         if (ai != 0)
             XvFreeAdaptorInfo(ai);
+        setErr("no-adaptor");
         return false;
     }
 
@@ -86,6 +105,15 @@ bool CXRendererXv::initXv()
     for (unsigned int i = 0; i < n && !grabbed; ++i) {
         if ((ai[i].type & XvImageMask) == 0)
             continue;
+        // 记录该 adaptor 支持的 depth/visual(诊断 visual-mismatch 用)
+        m_fmtCount = 0;
+        for (unsigned long v = 0;
+             v < ai[i].num_formats && m_fmtCount < CX_XV_MAX_FMT; ++v) {
+            m_fmtDepth[m_fmtCount] = ai[i].formats[v].depth;
+            m_fmtVisual[m_fmtCount] = ai[i].formats[v].visual_id;
+            m_fmtCount++;
+        }
+        bool haveYuv = false;
         for (unsigned int p = 0; p < ai[i].num_ports && !grabbed; ++p) {
             XvPortID port = ai[i].base_id + p;
             int cnt = 0;
@@ -106,14 +134,24 @@ bool CXRendererXv::initXv()
                 XFree(fv);
             if (want == 0)
                 continue;
+            haveYuv = true;
             if (XvGrabPort(m_dpy, port, CurrentTime) == Success) {
                 m_port = port;
                 m_formatId = want;
                 grabbed = true;
+                fprintf(stderr,
+                        "[cxvideo-xv] adaptor=%s port=%lu base=%lu fmt=0x%08x ports=%lu\n",
+                        ai[i].name, (unsigned long)port,
+                        (unsigned long)ai[i].base_id, (unsigned)m_formatId,
+                        (unsigned long)ai[i].num_ports);
             }
         }
+        if (!grabbed && haveYuv)
+            setErr("port-busy");
     }
     XvFreeAdaptorInfo(ai);
+    if (!grabbed && m_err.isEmpty())
+        setErr("no-yuv-format");
     return grabbed;
 }
 
@@ -182,19 +220,55 @@ bool CXRendererXv::ensureConvert(int w, int h)
     return m_sws != 0;
 }
 
+// 首帧核对窗口 visual:adaptor 只支持特定 depth/visual(例:Intel :0 是
+// depth24/visualID 0x20)。不匹配时 XvPutImage 会抛 BadMatch(异步,不易定位),
+// 所以提前打一条可读日志;不强行失败,避免误杀其它可用组合。
+void CXRendererXv::checkWindowVisual()
+{
+    if (m_win == 0 || m_dpy == 0)
+        return;
+    XWindowAttributes wa;
+    if (!XGetWindowAttributes(m_dpy, m_win, &wa))
+        return;
+    unsigned long vid = XVisualIDFromVisual(wa.visual);
+    bool match = false;
+    for (int i = 0; i < m_fmtCount; ++i) {
+        if (m_fmtDepth[i] == (unsigned long)wa.depth
+            && (m_fmtVisual[i] == 0 || m_fmtVisual[i] == vid)) {
+            match = true;
+            break;
+        }
+    }
+    if (!match) {
+        m_err = QString::fromLatin1("visual-mismatch");
+        fprintf(stderr,
+                "[cxvideo-xv] WARN window depth=%d visual=0x%lx 不在 adaptor"
+                "支持列表内(XvPutImage 可能 BadMatch,建议改用 x11/gl)\n",
+                wa.depth, vid);
+    } else {
+        fprintf(stderr, "[cxvideo-xv] window depth=%d visual=0x%lx compatible\n",
+                wa.depth, vid);
+    }
+}
+
 bool CXRendererXv::present(const QImage& img, const QRect& content)
 {
-    if (m_dpy == 0 && !initXv())
+    if (m_port == 0 && !initXv())      // 端口曾被占用等:每帧重试一次(廉价)
         return false;
     if (m_win == 0)
         m_win = (Window)winId();
     if (m_port == 0 || m_win == 0)
         return false;
+    if (!m_visualChecked) {
+        m_visualChecked = true;
+        checkWindowVisual();
+    }
     if (!ensureConvert(img.width(), img.height()))
         return false;
 
     QImage src = img;
-    src = cxToRgb32(src);
+    if (src.depth() != 32)
+        src = cxToRgb32(src);
     const uint8_t* planes[4];
     int strides[4];
     planes[0] = (const uint8_t*)src.bits();

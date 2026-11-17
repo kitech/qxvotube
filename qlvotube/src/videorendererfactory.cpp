@@ -79,14 +79,16 @@ static CxVideoOut cxTryCreate(QWidget* host, const QString& name)
 #endif
 #ifdef WITH_CX_RENDERER_XV
     else if (name == qFromUtf8("xv")) {
-        if (CXRendererXv::isAvailable()) {
-            CXRendererXv* w = new CXRendererXv(host);
-            if (w->ready()) {
-                r.widget = w;
-                r.renderer = w;
-            } else {
-                delete w;
-            }
+        /* 不再用 isAvailable() 预检(会重复 XOpenDisplay);
+         * 构造函数内部完成 adaptor 选择,失败用 lastError() 带出具体原因。 */
+        CXRendererXv* w = new CXRendererXv(host);
+        if (w->ready()) {
+            r.widget = w;
+            r.renderer = w;
+        } else {
+            r.why = w->lastError().isEmpty() ? qFromUtf8("unavailable")
+                                             : w->lastError();
+            delete w;
         }
     }
 #endif
@@ -117,7 +119,7 @@ static CxVideoOut cxTryCreate(QWidget* host, const QString& name)
         }
     }
 #endif
-    if (r.widget == 0)
+    if (r.widget == 0 && r.why.isEmpty())
         r.why = qFromUtf8("不可用");
     return r;
 }
@@ -156,7 +158,9 @@ CxVideoOut cxCreateVideoOut(QWidget* host, const QString& out,
             return r;
         }
         CxVideoOut re = cxTryCreate(host, qFromUtf8("raster"));
-        re.why = QString::fromUtf8("回退:%1 不可用").arg(want);
+        re.why = QString::fromUtf8("回退:%1(%2)")
+                     .arg(want)
+                     .arg(r.why.isEmpty() ? qFromUtf8("不可用") : r.why);
         return re;
     }
 
@@ -167,12 +171,15 @@ CxVideoOut cxCreateVideoOut(QWidget* host, const QString& out,
         if (r.widget != 0) {
             r.why = tried.isEmpty()
                     ? qFromUtf8("auto")
-                    : QString::fromUtf8("auto:%1 不可用").arg(tried);
+                    : QString::fromUtf8("auto:%1").arg(tried);
             return r;
         }
         if (!tried.isEmpty())
             tried += qFromUtf8(",");
+        // 带原因:xv(no-adaptor) / sdl(unavailable) ...
         tried += chain[i];
+        if (!r.why.isEmpty())
+            tried += qFromUtf8("(") + r.why + qFromUtf8(")");
     }
     CxVideoOut none;
     none.widget = 0;
