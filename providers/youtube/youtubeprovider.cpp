@@ -72,6 +72,7 @@ static const YtClient kClients[] = {
 };
 static const YtClient& kDefaultClient = kClients[0];
 
+
 // 从首页 HTML 的 ytcfg 里抓 visitorData(访客身份;必须随 X-Goog-Visitor-Id 头发送)
 static QString parseVisitorData(const QByteArray& html) {
     static const QByteArray k = qbaFromCharptr("\"visitorData\":\"");
@@ -156,6 +157,13 @@ static QByteArray dumpBody(cJSON* root) {
 static const char* kWebUa =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+// WEB 客户端:仅用于 guide/browse(分类)。
+// 2026-11-18 实测(代理出口):guide → Music/Live/Gaming 三个 UC* 主题;
+// browse 分别回 lockupViewModel(VIDEO)/videoRenderer/videoCardRenderer。
+// ★ body 的 client 与 UA 必须同档(WEB body + Chrome UA),混用恒空结果。
+static const YtClient kWebClient = {
+    "WEB", "2.20241126.01.00", kWebUa, 0, 0, 0
+};
 
 static QByteArray playerBody(const QString& videoId, const Potoken& p) {
     cJSON* root = cJSON_CreateObject();
@@ -224,6 +232,18 @@ static QByteArray continuationBody(const QString& token) {
     cJSON* ctx = cJSON_AddObjectToObject(root, "context");
     addClient(cJSON_AddObjectToObject(ctx, "client"), kDefaultClient);
     cJSON_AddStringToObject(root, "continuation", qToUtf8(token).data());
+    return dumpBody(root);
+}
+
+// guide/browse 的 WEB body;browseId=0 表示 guide(无 browseId)
+static QByteArray webBrowseBody(const char* browseId, const QString& params) {
+    cJSON* root = cJSON_CreateObject();
+    cJSON* ctx = cJSON_AddObjectToObject(root, "context");
+    addClient(cJSON_AddObjectToObject(ctx, "client"), kWebClient);
+    if (browseId != 0)
+        cJSON_AddStringToObject(root, "browseId", browseId);
+    if (!params.isEmpty())
+        cJSON_AddStringToObject(root, "params", qToUtf8(params).data());
     return dumpBody(root);
 }
 
@@ -403,39 +423,61 @@ void YoutubeProvider::webGetHtml(
 void YoutubeProvider::categories(
     std::function<void(const Result&, const QList36<CategoryItem>&)> cb)
 {
-    webGetHtml(qFromUtf8("/?hl=en&gl=US"),
-               [cb](const Result& r, const QByteArray& html) {
-        if (r.code != Err::Ok) { cb(r, {}); return; }
-        JRoot root;
-        if (!extractInitialData(html, root)) {
-            DBG_P(kMod, Warn, "categories: 无 ytInitialData (%d bytes)",
-                  html.size());
-            cb(Result::fail(Err::Unsupported,
-               qFromUtf8("youtube: 首页无初始数据(IP 被判空壳)")), {});
+    // 2026-11-18:首页 HTML/browse(FEwhat_to_watch) 在当前出口 IP 均为空壳,
+    // 改走 youtubei/v1/guide(左侧导航,免登录/免 API key,实测可用)。
+    innertube("guide", webBrowseBody(0, QString()), kWebClient.ua,
+      [cb](const NetResponse& r) {
+        if (!r.ok()) {
+            cb(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error), {});
             return;
         }
-        QList36<CategoryItem> chips;
-        walkChips(root.p, &chips);
-        DBG_P(kMod, Info, "categories: %d chips", chips.size());
-        if (chips.isEmpty()) {
-            DBG_P(kMod, Warn, "categories: 0 chips (空壳页/结构变更)");
+        JRoot root(r.body);
+        if (!root.ok()) { cb(Result::fail(Err::Parse, "not json"), {}); return; }
+        const QList36<CategoryItem> items = youtube::parse::guideItems(root.p);
+        DBG_P(kMod, Info, "categories(guide) -> %d", items.size());
+        if (items.isEmpty()) {
+            DBG_P(kMod, Warn, "categories: guide 无 UC* 主题(%d bytes)",
+                  r.body.size());
             cb(Result::fail(Err::Unsupported,
-               qFromUtf8("youtube: 首页无分类 chips")), {});
+               qFromUtf8("youtube: guide 无分类(结构变更/风控)")), {});
             return;
         }
-        cb(Result::ok(), chips);
-    });
+        cb(Result::ok(), items);
+      }, QString(), true /* 不带 cookie:游客口径 */);
 }
 
 void YoutubeProvider::categoryFeed(const QString& key, int page, SearchCb cb)
 {
     if (key.isEmpty()) { homeFeed(page, cb); return; }
-    // 翻页需要 continuation,当前无任何 chip 样本可验证 → 不假翻页
-    DBG_P(kMod, Warn, "categoryFeed: 无 chips 样本/continuation,暂不支持"
-                      " (key=%s p%d)", qToUtf8(key).data(), page);
-    cb(Result::fail(Err::Unsupported,
-       qFromUtf8("youtube: 分类列表暂不可用(首页空壳,无 continuation 样本)")),
-       {}, false);
+    // guide/browse 返回的 UA 页无 continuationItemRenderer(实测) → 不假翻页
+    if (page > 1) { cb(Result::ok(), {}, false); return; }
+    const int bar = qIndexOf(key, qFromUtf8("|"));
+    const QString id = bar > 0 ? key.left(bar) : key;
+    const QString params = bar > 0 ? key.mid(bar + 1) : QString();
+    innertube("browse", webBrowseBody(qToUtf8(id).data(), params),
+              kWebClient.ua,
+      [cb](const NetResponse& r) {
+        if (!r.ok()) {
+            cb(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error), {}, false);
+            return;
+        }
+        JRoot root(r.body);
+        if (!root.ok()) {
+            cb(Result::fail(Err::Parse, "not json"), {}, false);
+            return;
+        }
+        const QList36<VideoItem> items = youtube::parse::browseItems(root.p);
+        DBG_P(kMod, Info, "categoryFeed -> %d items (%d bytes)",
+              items.size(), r.body.size());
+        if (items.isEmpty()) {
+            cb(Result::fail(Err::Parse,
+               qFromUtf8("youtube: 分类无条目(空壳/改版)")), {}, false);
+            return;
+        }
+        cb(Result::ok(), items, false);
+      }, QString(), true);
 }
 
 // ── homeFeed ────────────────────────────────────────────────────────

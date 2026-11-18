@@ -200,3 +200,22 @@ ffprobe 校验 itag18 直链:`h264 640x360 + aac, duration 1953s` → 真可播�
 - `captcha/not a bot/unusual traffic` → `CaptchaRequired` + `captchaUrl`
 - `UNPLAYABLE` → `GeoBlocked`；其它 → `NotFound`
 - detail 带 `http.status=200`、`server.code=<playabilityStatus>`、`server.message=<reason>`
+
+## categories / categoryFeed(2026-11-18 落码)
+
+- **数据源**:`POST youtubei/v1/guide`(WEB client,免登录/免 API key),
+  解析 `guideEntryRenderer` → `browseEndpoint.browseId`。
+  只保留 `UC*` 真实主题频道(Music/Live/Gaming),滤掉 `FE*`/`SP*`
+  导航项(Movies=FEstorefront 在该出口 IP 为空壳,自然被滤)。
+- **分类列表**:`POST youtubei/v1/browse` + browseId(+params),
+  三种渲染器实测并存:
+  `videoRenderer`(Live,70 条)/`videoCardRenderer`(Gaming,36 条)/
+  `lockupViewModel`(Music,36 条,仅 `LOCKUP_CONTENT_TYPE_VIDEO`;
+  playlist 条目跳过,避免拿 RD... 当视频 id)。
+- **边界**:这些 UA 页无 `continuationItemRenderer` → page>1 返回 ok 空,
+  不假翻页;`WEB clientVersion` 常量(2.20241126.01.00)失效时表现为
+  HTTP 400 → 显式 Parse,升级点即该常量。
+- 首页推荐(`browse FEwhat_to_watch`)在 datacenter/该出口 IP 仍为空壳,
+  `homeFeed` 维持显式 Unsupported。
+- 实测(代理 127.0.0.1:10809):guide→3 chips;三类 feed 首条均带
+  id/title/author/cover;分类 id 走 resolve 正常出 360p 直链。
