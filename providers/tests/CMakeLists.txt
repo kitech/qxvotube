@@ -1,6 +1,6 @@
 add_executable(pvsmoke smoke.cpp)
 target_link_libraries(pvsmoke PRIVATE qxvproviders)
-add_test(NAME providers_smoke COMMAND pvsmoke)
+# 需外网(且抖音 search 现需登录态)→ 不进默认 ctest;手动 ./tests/pvsmoke
 
 add_executable(ettest errortext.test.cpp)
 target_link_libraries(ettest PRIVATE qxvproviders)
@@ -44,6 +44,11 @@ target_link_libraries(reliability PRIVATE qxvproviders)
 target_compile_definitions(reliability PRIVATE
     CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
 add_test(NAME providers_reliability COMMAND reliability)
+
+# 抖音签名纯算 golden(离线,进 ctest)
+add_executable(acsigtest acsig.test.cpp)
+target_link_libraries(acsigtest PRIVATE qxvproviders)
+add_test(NAME providers_acsig COMMAND acsigtest)
 
 # 离线解析单测(fixtures/ 真实响应回放,不联网,进 ctest)
 add_executable(parsetest parse.test.cpp)

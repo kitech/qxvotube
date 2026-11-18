@@ -11,7 +11,7 @@ export QTDIR
 QMAKE="$QTDIR/bin/qmake"
 
 if [ "$1" = "clean" ]; then
-    rm -rf build build-api
+    rm -rf build build-api build-parse
 fi
 
 run() {  # $1=pro $2=builddir $3=bin $4=fixture
@@ -24,3 +24,4 @@ run() {  # $1=pro $2=builddir $3=bin $4=fixture
 run qt3sign.pro    build     qt3sign    ../fixtures
 run qt3xhsapi.pro  build-api qt3xhsapi ../fixtures/xhs_api
 run qt3hgc.pro     build-hgc qt3hgc     ../fixtures/hgc
+run qt3parse.pro   build-parse qt3parse ../fixtures

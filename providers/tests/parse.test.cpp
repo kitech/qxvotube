@@ -196,6 +196,116 @@ int main(int argc, char** argv) {
               "douyin extra.kind=hotword");
     }
 
+    // ── youtube 分类(guide/browse,2026-11-18 落码) ─────────────
+    {
+        JRoot r(load(QString::fromUtf8("yt_guide.json")));
+        const QList36<CategoryItem> cats = youtube::parse::guideItems(r.p);
+        check(cats.size() >= 3, "yt_guide UC* 分类>=3",
+              QString::number(cats.size()));
+        bool allUc = true;
+        for (int i = 0; i < cats.size(); ++i)
+            if (!cats[i].key.startsWith(QString::fromUtf8("UC"))) allUc = false;
+        check(allUc, "yt_guide key 仅 UC*(滤 FE*/SP*)");
+    }
+    {
+        JRoot r(load(QString::fromUtf8("yt_browse_music.json")));
+        const QList36<VideoItem> items = youtube::parse::browseItems(r.p);
+        check(items.size() == 2, "yt_browse_music VIDEO==2(playlist 跳过)",
+              QString::number(items.size()));
+        check(!items.isEmpty() && items.first().id.size() == 11,
+              "yt lockup videoId 11 字符",
+              items.isEmpty() ? QString() : items.first().id);
+        check(!items.isEmpty() && !items.first().title.isEmpty()
+                  && !items.first().author.isEmpty(),
+              "yt lockup title/author 非空");
+        check(!items.isEmpty()
+                  && items.first().cover.startsWith(QString::fromUtf8("http")),
+              "yt lockup cover url");
+    }
+    {
+        JRoot r(load(QString::fromUtf8("yt_browse_gaming.json")));
+        const QList36<VideoItem> items = youtube::parse::browseItems(r.p);
+        check(items.size() == 2, "yt_browse_gaming videoCard==2",
+              QString::number(items.size()));
+        check(!items.isEmpty() && !items.first().title.isEmpty()
+                  && !items.first().author.isEmpty(),
+              "yt videoCard title/author 非空");
+    }
+    {
+        JRoot r(load(QString::fromUtf8("yt_browse_live.json")));
+        const QList36<VideoItem> items = youtube::parse::browseItems(r.p);
+        check(items.size() == 2, "yt_browse_live videoRenderer==2",
+              QString::number(items.size()));
+        check(!items.isEmpty() && !items.first().webUrl.isEmpty(),
+              "yt live webUrl 非空");
+    }
+
+    // ── douyin detail/streams/search(2026-11-18 落码) ───────────
+    {
+        JRoot r(load(QString::fromUtf8("douyin_detail.json")));
+        VideoItem vi;
+        QString err;
+        const bool ok = douyin::parse::awemeDetail(r.p, &vi, &err);
+        check(ok, "douyin_detail awemeDetail ok", err);
+        check(vi.id == QString::fromUtf8("7322042668907842867"),
+              "douyin_detail aweme_id", vi.id);
+        check(vi.publishMs == 1704795919000LL, "create_time*1000→publishMs",
+              QString::number(vi.publishMs));
+        check(vi.durationMs == 868566, "video.duration→durationMs",
+              QString::number(vi.durationMs));
+        check(!vi.author.isEmpty() && !vi.title.isEmpty(),
+              "douyin_detail author/title 非空");
+        check(vi.webUrl.indexOf(vi.id) >= 0, "webUrl 含 aweme_id", vi.webUrl);
+
+        const QList36<Stream> ss = douyin::parse::streamsOf(r.p);
+        check(ss.size() == 6, "streamsOf 6 档", QString::number(ss.size()));
+        long long prev = -1;
+        bool asc = true;
+        bool has1080 = false, has720 = false;
+        for (int i = 0; i < ss.size(); ++i) {
+            const long long b =
+                ss[i].extra[QString::fromUtf8("bitRate")].toLongLong();
+            if (b < prev) asc = false;
+            prev = b;
+            if (ss[i].quality == QString::fromUtf8("1080P")) has1080 = true;
+            if (ss[i].quality == QString::fromUtf8("720P")) has720 = true;
+        }
+        check(asc, "streamsOf bitRate 升序");
+        check(has1080 && has720, "gear_name→1080P/720P");
+    }
+    {
+        // 无 aweme_detail(风控)→ false + 文案透出
+        JRoot r(QByteArray(
+            "{\"status_code\":0,\"filter_detail\":"
+            "{\"detail_msg\":\"Blocked by ArgusSecurityPlugin\"}}"));
+        VideoItem vi;
+        QString err;
+        check(!douyin::parse::awemeDetail(r.p, &vi, &err),
+              "awemeDetail 风控空壳 false");
+        check(err.indexOf(QString::fromUtf8("Blocked")) >= 0,
+              "awemeDetail 风控文案透出", err);
+    }
+    {
+        // 无 bit_rate → play_addr 兜底
+        JRoot r(QByteArray(
+            "{\"aweme_detail\":{\"video\":{\"ratio\":\"720p\","
+            "\"play_addr\":{\"url_list\":[\"https://e/x.mp4\"]}}}}"));
+        const QList36<Stream> ss = douyin::parse::streamsOf(r.p);
+        check(ss.size() == 1
+                  && ss.first().quality == QString::fromUtf8("720p"),
+              "streamsOf play_addr 兜底", 
+              ss.isEmpty() ? QString() : ss.first().quality);
+    }
+    {
+        JRoot r(load(QString::fromUtf8("douyin_search.json")));
+        const QList36<VideoItem> items = douyin::parse::searchList(r.p);
+        check(items.size() == 2, "douyin_search 跳过非 type=1 卡",
+              QString::number(items.size()));
+        check(!items.isEmpty()
+                  && items.first().id == QString::fromUtf8("7322042668907842867"),
+              "douyin_search 首条 id", items.isEmpty() ? QString() : items.first().id);
+    }
+
     // ── xiaohongshu ────────────────────────────────────────────
     {
         // 频道列表:多候选键探测;字段齐全才收(不猜结构)

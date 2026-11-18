@@ -1,0 +1,49 @@
+{
+ "status_code": 0,
+ "data": [
+  {
+   "type": 1,
+   "aweme_info": {
+    "aweme_id": "7322042668907842867",
+    "desc": "视频A",
+    "create_time": 1704795919,
+    "author": {
+     "nickname": "作者A"
+    },
+    "video": {
+     "duration": 15000,
+     "cover": {
+      "url_list": [
+       "https://example.invalid/a.jpg"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "type": 4,
+   "card_info": {
+    "title": "广告卡"
+   }
+  },
+  {
+   "type": 1,
+   "aweme_info": {
+    "aweme_id": "7322042668907842868",
+    "desc": "视频B",
+    "create_time": 1704795929,
+    "author": {
+     "nickname": "作者B"
+    },
+    "video": {
+     "duration": 25000,
+     "cover": {
+      "url_list": [
+       "https://example.invalid/b.jpg"
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

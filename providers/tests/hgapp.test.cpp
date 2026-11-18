@@ -44,8 +44,10 @@ void decryptHead(const QByteArray& head) {
             const int sz = int(t.sampleSizes[i]);
             if (off + quint64(sz) > quint64(n)) break;   // 头外样本跳过
             hgcenc::TrackInfo one = t;
-            one.sampleOffsets = QList<quint64>() << off;
-            one.sampleSizes = QList<quint32>() << quint32(sz);
+            one.sampleOffsets.clear();
+            one.sampleOffsets.append(off);            // 类型随 TrackInfo 定义
+            one.sampleSizes.clear();
+            one.sampleSizes.append(quint32(sz));
             one.baseIv = t.baseIv + quint64(i);          // 单样本:索引基准平移
             if (hgcenc::Cenc::decryptTrack(buf, one, g_key) != 1) {
                 fail("decryptTrack", qFromUtf8("sample %1").arg(i));

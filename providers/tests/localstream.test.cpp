@@ -27,11 +27,11 @@ public:
         buf_.resize(n);
         for (int i = 0; i < n; ++i) buf_[i] = char('A' + i % 26);
     }
-    quint64 total() const override { return quint64(buf_.size()); }
-    bool read(quint64 off, quint64 len, QByteArray* out) override {
-        if (off >= quint64(buf_.size())) { out->clear(); return true; }
-        const quint64 avail = quint64(buf_.size()) - off;
-        const quint64 n = qMin(len, avail);
+    uint64_t total() const override { return uint64_t(buf_.size()); }
+    bool read(uint64_t off, uint64_t len, QByteArray* out) override {
+        if (off >= uint64_t(buf_.size())) { out->clear(); return true; }
+        const uint64_t avail = uint64_t(buf_.size()) - off;
+        const uint64_t n = qMin<uint64_t>(len, avail);
         *out = buf_.mid(int(off), int(n));
         return true;
     }

@@ -12,7 +12,7 @@ find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(CURL REQUIRED)
-find_package(Qt6 COMPONENTS Core Gui REQUIRED)
+find_package(Qt6 COMPONENTS Core Gui Widgets REQUIRED)
 
 add_library(qxvproviders STATIC
     ../qlcomp/cJSON.c                # 全仓唯一份(qlvotube 同源,避免双份符号)
@@ -36,6 +36,11 @@ add_library(qxvproviders STATIC
     bilibili/bili_parse.cpp
     douyin/douyinprovider.cpp
     douyin/dy_parse.cpp
+    douyin/abogus.cpp                  # a_bogus 纯 C++ 移植(离线单测/主程序共用)
+    douyin/acsig.cpp                   # __ac_signature 纯算 + Argus md5
+    douyin/abogus_js.cpp               # 双机制对照(qjs 命令行;Qt3/Qt4+ 分支)
+    douyin/acsig_js.cpp
+    douyin/qjsrun.cpp
     xiaohongshu/xiaohongshuprovider.cpp
     xiaohongshu/ssr.cpp
     xiaohongshu/xhs_parse.cpp
@@ -51,8 +56,9 @@ add_library(qxvproviders STATIC
     common/hgstream/hgstream.cpp
 )
 
-target_compile_definitions(qxvproviders PRIVATE
-    QT_NO_KEYWORDS)
+# 注:不定义 QT_NO_KEYWORDS —— common/ytdlp.h 使用 slots 关键字,
+# Qt6 AUTOMOC 会把它当显式/非关键字混用而编译失败(2026-11-18 实测)。
+# target_compile_definitions(qxvproviders PRIVATE QT_NO_KEYWORDS)
 
 target_include_directories(qxvproviders PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -61,7 +67,7 @@ target_include_directories(qxvproviders PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../qlappcom) # eventpoller.h
 
 target_link_libraries(qxvproviders PUBLIC
-    Qt6::Core Qt6::Gui OpenSSL::SSL OpenSSL::Crypto Threads::Threads
+    Qt6::Core Qt6::Gui Qt6::Widgets OpenSSL::SSL OpenSSL::Crypto Threads::Threads
     ZLIB::ZLIB CURL::libcurl)
 
 if(QXV_PROVIDERS_TESTS)

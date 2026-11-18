@@ -1,0 +1,75 @@
+{
+ "status_code": 0,
+ "aweme_detail": {
+  "aweme_id": "7322042668907842867",
+  "desc": "如何破除：人生死局？破茧而出......#死局 #破局 #认知 #国学智慧 #多元思维 #君子不器 #海纳百川",
+  "create_time": 1704795919,
+  "author": {
+   "nickname": "弄花人佳萌"
+  },
+  "video": {
+   "duration": 868566,
+   "cover": {
+    "url_list": [
+     "https://example.invalid/c.jpg"
+    ]
+   },
+   "bit_rate": [
+    {
+     "gear_name": "adapt_lowest_720_1",
+     "bit_rate": 661838,
+     "play_addr": {
+      "url_list": [
+       "https://example.invalid/adapt_lowest_720_1.mp4"
+      ]
+     }
+    },
+    {
+     "gear_name": "low_540_0",
+     "bit_rate": 852858,
+     "play_addr": {
+      "url_list": [
+       "https://example.invalid/low_540_0.mp4"
+      ]
+     }
+    },
+    {
+     "gear_name": "normal_540_0",
+     "bit_rate": 904588,
+     "play_addr": {
+      "url_list": [
+       "https://example.invalid/normal_540_0.mp4"
+      ]
+     }
+    },
+    {
+     "gear_name": "low_720_0",
+     "bit_rate": 918410,
+     "play_addr": {
+      "url_list": [
+       "https://example.invalid/low_720_0.mp4"
+      ]
+     }
+    },
+    {
+     "gear_name": "normal_720_0",
+     "bit_rate": 1054343,
+     "play_addr": {
+      "url_list": [
+       "https://example.invalid/normal_720_0.mp4"
+      ]
+     }
+    },
+    {
+     "gear_name": "normal_1080_0",
+     "bit_rate": 1662062,
+     "play_addr": {
+      "url_list": [
+       "https://example.invalid/normal_1080_0.mp4"
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

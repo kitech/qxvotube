@@ -1,0 +1,199 @@
+{
+ "items": [
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Home"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "FEwhat_to_watch",
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Shorts"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": null,
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Subscriptions"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "FEsubscriptions",
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "You"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "FElibrary",
+      "params": "KgN5b3U%3D"
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "History"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "FEhistory",
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Music"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "UC-9-kyTW8ZkZNDHQJ6FgpwQ",
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Movies"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "FEstorefront",
+      "params": "ogUCKAU%3D"
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Live"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "UC4R8DWoMoI7CAwX8_LjQHig",
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Show more"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": null,
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Gaming"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "UCOpNcN46UbXVtpKMrmU4Abg",
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Memberships"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "FEchannel_memberships",
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Show less"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": null,
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "YouTube Music"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": null,
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "YouTube Kids"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": null,
+      "params": null
+     }
+    }
+   }
+  },
+  {
+   "guideEntryRenderer": {
+    "formattedTitle": {
+     "simpleText": "Report history"
+    },
+    "navigationEndpoint": {
+     "browseEndpoint": {
+      "browseId": "SPreport_history",
+      "params": null
+     }
+    }
+   }
+  }
+ ]
+}
