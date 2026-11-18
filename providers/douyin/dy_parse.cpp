@@ -6,6 +6,28 @@ namespace qxv {
 namespace douyin {
 namespace parse {
 
+// URL path 段百分号编码(保留 unreserved;中文按 UTF-8 逐字节 %XX)。
+// douyin 搜索页路径需要它;不做 form 编码(' '→%20 而非 '+')。
+static QString urlPathEncode(const QString& s) {
+    static const char* kHex = "0123456789ABCDEF";
+    const QByteArray u = qToUtf8(s);
+    const char* p = u.data();
+    QString out;
+    for (int i = 0; p[i] != '\0'; ++i) {
+        const unsigned char c = (unsigned char)p[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+            || (c >= '0' && c <= '9')
+            || c == '-' || c == '_' || c == '.' || c == '~') {
+            out += QChar(c);
+        } else {
+            out += QChar('%');
+            out += QChar(kHex[c >> 4]);
+            out += QChar(kHex[c & 15]);
+        }
+    }
+    return out;
+}
+
 QList36<VideoItem> hotWords(cJSON* root) {
     QList36<VideoItem> items;
     cJSON* list = jarr(jobj(root, "data"), "word_list");
@@ -28,6 +50,10 @@ QList36<VideoItem> hotWords(cJSON* root) {
                         (long long)jint(it, "discuss_video_count"));
         vi.extra.insert(qFromUtf8("rank"), i + 1);
         vi.extra.insert(qFromUtf8("kind"), qFromUtf8("hotword"));
+        // 热词没有视频详情(匿名搜索已关闭),但给出原站搜索页:
+        // UI 右键「在浏览器打开」可直接看该话题;detail/resolve 显式报错。
+        vi.webUrl = qFromUtf8("https://www.douyin.com/search/")
+                    + urlPathEncode(word);
         items.append(vi);
     }
     return items;

@@ -52,6 +52,20 @@ int main(int argc, char** argv) {
               "acSignature golden", sig);
     }
 
+    // ── douyin 热词(webUrl=原站搜索页) ─────────────────────────
+    {
+        JRoot r(load(dir, qFromUtf8("douyin_hot.json")));
+        const QList36<VideoItem> items = douyin::parse::hotWords(r.p);
+        check(items.size() >= 3, "hotWords>=3", QString::number(items.size()));
+        check(!items.isEmpty()
+                  && items.first().id.startsWith(qFromUtf8("hot:")),
+              "hot id=hot:<group_id>");
+        check(!items.isEmpty()
+                  && items.first().webUrl.startsWith(
+                         qFromUtf8("https://www.douyin.com/search/")),
+              "hot webUrl=搜索页",
+              items.isEmpty() ? QString() : items.first().webUrl);
+    }
     // ── douyin detail / streams / search ────────────────────────
     {
         JRoot r(load(dir, qFromUtf8("douyin_detail.json")));

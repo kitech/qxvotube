@@ -194,6 +194,16 @@ int main(int argc, char** argv) {
                   && items.first().extra.value(QString::fromUtf8("kind")).toString()
                          == QString::fromUtf8("hotword"),
               "douyin extra.kind=hotword");
+        check(!items.isEmpty()
+                  && items.first().webUrl.startsWith(
+                         QString::fromUtf8("https://www.douyin.com/search/")),
+              "douyin hot webUrl=搜索页",
+              items.isEmpty() ? QString() : items.first().webUrl);
+        check(!items.isEmpty()
+                  && items.first().webUrl.size()
+                         > QString::fromUtf8("https://www.douyin.com/search/")
+                               .size(),
+              "douyin hot webUrl 带编码关键词");
     }
 
     // ── youtube 分类(guide/browse,2026-11-18 落码) ─────────────

@@ -543,3 +543,13 @@ dong/xb 红果短剧.py 的 `_StreamSession` 正是 H2b 规划的本地流式解
   (exit 127)——表象是"qjs 不存在"。修复:两个分支都在子进程剔除
   `LD_LIBRARY_PATH`/`LD_PRELOAD`。
 - 对照任务异步执行(`postEvent`),不阻塞签名链路;C++ 结果同步返回。
+
+### 13.1 热词条目的可用面(2026-11-18)
+
+- 热榜 `word_list[]` 只给词条(word/hot_value/group_id/封面),
+  **没有关联视频 id**;热词视频列表(`hot/search/video/list`)实测:
+  a_bogus / Argus 两种签名均 200 空体,与 search 同属登录/签名门槛
+  (app 域 `aweme-lq.snssdk.com` 版本才带 app 签名)。
+- 因此 provider:热词卡片 `webUrl=https://www.douyin.com/search/<urlencoded>`;
+  `detail/resolve` 返回 `Err::Unsupported` + 可读指引(不谎报 NotFound);
+  UI 右键「在浏览器打开」可跳原站搜索页。

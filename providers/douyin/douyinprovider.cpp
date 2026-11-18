@@ -311,8 +311,12 @@ void DouyinProvider::fetchDetail(const QString& id,
         return;
     }
     if (id.startsWith(qFromUtf8("hot:"))) {
-        cb(Result::fail(Err::NotFound,
-           qFromUtf8("douyin: 热词无视频详情,请先搜索")), QByteArray());
+        // 热词条目(热榜)不是视频:2026-11 起匿名搜索已被 2483 关闭,
+        // 无法把热词展开成视频列表 → 明确告知,并引导用卡片 webUrl
+        // (原站搜索页)在浏览器打开,而不是谎报"视频不存在"。
+        cb(Result::fail(Err::Unsupported,
+           qFromUtf8("douyin: 热词无视频详情(匿名搜索已关闭,需登录);"
+                     "右键卡片可打开抖音搜索页")), QByteArray());
         return;
     }
     if (m_cacheId == id &&
