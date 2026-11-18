@@ -176,6 +176,10 @@ AVFrame* CxDecoder::decode(AVPacket* pkt)
                 if (m_hwOut != 0) {
                     av_frame_unref(m_hwOut);
                     if (cffHwDownload(m_frame, m_hwOut)) {
+                        // M7-fix(mac 取证):下载后的系统内存帧形态
+                        qWarning("[dec] hw dl fmt=%d -> sw fmt=%d %dx%d",
+                                 m_frame->format, m_hwOut->format,
+                                 m_hwOut->width, m_hwOut->height);
                         AVFrame* c = av_frame_clone(m_hwOut);
                         if (c != 0) {
                             m_stash.push_back(c);
@@ -218,6 +222,12 @@ QImage CxDecoder::convert(AVFrame* avf)
 {
     if (avf == 0 || avf->width <= 0 || avf->height <= 0)
         return QImage();
+    // M7-fix(mac 取证):坏帧/超大帧直接丢,不给 sws 越界机会
+    if (avf->width > 8192 || avf->height > 8192 || avf->linesize[0] <= 0) {
+        qWarning("[dec] drop bad frame %dx%d ls0=%d",
+                 avf->width, avf->height, avf->linesize[0]);
+        return QImage();
+    }
     int pix = avf->format;
     if (m_sws == 0 || m_swsW != avf->width || m_swsH != avf->height ||
         m_swsPix != pix) {
@@ -233,14 +243,31 @@ QImage CxDecoder::convert(AVFrame* avf)
         m_swsPix = pix;
     }
     QImage img = cxNewImage(avf->width, avf->height);
-    if (img.isNull())
+    if (img.isNull() || img.bits() == 0)
         return QImage();
+    // M7-fix(mac 取证):尺寸/格式变化打一条;崩溃前最后一条即现场
+    static int s_logW = -1, s_logH = -1, s_logPix = -1;
+    if (s_logW != avf->width || s_logH != avf->height || s_logPix != pix) {
+        s_logW = avf->width; s_logH = avf->height; s_logPix = pix;
+        qWarning("[dec] frame %dx%d fmt=%d ls0=%d | img %dx%d bpl=%d bits=%p sws=%p",
+                 avf->width, avf->height, pix, avf->linesize[0],
+                 img.width(), img.height(), img.bytesPerLine(),
+                 (void*)img.bits(), (void*)m_sws);
+    }
+    if (img.bytesPerLine() < img.width() * 4) {
+        qWarning("[dec] drop short bpl %d < %d", img.bytesPerLine(),
+                 img.width() * 4);
+        return QImage();
+    }
     uint8_t* dst[4] = { 0, 0, 0, 0 };
     int dstLine[4] = { 0, 0, 0, 0 };
     dst[0] = img.bits();
     dstLine[0] = img.bytesPerLine();
-    sws_scale(m_sws, (const uint8_t* const*)avf->data, avf->linesize, 0,
-              avf->height, dst, dstLine);
+    if (sws_scale(m_sws, (const uint8_t* const*)avf->data, avf->linesize, 0,
+                  avf->height, dst, dstLine) <= 0) {
+        qWarning("[dec] sws_scale rc<=0 %dx%d", avf->width, avf->height);
+        return QImage();
+    }
     return img;
 }
 
