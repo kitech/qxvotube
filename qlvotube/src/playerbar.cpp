@@ -9,6 +9,10 @@
 #include <qpainter.h>
 #include <qevent.h>
 #include <qfontmetrics.h>
+#include <qframe.h>
+#include <qcheckbox.h>
+#include <qtimer.h>
+#include <qapplication.h>
 #ifdef QT3_BUILD
 #include <qpointarray.h>
 typedef QPointArray MuiPolygon;
@@ -26,6 +30,99 @@ QString fmtMs(int ms)
     if (s < 10) ss = QString("0") + ss;
     return QString::number(m) + ":" + ss;
 }
+
+/* 音量弹层:自绘滑条 + 静音勾选(qlmusic 同款,Qt3/Qt4 双分支) */
+class VolumePanelSlider : public QWidget {
+public:
+    VolumePanelSlider(PlayerBar* bar, QWidget* parent)
+        : QWidget(parent), m_bar(bar), m_v(100), m_drag(false), m_hover(false)
+    {
+        setFixedSize(126, 26);
+        setMouseTracking(true);
+    }
+    void setValue(int v) { if (v != m_v) { m_v = v; update(); } }
+    int getValue() const { return m_v; }
+    void endDrag() { if (m_drag) { m_drag = false; update(); } }
+
+protected:
+    void paintEvent(QPaintEvent*)
+    {
+        const StyleParams::Palette& pal = muiPalette();
+        QPainter p(this);
+        QRect tr(0, 10, width(), 6);
+        p.setPen(Qt::NoPen);
+        p.setBrush(pal.border);
+        muiDrawRoundRect(p, tr, 3, 3);
+        int vw = tr.width() * m_v / 100;
+        if (vw > 0) {
+            p.setBrush(pal.accent);
+            muiDrawRoundRect(p, QRect(tr.x(), tr.y(), vw, tr.height()), 3, 3);
+        }
+        int hx = tr.x() + vw - 6;
+        QColor hc = (m_drag || m_hover) ? pal.accent : pal.textPrimary;
+        p.setPen(QPen(pal.border, 1));
+        p.setBrush(hc);
+        p.drawEllipse(hx, tr.y() + tr.height() / 2 - 6, 12, 12);
+    }
+    void mousePressEvent(QMouseEvent* e)
+    {
+        if (e->button() != Qt::LeftButton) { e->ignore(); return; }
+        m_drag = true;
+        jumpTo(e->pos().x());
+    }
+    void mouseMoveEvent(QMouseEvent* e) { if (m_drag) jumpTo(e->pos().x()); }
+    void mouseReleaseEvent(QMouseEvent*) { if (m_drag) { m_drag = false; update(); } }
+    void enterEvent(QEvent*) { m_hover = true; update(); }
+    void leaveEvent(QEvent*) { m_hover = false; update(); }
+
+private:
+    void jumpTo(int x)
+    {
+        int v = qBound(0, x, width() - 1) * 100 / (width() - 1);
+        if (v < 2) v = 2;            /* click-jump 不落 0(静音走勾选) */
+        if (v == m_v) return;
+        m_v = v;
+        update();
+        m_bar->onPopupVolume(v);
+    }
+    PlayerBar* m_bar;
+    int m_v;
+    bool m_drag;
+    bool m_hover;
+};
+
+class VolumePopupFrame : public QFrame {
+public:
+    VolumePopupFrame(PlayerBar* bar)
+#ifdef QT3_BUILD
+        : QFrame(bar, 0, Qt::WType_Popup)
+#else
+        : QFrame(bar, Qt::Popup)
+#endif
+        , m_bar(bar), m_panel(0)
+    {
+        setFrameStyle(QFrame::WinPanel | QFrame::Raised);
+    }
+    void setPanel(VolumePanelSlider* s) { m_panel = s; }
+
+protected:
+    void closeEvent(QCloseEvent* e)
+    {
+        e->accept();
+        if (m_panel) m_panel->endDrag();
+        QMouseEvent me(QEvent::MouseButtonRelease, QPoint(0, 0), QPoint(0, 0),
+#ifdef QT3_BUILD
+                       QMouseEvent::LeftButton, QMouseEvent::NoButton);
+#else
+                       Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+#endif
+        QApplication::sendEvent(m_bar, &me);
+    }
+
+private:
+    PlayerBar* m_bar;
+    VolumePanelSlider* m_panel;
+};
 
 void drawTriangle(QPainter& p, const QRect& r, bool left, const QColor& c)
 {
@@ -48,7 +145,10 @@ void drawTriangle(QPainter& p, const QRect& r, bool left, const QColor& c)
 PlayerBar::PlayerBar(QWidget* parent)
     : QWidget(parent), m_hasTrack(false), m_playing(false),
       m_progressMs(0), m_durationMs(0), m_hover(HitNone), m_dragging(false),
-      m_volDrag(false), m_volume(100), m_rate(1.0), m_muted(false)
+      m_volume(100), m_lastVolume(100), m_rate(1.0), m_muted(false),
+      m_repeatMode(0), m_shuffle(false), m_autoSkip(true),
+      m_dlPct(0), m_dlVisible(false),
+      m_dlHideTimer(0), m_volumePopup(0), m_volumeSlider(0), m_muteCheck(0)
 {
     setMouseTracking(true);
     setFixedHeight(80);
@@ -82,6 +182,7 @@ void PlayerBar::setDuration(int ms)
 void PlayerBar::setVolume(int pct)
 {
     m_volume = qBound(0, pct, 100);
+    if (m_volume > 0) m_lastVolume = m_volume;
     update();
 }
 
@@ -107,20 +208,20 @@ void PlayerBar::setPlaying(bool on)
 
 QRect PlayerBar::playRect() const
 {
-    int cx = width() / 2;
-    return QRect(cx - 15, 14, 30, 30);
+    int cx = width() / 2;                 /* qlmusic 中央群:prev|play|next|循环|随机|喇叭|下载 */
+    return QRect(cx - 75, 14, 30, 30);
 }
 
 QRect PlayerBar::prevRect() const
 {
     int cx = width() / 2;
-    return QRect(cx - 60, 19, 20, 20);
+    return QRect(cx - 120, 19, 20, 20);
 }
 
 QRect PlayerBar::nextRect() const
 {
     int cx = width() / 2;
-    return QRect(cx + 40, 19, 20, 20);
+    return QRect(cx - 20, 19, 20, 20);
 }
 
 QRect PlayerBar::progressRect() const
@@ -129,24 +230,16 @@ QRect PlayerBar::progressRect() const
     return QRect(cx - 130, 58, 260, 6);
 }
 
-/* M5-A2 右侧:音量条 + 倍速 + EQ + 截图 */
-QRect PlayerBar::volRect() const   { return QRect(width() - 250, 29, 70, 6); }
+/* 喇叭(弹层):next 右侧第三位(qlmusic 口径) */
+QRect PlayerBar::volRect() const   { int cx = width() / 2; return QRect(cx + 71, 19, 20, 20); }
 QRect PlayerBar::rateRect() const  { return QRect(width() - 172, 22, 40, 20); }
 QRect PlayerBar::ccRect() const    { return QRect(width() - 126, 22, 30, 20); }
 QRect PlayerBar::eqRect() const    { return QRect(width() - 90, 22, 34, 20); }
 QRect PlayerBar::shotRect() const  { return QRect(width() - 52, 22, 34, 20); }
-/* 二期同步:静音按钮(音量条左侧) */
-QRect PlayerBar::muteRect() const  { return QRect(width() - 288, 22, 30, 20); }
-
-void PlayerBar::setVolumeFromX(int x)
-{
-    QRect vr = volRect();
-    if (vr.width() <= 0) return;
-    int rel = qBound(0, x - vr.x(), vr.width());
-    m_volume = (int)((double)rel / vr.width() * 100.0);
-    update();
-    emit volumeChanged(m_volume);
-}
+QRect PlayerBar::repeatRect() const  { int cx = width() / 2; return QRect(cx + 15, 19, 20, 20); }
+QRect PlayerBar::shuffleRect() const { int cx = width() / 2; return QRect(cx + 43, 19, 20, 20); }
+QRect PlayerBar::downloadRect() const{ int cx = width() / 2; return QRect(cx + 99, 19, 20, 20); }
+QRect PlayerBar::autoSkipRect() const{ int cx = width() / 2; return QRect(cx - 155, 19, 20, 20); }
 
 void PlayerBar::setProgressFromX(int x)
 {
@@ -224,22 +317,126 @@ void PlayerBar::paintEvent(QPaintEvent*)
     p.drawText(QRect(pr.right() + 4, pr.y() - 8, 44, 20), Qt::AlignVCenter | Qt::AlignLeft,
                fmtMs(m_durationMs));
 
-    /* 静音按钮(🔊/🔇;二期同步自 qskvotube) */
-    p.setFont(small);
-    p.setPen(m_hover == HitMute ? pal.accent : pal.textMuted);
-    p.drawText(muteRect(), Qt::AlignCenter,
-               m_muted ? qFromUtf8("🔇") : qFromUtf8("🔊"));
-
-    /* 音量条 + 倍速/EQ/截图(右侧) */
-    QRect vr = volRect();
-    p.setPen(Qt::NoPen);
-    p.setBrush(pal.border);
-    muiDrawRoundRect(p, vr, 3, 3);
-    int vfill = vr.width() * m_volume / 100;
-    if (vfill > 0) {
-        p.setBrush(m_hover == HitVol ? pal.accent : pal.textMuted);
-        muiDrawRoundRect(p, QRect(vr.x(), vr.y(), vfill, vr.height()), 3, 3);
+    /* 喇叭(点击弹音量面板;静音/0 音量画斜杠;0 以上画声波) */
+    {
+        QRect vr = volRect();
+        const QColor avCol = (m_hover == HitVol) ? pal.accent : pal.textMuted;
+        p.save();
+        p.setPen(QPen(avCol, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(vr.left() + 3, vr.top() + 9, 4, 6);
+        p.drawLine(vr.left() + 7, vr.top() + 9, vr.left() + 11, vr.top() + 5);
+        p.drawLine(vr.left() + 7, vr.top() + 14, vr.left() + 11, vr.top() + 18);
+        if (!m_muted && m_volume > 0) {
+            p.drawArc(QRect(vr.left() + 11, vr.top() + 8, 8, 8), -45 * 16, 100 * 16);
+            if (m_volume >= 50)
+                p.drawArc(QRect(vr.left() + 10, vr.top() + 5, 10, 14), -45 * 16, 100 * 16);
+        } else {
+            p.setPen(QPen(QColor(0xCC, 0x44, 0x44), 2));
+            p.drawLine(vr.left() + 3, vr.top() + 18, vr.left() + 18, vr.top() + 4);
+        }
+        p.restore();
     }
+
+    /* 下载 pie(0-100 扇形 / -1 转圈 / -2 失败斜杠) */
+    if (m_dlVisible) {
+        QRect dr = downloadRect();
+        const QColor dlCol = (m_hover == HitDownload) ? pal.accent
+                           : (m_dlPct == -2 ? QColor(0xCC, 0x44, 0x44) : pal.textMuted);
+        p.save();
+        p.setPen(QPen(dlCol, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(dr.left() + 1, dr.top() + 1, dr.width() - 2, dr.height() - 2);
+        if (m_dlPct == -2) {
+            p.setPen(QPen(dlCol, 2));
+            p.drawLine(dr.left() + 5, dr.top() + 16, dr.left() + 16, dr.top() + 5);
+        } else if (m_dlPct < 0) {
+            p.setPen(QPen(pal.accent, 2));
+            p.drawArc(dr.left() + 3, dr.top() + 3, dr.width() - 6,
+                      dr.height() - 6, 45 * 16, -120 * 16);
+        } else if (m_dlPct > 0) {
+            p.setBrush(pal.accent);
+            p.setPen(Qt::NoPen);
+            p.drawPie(dr.left() + 2, dr.top() + 2, dr.width() - 4,
+                      dr.height() - 4, 90 * 16, -m_dlPct * 3600 / 100);
+        }
+        p.restore();
+    }
+
+    /* 失败自动跳过:圆圈+勾(开=accent) */
+    {
+        QRect as = autoSkipRect();
+        const QColor asCol = (m_hover == HitAutoSkip) ? pal.accent
+                           : (m_autoSkip ? pal.accent : pal.textMuted);
+        p.save();
+        p.setPen(QPen(asCol, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(as.left() + 1, as.top() + 1, as.width() - 2,
+                      as.height() - 2);
+        p.drawLine(as.left() + 5, as.top() + 10, as.left() + 8, as.top() + 14);
+        p.drawLine(as.left() + 8, as.top() + 14, as.left() + 15, as.top() + 5);
+        p.restore();
+    }
+
+    /* 循环模式:off=圆点 / all=双弧箭头 / one=圆+1 */
+    {
+        QRect rp = repeatRect();
+        const QColor rc = (m_hover == HitRepeat) ? pal.accent
+                        : (m_repeatMode ? pal.accent : pal.textMuted);
+        p.save();
+        p.setPen(QPen(rc, 1));
+        p.setBrush(Qt::NoBrush);
+        if (m_repeatMode == 1) {
+            p.drawArc(rp.left() + 1, rp.top() + 1, rp.width() - 2, rp.height() - 2,
+                      30 * 16, 150 * 16);
+            p.drawArc(rp.left() + 1, rp.top() + 1, rp.width() - 2, rp.height() - 2,
+                      210 * 16, 150 * 16);
+            MuiPolygon a(3);
+            a.setPoint(0, rp.right() - 5, rp.top() + 1);
+            a.setPoint(1, rp.right() - 1, rp.top() + 3);
+            a.setPoint(2, rp.right() - 3, rp.top() + 6);
+            p.setBrush(rc);
+            p.drawPolygon(a);
+            MuiPolygon b(3);
+            b.setPoint(0, rp.left() + 5, rp.bottom() - 1);
+            b.setPoint(1, rp.left() + 1, rp.bottom() - 3);
+            b.setPoint(2, rp.left() + 3, rp.bottom() - 6);
+            p.drawPolygon(b);
+        } else if (m_repeatMode == 2) {
+            p.drawEllipse(rp.left() + 1, rp.top() + 1, rp.width() - 2,
+                          rp.height() - 2);
+            p.setPen(rc);
+            p.drawText(rp, Qt::AlignCenter, qFromUtf8("1"));
+        } else {
+            p.drawEllipse(rp.left() + 1, rp.top() + 1, rp.width() - 2,
+                          rp.height() - 2);
+            p.setPen(rc);
+            p.drawText(rp, Qt::AlignCenter, qFromUtf8("\u21bb"));
+        }
+        p.restore();
+    }
+
+    /* 随机:两道交叉箭头 */
+    {
+        QRect sr = shuffleRect();
+        const QColor sc = (m_hover == HitShuffle) ? pal.accent
+                        : (m_shuffle ? pal.accent : pal.textMuted);
+        p.save();
+        p.setPen(QPen(sc, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawLine(sr.left() + 2, sr.top() + 6, sr.right() - 5, sr.top() + 6);
+        p.drawLine(sr.left() + 2, sr.bottom() - 6, sr.right() - 5, sr.bottom() - 6);
+        p.drawLine(sr.left() + 5, sr.top() + 6, sr.left() + 10, sr.bottom() - 6);
+        p.drawLine(sr.left() + 5, sr.bottom() - 6, sr.left() + 10, sr.top() + 6);
+        MuiPolygon t(3);
+        t.setPoint(0, sr.right() - 6, sr.top() + 3);
+        t.setPoint(1, sr.right() - 1, sr.top() + 6);
+        t.setPoint(2, sr.right() - 6, sr.top() + 9);
+        p.setBrush(sc);
+        p.drawPolygon(t);
+        p.restore();
+    }
+
     p.setFont(small);
     p.setPen(m_hover == HitRate ? pal.accent : pal.textMuted);
     p.drawText(rateRect(), Qt::AlignCenter,
@@ -268,13 +465,14 @@ void PlayerBar::mousePressEvent(QMouseEvent* e)
     } else if (progressRect().contains(e->pos())) {
         m_dragging = true;
         setProgressFromX(e->pos().x());
-    } else if (muteRect().contains(e->pos())) {
-        m_muted = !m_muted;
-        update();
-        emit muteChanged(m_muted);
     } else if (volRect().contains(e->pos())) {
-        m_volDrag = true;
-        setVolumeFromX(e->pos().x());
+        toggleVolumePopup();
+    } else if (repeatRect().contains(e->pos())) {
+        emit repeatClicked();
+    } else if (shuffleRect().contains(e->pos())) {
+        emit shuffleClicked();
+    } else if (autoSkipRect().contains(e->pos())) {
+        emit autoSkipClicked();
     } else if (rateRect().contains(e->pos())) {
         static const double kRates[5] = { 0.5, 1.0, 1.25, 1.5, 2.0 };
         int idx = 0;
@@ -298,10 +496,6 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
         setProgressFromX(e->pos().x());
         return;
     }
-    if (m_volDrag) {
-        setVolumeFromX(e->pos().x());
-        return;
-    }
     Hit h = HitNone;
     if (playRect().contains(e->pos())) h = HitPlay;
     else if (prevRect().contains(e->pos())) h = HitPrev;
@@ -312,7 +506,10 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
     else if (ccRect().contains(e->pos())) h = HitSub;
     else if (eqRect().contains(e->pos())) h = HitEq;
     else if (shotRect().contains(e->pos())) h = HitShot;
-    else if (muteRect().contains(e->pos())) h = HitMute;
+    else if (m_dlVisible && downloadRect().contains(e->pos())) h = HitDownload;
+    else if (repeatRect().contains(e->pos())) h = HitRepeat;
+    else if (shuffleRect().contains(e->pos())) h = HitShuffle;
+    else if (autoSkipRect().contains(e->pos())) h = HitAutoSkip;
     if (h != m_hover) {
         m_hover = h;
         update();
@@ -325,7 +522,6 @@ void PlayerBar::mouseReleaseEvent(QMouseEvent*)
         m_dragging = false;
         emit seekRequested(m_progressMs);
     }
-    m_volDrag = false;
     update();
 }
 
@@ -336,4 +532,132 @@ void PlayerBar::leaveEvent(QEvent* e)
         m_hover = HitNone;
         update();
     }
+}
+
+// ── 播放模式 / 下载进度 / 音量弹层(2026-11-18,qlmusic 移植) ──
+
+void PlayerBar::setRepeatMode(int mode)
+{
+    mode = qBound(0, mode, 2);
+    if (m_repeatMode == mode) return;
+    m_repeatMode = mode;
+    update();
+}
+
+void PlayerBar::setAutoSkip(bool on)
+{
+    if (m_autoSkip == on) return;
+    m_autoSkip = on;
+    update();
+}
+
+void PlayerBar::setShuffle(bool on)
+{
+    if (m_shuffle == on) return;
+    m_shuffle = on;
+    update();
+}
+
+void PlayerBar::setDownloadState(int pct)
+{
+    if (pct == 100) {
+        /* 完成:短暂留痕(1.2s 后隐藏) */
+        m_dlPct = 100;
+        m_dlVisible = true;
+        update();
+        if (m_dlHideTimer == 0)
+            m_dlHideTimer = new QTimer(this);
+        QTimer* t = (QTimer*)m_dlHideTimer;
+        QObject::disconnect(t, 0, this, 0);
+        QObject::connect(t, SIGNAL(timeout()), this, SLOT(onDlHide()));
+#if QT_VERSION >= 0x040000
+        t->setSingleShot(true);
+        t->start(1200);
+#else
+        t->start(1200, true);   /* Qt3: start(ms, singleShot) */
+#endif
+        return;
+    }
+    if (pct < 0) {
+        m_dlPct = (pct == -2) ? -2 : -1;
+    } else {
+        m_dlPct = qBound(0, pct, 100);
+    }
+    m_dlVisible = true;
+    if (m_dlHideTimer != 0) ((QTimer*)m_dlHideTimer)->stop();
+    update();
+}
+
+void PlayerBar::onDlHide()
+{
+    m_dlVisible = false;
+    m_dlPct = 0;
+    update();
+}
+
+void PlayerBar::wheelEvent(QWheelEvent* e)
+{
+    const int dy = qWheelDeltaY(e);
+    if (dy == 0) { e->ignore(); return; }
+    emit volumeChanged(qBound(0, m_volume + (dy > 0 ? 5 : -5), 100));
+    e->accept();
+}
+
+void PlayerBar::toggleVolumePopup()
+{
+    if (m_volumePopup) {
+        QWidget* pw = (QWidget*)m_volumePopup;
+        if (pw->isVisible()) { pw->close(); return; }
+    }
+    if (!m_volumePopup) {
+        VolumePopupFrame* f = new VolumePopupFrame(this);
+        VolumePanelSlider* sl = new VolumePanelSlider(this, f);
+        f->setPanel(sl);
+        sl->move(8, 9);
+        QCheckBox* c = new QCheckBox(_("player.mute"), f);
+        c->move(142, 13);
+        QObject::connect(c, SIGNAL(toggled(bool)), this, SLOT(onMuteToggled(bool)));
+        f->resize(246, 42);
+        m_volumePopup = f;
+        m_volumeSlider = sl;
+        m_muteCheck = c;
+    }
+    VolumePanelSlider* sl = (VolumePanelSlider*)m_volumeSlider;
+    sl->setValue(m_volume > 0 ? m_volume : m_lastVolume);
+    QCheckBox* c = (QCheckBox*)m_muteCheck;
+    c->blockSignals(true);
+    c->setChecked(m_muted || m_volume == 0);
+    c->blockSignals(false);
+    QWidget* f = (QWidget*)m_volumePopup;
+    f->move(mapToGlobal(QPoint(volRect().left() - 200, volRect().bottom() + 4)));
+    f->resize(246, 42);
+    f->show();
+}
+
+void PlayerBar::onPopupVolume(int v)
+{
+    if (v > 0) {
+        m_volume = qBound(0, v, 100);
+        m_lastVolume = m_volume;
+        if (m_muted) {
+            m_muted = false;
+            emit muteChanged(false);
+        }
+    }
+    emit volumeChanged(qBound(0, v, 100));
+}
+
+void PlayerBar::onMuteToggled(bool on)
+{
+    m_muted = on;
+    if (on) {
+        if (m_volume > 0) m_lastVolume = m_volume;
+        m_volume = 0;
+        emit volumeChanged(0);
+    } else {
+        m_volume = m_lastVolume > 0 ? m_lastVolume : 50;
+        emit volumeChanged(m_volume);
+    }
+    update();
+    emit muteChanged(on);
 }

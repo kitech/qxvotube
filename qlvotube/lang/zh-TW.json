@@ -31,6 +31,12 @@
     "yi": "億"
   },
   "player": {
+    "mute": "靜音",
+    "tip_repeat_off": "清單循環：關",
+    "tip_repeat_all": "清單循環：開",
+    "tip_repeat_one": "單曲循環",
+    "tip_shuffle_on": "隨機播放：開",
+    "tip_shuffle_off": "隨機播放：關",
     "prev": "上一首",
     "play": "播放",
     "pause": "暫停",
@@ -75,6 +81,7 @@
     "dark": "深色模式"
   },
   "menu": {
+    "download": "下載目前影片",
     "file": "檔案(&F)",
     "edit": "編輯(&E)",
     "tool": "工具(&T)",

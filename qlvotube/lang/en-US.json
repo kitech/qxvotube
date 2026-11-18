@@ -31,6 +31,12 @@
     "yi": "Yi"
   },
   "player": {
+    "mute": "Mute",
+    "tip_repeat_off": "Repeat: off",
+    "tip_repeat_all": "Repeat: all",
+    "tip_repeat_one": "Repeat: one",
+    "tip_shuffle_on": "Shuffle: on",
+    "tip_shuffle_off": "Shuffle: off",
     "prev": "Previous",
     "play": "Play",
     "pause": "Pause",
@@ -75,6 +81,7 @@
     "dark": "Dark Mode"
   },
   "menu": {
+    "download": "Download current video",
     "file": "&File",
     "edit": "&Edit",
     "tool": "&Tools",

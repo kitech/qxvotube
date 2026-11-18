@@ -43,6 +43,7 @@ public:
 
 protected:
     bool eventFilter(QObject* o, QEvent* e);
+    void showEvent(QShowEvent* e);
     virtual void closeEvent(QCloseEvent* event);
     virtual void customEvent(CustomEventBase* event);
     virtual void dragEnterEvent(QDragEnterEvent* event); /* 拖拽导入视频 */
@@ -74,6 +75,10 @@ private slots:
     /* 视频源(providers):切站点 / 切分类 / 点卡片 / 翻页 */
     void onSiteChanged(const QString& providerId);
     void onVideoCategorySelected(const QString& key);
+    void onRepeatClicked();
+    void onShuffleClicked();
+    void onAutoSkipClicked();
+    void onDownloadCurrent();
     void onVideoActivated(const QString& id);
     void onVideoContextMenu(const QString& id, const QPoint& globalPos);  /* M7 */
     void onPlayerContextMenu(const QPoint& globalPos);                    /* M7 */
@@ -128,9 +133,22 @@ private:
     void adjustRate(double delta);
     void toggleFullscreen();
     void showShortcutHelp();
+    /* 播放模式/连播(qlmusic 语义) */
+    void advanceNext(bool fromAuto);
+    /* 失败自动跳过(qlmusic skipOnError):连续失败止损 */
+    bool skipOnError(const QString& why);
+    enum { kErrSkipStopAt = 99 };
+    void saveQueueSnapshot();
+    void restoreQueueSnapshot();
     QRect m_normGeom;
     bool m_fullscreen = false;
     long m_durMs = 0;   /* 引擎时长(ffmpeg 的 duration() 可能返回 0) */
+    int m_repeatMode = 0;          /* 0 off 1 all 2 one */
+    bool m_shuffle = false;
+    bool m_autoSkip = true;
+    int m_errSkipRun = 0;
+    QString m_skipGuardId;
+    class Downloader* m_dl = nullptr;
 
     struct MenuItemRef {
         const char* key;

@@ -26,6 +26,9 @@
 #include "eqdialog.h"
 #include "providers/common/provider.h"
 #include "providers/common/errortext.h"
+#include "downloader.h"
+#include "providers/common/fingerprint.h"
+#include "queue_store.h"
 #include "providers/common/debuglog.h"   /* QXVOTUBE_DEBUG → providers 分级日志 */
 #include "videoui.h"
 #include "videothumbcache.h"
@@ -47,6 +50,7 @@
 #include <qevent.h>
 #include <qtimer.h>
 #include <qmessagebox.h>
+#include <qdesktopwidget.h>
 #if QT_VERSION >= 0x040000
 #include <QDebug>
 #endif
@@ -199,6 +203,10 @@ MainWindow::MainWindow(QWidget* parent)
     );
 
     setGeometry(100, 50, 980, 640);
+    /* mac/Qt4:布局最小宽可能把窗口顶到数屏宽 → 解除布局尺寸约束 */
+#ifndef QT3_BUILD
+    if (layout()) layout()->setSizeConstraint(QLayout::SetNoConstraint);
+#endif
     buildStatusBar();
     buildCentralWidget();
     buildAppearancePanel();
@@ -348,6 +356,27 @@ void MainWindow::buildCentralWidget()
 
     setupVideoProviders();
 
+    /* 播放模式/音量恢复(qlmusic:config.json 持久化) */
+    m_dl = new Downloader(this);
+    m_repeatMode = Config::value("player.repeat").toInt();
+    m_shuffle = Config::value("player.shuffle") == qFromUtf8("1");
+    {
+        const QString as = Config::value("player.autoskip");
+        m_autoSkip = as.isEmpty() ? true : (as != qFromUtf8("0"));
+    }
+    {
+        const QString vol = Config::value("player.volume");
+        const int v = vol.isEmpty() ? 100 : vol.toInt();
+        if (playerBar) playerBar->setVolume(v);
+        if (m_player) m_player->setVolume(v);
+    }
+    if (playerBar) {
+        playerBar->setRepeatMode(m_repeatMode);
+        playerBar->setShuffle(m_shuffle);
+        playerBar->setAutoSkip(m_autoSkip);
+    }
+    restoreQueueSnapshot();
+
     if (playerBar) {
         QObject::connect(playerBar, SIGNAL(playPauseRequested()),
                          this, SLOT(onPlayPause()));
@@ -361,6 +390,12 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onVolumeChanged(int)));
         QObject::connect(playerBar, SIGNAL(muteChanged(bool)),
                          this, SLOT(onMuteChanged(bool)));
+        QObject::connect(playerBar, SIGNAL(repeatClicked()),
+                         this, SLOT(onRepeatClicked()));
+        QObject::connect(playerBar, SIGNAL(shuffleClicked()),
+                         this, SLOT(onShuffleClicked()));
+        QObject::connect(playerBar, SIGNAL(autoSkipClicked()),
+                         this, SLOT(onAutoSkipClicked()));
         QObject::connect(playerBar, SIGNAL(rateChanged(double)),
                          this, SLOT(onRateChanged(double)));
         QObject::connect(playerBar, SIGNAL(eqRequested()),
@@ -566,6 +601,7 @@ void MainWindow::buildMenus()
     addMenuItem(tool, this, SLOT(onTakeScreenshot()), "menu.screenshot");
     addMenuItem(tool, this, SLOT(onToggleEngine()), "menu.engine");
     addMenuItem(tool, this, SLOT(onLoadSubtitleFile()), "menu.subtitle");
+    addMenuItem(tool, this, SLOT(onDownloadCurrent()), "menu.download");
     MenuWidget34* help = static_cast<MenuWidget34*>(addTopMenu("menu.help"));
     addMenuItem(help, qApp, SLOT(aboutQt()), "menu.aboutqt");
     addMenuItem(help, this, SLOT(onAboutApp()), "menu.about_qlvotube");
@@ -672,6 +708,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
         event->ignore();
         return;
     }
+    saveQueueSnapshot();   /* 兜底:队列快照 */
     /* 借关闭事件明确停播:cmdmpv 走 killProcess;libmpv 走 terminate */
     if (m_player != 0 && m_player->engine() != 0)
         m_player->close();
@@ -1335,6 +1372,7 @@ void MainWindow::enterVideoMode(int index)
     }
     m_videoMode = true;
     m_videoIdx = index;
+    saveQueueSnapshot();
     if (queuePanel) {
         queuePanel->setQueue(m_videoQueue, m_videoIdx);
         queuePanel->setCurrentTrack(m_videoQueue[m_videoIdx]);
@@ -1354,6 +1392,7 @@ void MainWindow::playVideoAt(int index)
 {
     if (!m_curProv || index < 0 || index >= (int)m_videoIds.size()) return;
     m_videoIdx = index;
+    saveQueueSnapshot();
     const QString id = m_videoIds[index];
     if (queuePanel) queuePanel->setCurrentTrack(m_videoQueue[index]);
     if (playerBar) playerBar->setTrack(m_videoQueue[index]);
@@ -1381,7 +1420,10 @@ void MainWindow::playVideoAt(int index)
         if (r.code != qxv::Err::Ok || pr.streams.isEmpty()) {
             ev->text = qFromUtf8("|err|") + QString::number((int)r.code)
                        + qFromUtf8("|") + r.message;
+            skipOnError(r.message);   /* autoskip:解析失败换下一项 */
         } else {
+            m_errSkipRun = 0;         /* 成功即清零连续失败计数 */
+            m_skipGuardId = QString();
             const qxv::Stream& st = pr.streams.first();
             ev->text = st.url;
             ev->referer = qMapValue(st.extra, qFromUtf8("referer"),
@@ -1708,15 +1750,199 @@ void MainWindow::onPlayerContextMenu(const QPoint& globalPos)
     }
 }
 
+void MainWindow::onRepeatClicked()
+{
+    m_repeatMode = (m_repeatMode + 1) % 3;
+    if (playerBar) playerBar->setRepeatMode(m_repeatMode);
+    Config::setValue("player.repeat", QString::number(m_repeatMode));
+}
+
+void MainWindow::onShuffleClicked()
+{
+    m_shuffle = !m_shuffle;
+    if (playerBar) playerBar->setShuffle(m_shuffle);
+    Config::setValue("player.shuffle", m_shuffle ? qFromUtf8("1")
+                                                  : qFromUtf8("0"));
+}
+
+void MainWindow::onAutoSkipClicked()
+{
+    m_autoSkip = !m_autoSkip;
+    if (playerBar) playerBar->setAutoSkip(m_autoSkip);
+    Config::setValue("player.autoskip", m_autoSkip ? qFromUtf8("1")
+                                                   : qFromUtf8("0"));
+    SharedStatusBar::instance()->showMessage(
+        m_autoSkip ? qFromUtf8("播放失败自动跳过:开")
+                   : qFromUtf8("播放失败自动跳过:关"), 2500);
+}
+
+/* 失败自动跳过(qlmusic skipOnError):同曲只跳一次;连续失败到阈值停播 */
+bool MainWindow::skipOnError(const QString& why)
+{
+    if (!m_autoSkip) return false;
+    bool hasNext = false;
+    QString gid;
+    if (m_videoMode && !m_videoIds.empty()) {
+        const int n = (int)m_videoIds.size();
+        hasNext = (m_videoIdx + 1 < n) || m_repeatMode == 1
+                  || (m_shuffle && n > 1);
+        if (m_videoIdx >= 0 && m_videoIdx < (int)m_videoIds.size())
+            gid = m_videoIds[m_videoIdx];
+    } else {
+        const Playlist* pl = findPlaylist(m_library, m_curPlaylistId);
+        if (pl && !pl->tracks.empty()) {
+            const int n = (int)pl->tracks.size();
+            hasNext = (m_curTrackIndex + 1 < n) || m_repeatMode == 1
+                      || (m_shuffle && n > 1);
+            gid = qFromUtf8("lib:%1:%2").arg(m_curPlaylistId)
+                      .arg(m_curTrackIndex);
+        }
+    }
+    if (!hasNext) {
+        if (playerBar) playerBar->setPlaying(false);
+        SharedStatusBar::instance()->showMessageTyped(
+            qFromUtf8("播放失败且无下一项: %1").arg(why), StatusError, 5000);
+        return false;
+    }
+    if (!gid.isEmpty() && gid == m_skipGuardId) return true;  /* 同曲双通道只跳一次 */
+    m_skipGuardId = gid;
+    if (++m_errSkipRun >= kErrSkipStopAt) {
+        m_errSkipRun = 0;
+        if (playerBar) playerBar->setPlaying(false);
+        SharedStatusBar::instance()->showMessageTyped(
+            qFromUtf8("连续 %1 次失败,已停止自动跳过").arg(kErrSkipStopAt),
+            StatusError, 5000);
+        return false;
+    }
+    SharedStatusBar::instance()->showMessage(
+        qFromUtf8("播放失败,自动跳过: %1").arg(why), 4000);
+    advanceNext(true);
+    return true;
+}
+
+/* 统一推进(qlmusic 语义):fromAuto=false 手动 next 恒环绕;
+ * fromAuto=true 自然播完仅 repeat=all 环绕;shuffle 随机≠当前。 */
+void MainWindow::advanceNext(bool fromAuto)
+{
+    if (m_videoMode && !m_videoIds.empty()) {
+        const int n = (int)m_videoIds.size();
+        if (m_shuffle && n > 1) {
+            int nx = m_videoIdx;
+            while (nx == m_videoIdx) nx = std::rand() % n;
+            playVideoAt(nx);
+            return;
+        }
+        if (m_repeatMode == 2 && m_videoIdx >= 0) {
+            playVideoAt(m_videoIdx);     /* 单曲重播 */
+            return;
+        }
+        int nx = m_videoIdx + 1;
+        if (nx >= n) {
+            if (!fromAuto || m_repeatMode == 1) nx = 0;
+            else {
+                if (playerBar) playerBar->setPlaying(false);
+                return;
+            }
+        }
+        playVideoAt(nx);
+        return;
+    }
+    if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
+        const int n = (int)m_argvUrls.size();
+        if (m_repeatMode == 2 && m_argvIdx >= 0) { playArgvAt(m_argvIdx); return; }
+        int nx = m_argvIdx + 1;
+        if (nx >= n) {
+            if (!fromAuto || m_repeatMode == 1) nx = 0;
+            else return;                 /* 到尾停 */
+        }
+        playArgvAt(nx);
+        return;
+    }
+    const Playlist* pl = findPlaylist(m_library, m_curPlaylistId);
+    if (!pl || pl->tracks.empty()) return;
+    const int n = (int)pl->tracks.size();
+    if (m_shuffle && n > 1) {
+        int nx = m_curTrackIndex;
+        while (nx == m_curTrackIndex) nx = std::rand() % n;
+        showTrackStub(m_curPlaylistId, nx);
+        return;
+    }
+    if (m_repeatMode == 2 && m_curTrackIndex >= 0) {
+        showTrackStub(m_curPlaylistId, m_curTrackIndex);
+        return;
+    }
+    int nx = m_curTrackIndex + 1;
+    if (nx >= n) {
+        if (!fromAuto || m_repeatMode == 1) nx = 0;
+        else return;
+    }
+    showTrackStub(m_curPlaylistId, nx);
+}
+
+void MainWindow::onDownloadCurrent()
+{
+    if (!m_dl || m_dl->busy()) {
+        SharedStatusBar::instance()->showMessage(
+            qFromUtf8("已有下载任务在进行"), 3000);
+        return;
+    }
+    if (!m_videoMode || m_videoIdx < 0
+        || m_videoIdx >= (int)m_videoIds.size() || !m_curProv) {
+        SharedStatusBar::instance()->showMessage(
+            qFromUtf8("当前没有可下载的视频"), 3000);
+        return;
+    }
+    const QString id = m_videoIds[m_videoIdx];
+    QString title = m_videoQueue[m_videoIdx].title;
+    if (title.isEmpty()) title = id;
+    const long dur = (long)m_videoQueue[m_videoIdx].durationMs;
+    SharedStatusBar::instance()->showMessage(qFromUtf8("解析下载地址…"), 4000);
+    qxv::VideoProvider* p = m_curProv;
+    p->resolve(id, [this, id, title, dur, p](const qxv::Result& r,
+                                             const qxv::PlayResult& pr) {
+        if (r.code != qxv::Err::Ok || pr.streams.isEmpty()) {
+            SharedStatusBar::instance()->showMessageTyped(
+                r.message.isEmpty() ? qFromUtf8("下载失败:无法解析地址")
+                                    : r.message, StatusError, 5000);
+            return;
+        }
+        QString url = pr.streams.first().url;
+        const QString pid = p->id();
+        QString referer = qFromUtf8("https://www.douyin.com/");
+        if (pid == qFromUtf8("bilibili"))
+            referer = qFromUtf8("https://www.bilibili.com/");
+        else if (pid == qFromUtf8("youtube"))
+            referer = qFromUtf8("https://www.youtube.com/");
+        else if (pid == qFromUtf8("xiaohongshu"))
+            referer = qFromUtf8("https://www.xiaohongshu.com/");
+        const QString ua =
+            qxv::Fingerprint::chromeWeb(qFromUtf8("zh-CN,zh;q=0.9")).userAgent;
+        const char* px = getenv("QXVOTUBE_PROXY");
+        const QString proxy = px != 0 ? qFromUtf8(px) : QString();
+        if (playerBar) playerBar->setDownloadState(0);
+        const bool ok = m_dl->start(url, title, dur,
+            [this](int pct) {
+                if (playerBar) playerBar->setDownloadState(pct);
+            },
+            [this](bool ok2, const QString& path, const QString& err) {
+                if (playerBar) playerBar->setDownloadState(ok2 ? 100 : -2);
+                if (ok2)
+                    SharedStatusBar::instance()->showMessage(
+                        qFromUtf8("下载完成: %1").arg(path), 5000);
+                else
+                    SharedStatusBar::instance()->showMessageTyped(
+                        qFromUtf8("下载失败: %1").arg(err), StatusError, 6000);
+            }, QString(), referer, ua, proxy);
+        if (!ok)
+            SharedStatusBar::instance()->showMessageTyped(
+                qFromUtf8("下载启动失败(ffmpeg 不可用?)"), StatusError, 5000);
+    });
+}
+
 void MainWindow::onPlayerFinished()
 {
     if (playerBar) playerBar->setPlaying(false);
-    /* 简易连播:顺序换下一首(引擎 finished 后 UI 流迁移) */
-    if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
-        playArgvAt(m_argvIdx + 1);   /* 到尾自动停("列表播完") */
-        return;
-    }
-    onNext();
+    advanceNext(true);   /* 自然播完:仅 repeat=all 环绕(qlmusic 语义) */
 }
 
 void MainWindow::onPlayerPosition(long ms)
@@ -1745,6 +1971,7 @@ void MainWindow::onPlayerDuration(long ms)
 void MainWindow::onVolumeChanged(int pct)
 {
     if (m_player != 0) m_player->setVolume(pct);
+    Config::setValue("player.volume", QString::number(pct));
 }
 
 void MainWindow::onRateChanged(double r)
@@ -1755,6 +1982,7 @@ void MainWindow::onRateChanged(double r)
 void MainWindow::onMuteChanged(bool on)
 {
     if (m_player != 0) m_player->setMute(on);
+    Config::setValue("player.mute", on ? qFromUtf8("1") : qFromUtf8("0"));
 }
 
 void MainWindow::onOpenEqDialog()
@@ -1921,6 +2149,7 @@ void MainWindow::onPlayerError(int code, const QString& msg)
     (void)code;
     if (playerBar) playerBar->setPlaying(false);
     SharedStatusBar::instance()->showMessageTyped(msg, StatusError, 4000);
+    skipOnError(msg);   /* autoskip 开:换下一项;关闭则停在错误上 */
 }
 
 void MainWindow::onSeekRequested(int ms)
@@ -1952,22 +2181,7 @@ void MainWindow::onPrev()
 
 void MainWindow::onNext()
 {
-    if (m_videoMode && !m_videoIds.empty()) {
-        if (m_videoIdx + 1 >= (int)m_videoIds.size()) {
-            if (playerBar) playerBar->setPlaying(false);   /* 播完停 */
-            return;
-        }
-        playVideoAt(m_videoIdx + 1);
-        return;
-    }
-    if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
-        playArgvAt(m_argvIdx + 1);
-        return;
-    }
-    const Playlist* pl = findPlaylist(m_library, m_curPlaylistId);
-    if (!pl) return;
-    if (m_curTrackIndex + 1 < (int)pl->tracks.size())
-        showTrackStub(m_curPlaylistId, m_curTrackIndex + 1);
+    advanceNext(false);   /* 手动 next:尾部恒环绕 */
 }
 
 void MainWindow::onMenu1Stub() {}
@@ -2419,4 +2633,97 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e)
         { adjustRate(0.25); return true; }
     if (k == Qt::Key_Question) { showShortcutHelp(); return true; }
     return QMainWindow::eventFilter(o, e);
+}
+
+
+// ── 播放队列快照(qlmusic queue.json 模型;仅视频队列) ─────────────
+void MainWindow::saveQueueSnapshot()
+{
+    if (!m_videoMode || m_videoIds.empty()) return;
+    QString provider = m_curProv ? m_curProv->id() : QString();
+    std::vector<VideoCard> cards;
+    /* 网格卡片与播放队列仅在"刚由网格进入播放"时同序;恢复后的队列
+     * 与网格可能不一致 → 用 id 全量校验,不一致走队列兜底。 */
+    bool aligned = m_videoCards.size() == m_videoIds.size();
+    for (size_t i = 0; aligned && i < m_videoIds.size(); ++i)
+        if (m_videoCards[i].id != m_videoIds[i]) aligned = false;
+    if (aligned) {
+        for (size_t i = 0; i < m_videoCards.size(); ++i)
+            cards.push_back(m_videoCards[i]);
+    } else {
+        cards.clear();
+        for (int i = 0; i < (int)m_videoQueue.size(); ++i) {
+            VideoCard c;
+            c.id = m_videoIds[i];
+            c.title = m_videoQueue[i].title;
+            c.author = m_videoQueue[i].artist;
+            c.cover = m_videoQueue[i].coverUrl;
+            c.durationMs = m_videoQueue[i].durationMs;
+            cards.push_back(c);
+        }
+    }
+    queue_store::save(provider, m_gridChip, m_videoIdx, cards);
+}
+
+void MainWindow::restoreQueueSnapshot()
+{
+    QString provider, chip;
+    int current = -1;
+    std::vector<VideoCard> cards;
+    if (!queue_store::load(&provider, &chip, &current, &cards)) return;
+    if (!m_curProv || m_curProv->id() != provider) return;  /* 不匹配丢弃 */
+    if (cards.empty()) return;
+
+    m_videoQueue.clear();
+    m_videoIds.clear();
+    for (size_t i = 0; i < cards.size(); ++i) {
+        Track t;
+        t.id = (int)i;
+        t.title = cards[i].title;
+        t.artist = cards[i].author;
+        t.coverUrl = cards[i].cover;
+        t.durationMs = (int)cards[i].durationMs;
+        t.playable = true;
+        m_videoQueue.push_back(t);
+        m_videoIds.push_back(cards[i].id);
+    }
+    m_videoMode = true;
+    m_gridChip = chip;
+    if (current < 0 || current >= (int)m_videoQueue.size()) current = 0;
+    m_videoIdx = current;
+    if (queuePanel) {
+        queuePanel->setQueue(m_videoQueue, m_videoIdx);
+        queuePanel->setCurrentTrack(m_videoQueue[m_videoIdx]);
+    }
+    if (playerBar) {
+        playerBar->setTrack(m_videoQueue[m_videoIdx]);
+        playerBar->setPlaying(false);      /* 摆好但不播(qlmusic 一致) */
+    }
+    m_curWebUrl = cards[current].webUrl;
+}
+
+void MainWindow::showEvent(QShowEvent* event)
+{
+    QMainWindow::showEvent(event);
+    /* 首次显示:按屏幕可用区夹取(mac 上布局最小宽可能把窗口顶到数屏宽) */
+    static bool clamped = false;
+    if (clamped) return;
+    clamped = true;
+    const QRect avail = QApplication::desktop()->availableGeometry(this);
+    int w = avail.width() * 9 / 10;
+    int h = avail.height() * 9 / 10;
+    if (w > 980) w = 980;
+    if (h > 640) h = 640;
+    resize(w, h);
+    move(avail.x() + (avail.width() - w) / 2,
+         avail.y() + (avail.height() - h) / 2);
+    if (avail.width() < minimumSizeHint().width()) {
+        qWarning("[win] avail=%dx%d winMin=%d side=%d content=%d queue=%d "
+                 "player=%d", avail.width(), avail.height(),
+                 minimumSizeHint().width(),
+                 sideNav ? sideNav->minimumSizeHint().width() : -1,
+                 contentView ? contentView->minimumSizeHint().width() : -1,
+                 queuePanel ? queuePanel->minimumSizeHint().width() : -1,
+                 playerBar ? playerBar->minimumSizeHint().width() : -1);
+    }
 }
