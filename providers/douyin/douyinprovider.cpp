@@ -6,6 +6,7 @@
 #include "common/fingerprint.h"
 #include "abogus_js.h"
 #include "acsig.h"
+#include "acsig_js.h"
 
 
 // 抖音(2026-11-18 a_bogus 落码后扩面,详见 bytedance.md §13/§15):
@@ -174,7 +175,8 @@ void DouyinProvider::ensureTtwid(std::function<void()> done) {
         DBG_P(kMod, Debug, "home1 -> %d nonce=%d", r1.status, (int)nonce.length());
         if (nonce.isEmpty()) { registerTtwid(done); return; }
 
-        const QString sig = douyin::acSignature(
+        // 签名走 acSignatureChecked:C++ 为准 + qjs 命令行对照(acsig_js.h)
+        const QString sig = douyin::acSignatureChecked(
             (long long)::time(0), qFromUtf8("www.douyin.com/"), nonce,
             fp.userAgent);
         m_jar.importCookieString(qFromUtf8("www.douyin.com"),

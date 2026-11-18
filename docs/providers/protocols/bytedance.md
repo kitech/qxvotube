@@ -516,3 +516,30 @@ dong/xb 红果短剧.py 的 `_StreamSession` 正是 H2b 规划的本地流式解
 - **流档位**:`bit_rate[].gear_name` 实际形如 `normal_1080_0` /
   `adapt_low_540_1`,映射为 `1080P/720P/540P`(`_3~4位数字段_` 规则);
   `bitRate` 升序;默认档取最低码率(带宽友好),不命中→最低档+degraded。
+
+### 15.6 __ac_signature 双机制对照(2026-11-18 落码)
+
+- **机制 A(权威)**:`acsig.cpp` 纯算(CSDN 145899104),结果始终以它为准。
+- **机制 B(对照)**:`acsig_js.cpp` 用 QProcess 起 quickjs-ng
+  `qjs -C abjs/acsig_runner.js <ts> <site> <nonce> <ua>`,跑独立书写的
+  JS 参考实现(不链接库),与 A 同输入 → 字节级一致;不一致 → 4 行
+  qWarning 取证,仍用 C++ 结果。
+- **复用既有开关,不新增环境变量**:`QXVOTUBE_QJS`(qjs 路径)、
+  `QXVOTUBE_ABJS_DIR`(abjs 目录)、`QXVOTUBE_ABJS_CHECK=0`(关闭对照)。
+  qjs/脚本缺失/超时 → warn 一次自动跳过,不阻塞签名。
+- **与 a_bogus 对照的差别**:`__ac_signature` 签名不唯一——V2 段是
+  `FP_CONST ^ v3l`(浏览器指纹常量),服务端不校验该段值(实测两份
+  不同签名均被接受并下发 ttwid/UIFID_TEMP)。因此对照基准是
+  **同一 FP 常量下的字节级一致**(JS 与 C++ 同常量),不是与原站
+  浏览器签名一致;原站 VM 结果仅作诊断参考,不做期望值。
+
+### 15.7 qjs 对照器工程坑(2026-11-18 实测)
+
+- **Qt3 + eventpoller 泵线程下 QProcess 取不到子进程输出**
+  (`normalExit=1` 但 `readStdout` 空)→ 统一改用 `qjsrun.cpp`:
+  Qt3 走 `fork/execvp + pipe + poll`,Qt4+ 走 `QProcess`。
+- **父进程 `LD_LIBRARY_PATH` 会污染 qjs**:vcpkg/qt 私有库路径遮蔽
+  `libqjs`,子进程启动即 `symbol lookup error: js_init_module_bjson`
+  (exit 127)——表象是"qjs 不存在"。修复:两个分支都在子进程剔除
+  `LD_LIBRARY_PATH`/`LD_PRELOAD`。
+- 对照任务异步执行(`postEvent`),不阻塞签名链路;C++ 结果同步返回。

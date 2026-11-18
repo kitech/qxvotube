@@ -3,6 +3,7 @@
 // <uri> <ua> <windowFp>"(不链接 quickjs 库;系统没有 qjs 命令时自动跳过
 // 对照,仅警告不阻塞签名)。Qt3/Qt4 QProcess API 差异分支同 ytdlp.cpp 口径。
 #include "abogus_js.h"
+#include "qjsrun.h"
 #include "abogus.h"
 #include "compat.h"
 #include <qapplication.h>
@@ -49,9 +50,8 @@ QString findRunner()
 }
 
 // 从 stdout 解析 "AB=<a_bogus>" 行(取最后一行,防前导噪音)
-std::string parseAb(const QByteArray& buf)
+std::string parseAb(const std::string& s)
 {
-    std::string s(buf.data(), (size_t)buf.size());
     size_t pos = s.rfind("AB=");
     if (pos == std::string::npos) return std::string();
     size_t e = pos + 3;
@@ -91,30 +91,10 @@ bool generateViaJs(unsigned int seed, long long nowMs,
         << QString::fromUtf8(ua.c_str())
         << fpStr;
 
-    QProcess* p = new QProcess();
-    QByteArray outBuf;
-    bool ok = false;
-#ifdef QT3_BUILD
-    // Qt3:QProcess 无独立 program 属性,args[0]=程序路径(同 ytdlp 口径);
-    // 无 waitForFinished,且 Qt3 每线程仅允许一个 QEventLoop(QApplication
-    // 已内置),不能新建 → 用 processEvents 旋转等待 + 超时。
-    p->setArguments(args);
-    QTime t;
-    t.start();
-    if (p->start()) {
-        while (p->isRunning() && t.elapsed() < 2000)
-            qApp->processEvents(50);
-        if (p->isRunning()) p->kill();   // 超时,防止残留
-        outBuf = p->readStdout();
-        ok = !outBuf.isEmpty() && p->normalExit();
-    }
-#else
-    p->setProcessChannelMode(QProcess::SeparateChannels);
-    p->start(args.first(), args.mid(1));
-    ok = p->waitForFinished(2000);
-    if (ok) outBuf = p->readAllStandardOutput();
-#endif
-    delete p;
+    // qjs 执行器统一走 qjsrun(详见 qjsrun.h:Qt3 fork/execvp,
+    // Qt4+ QProcess;均剔除 LD_LIBRARY_PATH,防 vcpkg 库遮蔽)
+    std::string outBuf;
+    const bool ok = qxv::douyin::runQjs(args, &outBuf, 2000);
 
     if (!ok) {
         if (!warnedOnce) {
