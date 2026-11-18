@@ -415,3 +415,37 @@ dong/xb 红果短剧.py 的 `_StreamSession` 正是 H2b 规划的本地流式解
   (detail: `http.status`, `server.code=public_fallback_unavailable`, `server.message`)
 - App 链 `code!=0` → `Parse`(detail: `server.code`, `server.message`)
 - douyin 未实现能力 → `Unsupported`(附 `auth.mode`);热榜 `status_code!=0` → `Parse`
+
+## 15. a_bogus C++ 移植(2026-11-18 落码)
+
+### 15.1 来源与对拍
+- 参考实现:ylcangel/douyin_sign 的 `a_bogus`(utils.js + sm3.js,Apache-2.0,作者 AngelToms)。
+- 移植:`providers/douyin/abogus.{h,cpp}`(SM3 大端 + 魔改 RC4 + 魔改 base64 表 + U 数组主流程)。
+- 对拍方法(node 金标,可复现):
+  - Math.random → 确定性 LCG(`seed*1103515245+12345`,取值 /2^32);
+  - Date 覆写为固定 now(`Date.now` 与 `new Date` 均固定);
+  - **`enterPageTs` 必须显式设为 now**——G_RELEASE 下 `makeABogus(uri, ts)` 的 ts
+    参数不生效(仅 G_DEBUG 分支赋值),参考实现加载时 `enterPageTs=+Date.now()`
+    用的是真实时钟,U28 每轮都变;
+  - navigator.userAgent / window 尺寸 / navigator.platform 按用例给定;
+  - `programVersion = G_RELEASE`(参考文件 312 行处默认 G_DEBUG,有调试打印)。
+- 验收:`providers/douyin/abogus_golden_test.cpp`,5 组用例
+  (seed/now/uri/ua/窗口指纹各不同)字节级 **5/5 MATCH**。
+- 关键实现坑(与参考 JS 逐处核对过):
+  - `random()` 每次调用**开头无条件消费一个 Math.random**;flag=2 分支再消费第二个
+    (r1 来自第二次 `*240`,r2=178 常量;flag=1 时 r2=0 但初始 r 仍消费);
+  - 魔改 RC4:S 倒序(`255-i`)、KSA 权重 `(j*S[i]+j+K[i])%256`;
+  - SM3 标准 GB/T 32905-2016,大端输出,digest 输入第二次是 32 字节数组;
+  - 魔改 base64 表 s0..s4,U[92] 编码用 s4;
+  - U[37]=[0,0,0,0,129]、U26 时间基点 1721836800000、pageId=7571、aid=6383
+    (均照参考注释写死)。
+
+### 15.2 使用口径
+- 输入 `uri` = 查询串(不含 `?`),msToken 值以 `dhzx` 结尾;
+- 输出追加为 `&a_bogus=<值>`;请求 UA 必须与 generate 的 ua 一致;
+- 需 ttwid cookie(GET douyin.com 首页 autoCookie 预热);
+- msToken/窗口指纹可写死(服务端按统计口径校验,不校验具体值);
+- sdkVersion 口径 = web `1.0.1.19-fix.01`;窗口指纹默认
+  `1920|1080|1920|1040|1920|1040|0|0|Win32`。
+- 边界:上游(抖音 web)换签名版本需重新对拍;对拍用例见 abogus_golden_test.cpp
+  (独立 main,不进 providers.pri)。

@@ -53,6 +53,7 @@ SOURCES += \
     $$QXV_PROVIDERS_DIR/hongguo/hg_parse.cpp \
     $$QXV_PROVIDERS_DIR/douyin/douyinprovider.cpp \
     $$QXV_PROVIDERS_DIR/douyin/dy_parse.cpp \
+    $$QXV_PROVIDERS_DIR/douyin/abogus.cpp \
     $$QXV_PROVIDERS_DIR/xiaohongshu/xiaohongshuprovider.cpp \
     $$QXV_PROVIDERS_DIR/xiaohongshu/xhs_parse.cpp \
     $$QXV_PROVIDERS_DIR/xiaohongshu/ssr.cpp \
