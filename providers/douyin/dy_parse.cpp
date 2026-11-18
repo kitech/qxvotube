@@ -1,5 +1,7 @@
 #include "parse.h"
 
+#include <vector>
+
 namespace qxv {
 namespace douyin {
 namespace parse {
@@ -29,6 +31,126 @@ QList36<VideoItem> hotWords(cJSON* root) {
         items.append(vi);
     }
     return items;
+}
+
+// 从单条 aweme 对象抽取 VideoItem(详情/搜索共用)
+void fillFromAweme(const cJSON* aw, VideoItem* vi) {
+    vi->id = jstr(aw, "aweme_id");
+    vi->title = jstr(aw, "desc");
+    vi->publishMs = jint(aw, "create_time") * 1000;   // 秒 → ms
+    vi->author = jstr(jobj(aw, "author"), "nickname");
+    cJSON* video = jobj(aw, "video");
+    if (video) {
+        vi->durationMs = jint(video, "duration");     // 已是 ms
+        cJSON* covers = jarr(jobj(video, "cover"), "url_list");
+        const cJSON* c0 = jat(covers, 0);
+        if (c0 && cJSON_IsString(c0) && c0->valuestring)
+            vi->cover = QString::fromUtf8(c0->valuestring);
+    }
+    vi->webUrl = qFromUtf8("https://www.douyin.com/video/%1").arg(vi->id);
+}
+
+// 详情解析:root.aweme_detail;缺失 → 风控/不存在,带 filter_detail.msg
+bool awemeDetail(cJSON* root, VideoItem* vi, QString* err) {
+    cJSON* aw = jobj(root, "aweme_detail");
+    if (!aw) {
+        const QString filterMsg = jstr(jobj(root, "filter_detail"), "detail_msg");
+        *err = filterMsg.isEmpty()
+            ? qFromUtf8("douyin: aweme_detail 缺失(风控或视频不存在)")
+            : qFromUtf8("douyin: %1").arg(filterMsg);
+        return false;
+    }
+    fillFromAweme(aw, vi);
+    if (vi->id.isEmpty()) { *err = qFromUtf8("douyin: aweme_id 为空"); return false; }
+    return true;
+}
+
+// 搜索:root.data[] 数组,只收 type==1(aweme_info 视频卡),跳过广告/其他卡片
+QList36<VideoItem> searchList(cJSON* root) {
+    QList36<VideoItem> items;
+    cJSON* arr = jarr(root, "data");
+    for (int i = 0; i < jsize(arr); ++i) {
+        const cJSON* it = jat(arr, i);
+        if (jint(it, "type") != 1) continue;          // 1=aweme 视频卡
+        cJSON* aw = jobj(it, "aweme_info");
+        if (!aw) continue;
+        VideoItem vi;
+        fillFromAweme(aw, &vi);
+        if (vi.id.isEmpty()) continue;
+        items.append(vi);
+    }
+    return items;
+}
+
+// gear_name → 档位标签:"normal_1080_0"→"1080P"、"adapt_low_540_1"→"540P"、
+// "gear_360p_500k"→"360P";解析不出 → 原值(不丢档位)。
+static QString gearName(const QString& gear) {
+    for (int i = 0; i < (int)gear.length(); ++i) {
+        if (gear[i] < QChar('0') || gear[i] > QChar('9')) continue;
+        QString num;
+        int j = i;
+        for (; j < (int)gear.length(); ++j) {
+            const QChar c = gear[j];
+            if (c < QChar('0') || c > QChar('9')) break;
+            num += c;
+        }
+        // 3~4 位数字段 + 前后为分隔符(避免把 640k 码率当分辨率)
+        if ((num.length() == 3 || num.length() == 4)
+            && (i == 0 || gear[i-1] == QChar('_') || gear[i-1] == QChar('-'))
+            && (j >= (int)gear.length() || gear[j] == QChar('_')
+                || gear[j] == QChar('p') || gear[j] == QChar('P')))
+            return num + qFromUtf8("P");
+        i = j;
+    }
+    return gear;
+}
+
+// 取流:video.play_addr 兜底 + bit_rate[] 档位(gear_name→quality),bitRate 升序
+// 注:Qt3 QValueList::operator[] 为值语义(不可用于排序交换),内部走 std::vector。
+QList36<Stream> streamsOf(cJSON* root) {
+    std::vector<Stream> all;
+    cJSON* video = jobj(jobj(root, "aweme_detail"), "video");
+    if (!video) return QList36<Stream>();
+    cJSON* brs = jarr(video, "bit_rate");
+    for (int i = 0; i < jsize(brs); ++i) {
+        const cJSON* br = jat(brs, i);
+        cJSON* pa = jobj(br, "play_addr");
+        cJSON* urls = jarr(pa, "url_list");
+        const cJSON* u0 = jat(urls, 0);
+        if (!u0 || !cJSON_IsString(u0) || !u0->valuestring) continue;
+        Stream s;
+        s.url = QString::fromUtf8(u0->valuestring);
+        s.quality = gearName(jstr(br, "gear_name"));
+        s.kind = qFromUtf8("mp4");
+        s.extra.insert(qFromUtf8("bitRate"), jint(br, "bit_rate"));
+        s.extra.insert(qFromUtf8("gear"), jstr(br, "gear_name"));
+        all.push_back(s);
+    }
+    if (all.empty()) {   // 兜底:video.play_addr
+        cJSON* urls = jarr(jobj(video, "play_addr"), "url_list");
+        const cJSON* u0 = jat(urls, 0);
+        if (u0 && cJSON_IsString(u0) && u0->valuestring) {
+            Stream s;
+            s.url = QString::fromUtf8(u0->valuestring);
+            s.quality = jstr(video, "ratio");
+            s.kind = qFromUtf8("mp4");
+            all.push_back(s);
+        }
+    }
+    // bitRate 升序(档位 ≤20,插入排序足够;同码率保持接口原序)
+    for (size_t i = 1; i < all.size(); ++i) {
+        Stream v = all[i];
+        const long long vb = v.extra[qFromUtf8("bitRate")].toLongLong();
+        size_t j = i;
+        while (j > 0 && all[j-1].extra[qFromUtf8("bitRate")].toLongLong() > vb) {
+            all[j] = all[j-1];
+            --j;
+        }
+        all[j] = v;
+    }
+    QList36<Stream> out;
+    for (size_t i = 0; i < all.size(); ++i) out.append(all[i]);
+    return out;
 }
 
 } // namespace parse

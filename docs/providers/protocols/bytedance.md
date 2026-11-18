@@ -449,3 +449,70 @@ dong/xb 红果短剧.py 的 `_StreamSession` 正是 H2b 规划的本地流式解
   `1920|1080|1920|1040|1920|1040|0|0|Win32`。
 - 边界:上游(抖音 web)换签名版本需重新对拍;对拍用例见 abogus_golden_test.cpp
   (独立 main,不进 providers.pri)。
+
+### 15.3 a_bogus 双机制对照(2026-11-18 落码)
+
+- **机制 A(权威)**:`abogus.cpp` 纯 C++ 移植,签名结果始终以它为准。
+- **机制 B(对照)**:`abogus_js.cpp` 用 QProcess 起 quickjs-ng 命令行
+  `qjs -C abjs/runner.js <seed> <now> <uri> <ua> <windowFp>` 跑参考原版 JS
+  (不链接 quickjs 库),与 A 同 seed(LCG)/now/uri/ua/窗口指纹 → 理论上
+  字节级一致;入口统一走 `qxv::abogus::generateChecked(...)`。
+- **不匹配** → `qWarning` 4 行取证(cpp/js 两侧值 + now/seed/uriLen/uaLen/fp),
+  仍以 C++ 结果签名,不重试不阻塞。
+- **qjs 缺失自动跳过**:系统没装 quickjs-ng / 超时(2s kill)/无 `AB=` 输出 →
+  仅 warn 一次("仅对照缺席,不影响 C++ 签名"),装上后自动恢复。
+- 环境变量:`QXVOTUBE_QJS`(qjs 路径,默认 PATH 找)、
+  `QXVOTUBE_ABJS_DIR`(abjs 目录,默认 appDir 回推)、
+  `QXVOTUBE_ABJS_CHECK=0` 关闭对照(默认开)。
+- quickjs-ng 0.17 实测(2026-11-18,网搜+本机):ES2023 全覆盖(≥ES2020),
+  参考 JS 全为 ES2020 内语法;三个引擎特有坑:
+  ① `qjs` 自动探测 script/模块,被当模块=严格模式,隐式全局赋值报错
+     → 必须 `-C` 强制经典脚本;
+  ② 内置只读全局 `navigator`(ua=quickjs-ng/0.17.0),属性无 setter,
+     赋值静默失败 → `Object.defineProperty(globalThis,"navigator",{value:...})`
+     整体替换(descriptor configurable:true);
+  ③ 脚本参数在 `scriptArgs`(含脚本名),不是 `arguments`。
+- 对照用 JS harness 的确定性环境与金标生成方法同 §15.1
+  (LCG + 固定 Date.now + 显式固定 enterPageTs + G_RELEASE)。
+
+### 15.4 provider 接线(2026-11-18)
+
+- search/detail/resolve 统一走 a_bogus 签名:`signUrl()` 用
+  `generateChecked`(C++ 为准+qjs 对照,§15.3),seed=秒级 now,
+  msToken=假 116 字符+dhzx,UA 与请求头一致(chromeWeb zh-CN)。
+- ttwid 预热:`ensureTtwid()` 首次签名请求前 GET douyin.com 首页,
+  Set-Cookie 下发 ttwid → NetClient 回存 jar(autoCookie 自动附带);
+  失败也放行,由实际请求判,只预热一次。
+- `fetchDetail` 5 分钟单条缓存:detail→resolve 连击不重打签名请求
+  (解析失败也缓存 body 防连击)。
+- `resolveQuality` 选档:quality 空=精确挑 360P(无则最高档)/非空=精确
+  匹配/不命中=默认档+`requestedQuality`+`degraded`;`streamsOf` 输出
+  bit_rate 档位(gear_name→"360P" 风格)按 bitRate 升序。
+- 已知边界(待代理实测):detail 曾被 ArgusSecurityPlugin Uifid Not Found
+  挡(§13),a_bogus 落地后待复测;search 200+空 data=签名无效/风控
+  → 显式 RateLimit。
+
+### 15.5 Argus 签名链(2026-11-18 实测,detail/resolve 打通)
+
+- **detail 端点现状**:`/aweme/v1/web/aweme/detail/` 由 ArgusSecurityPlugin 把关,
+  必需 `aweme_id + uifid + x-secsdk-web-signature`:
+  缺 uifid → `Uifid Not Found`;缺签名 → `Signature Not Found`;
+  签名错 → `Sign Invalid`(均为 HTTP 403)。
+- **x-secsdk-web-signature** = `md5("<uifid>_<timestamp>_<SALT>_<query>")`,
+  SALT=`A96D855A08C0A9707F8BEF0D9A527E4E`,query=最终查询串(不含签名自身)。
+  实现:`providers/douyin/acsig.cpp` 的 `argusSignature()`(自包含 MD5)。
+- **a_bogus 对 detail 无关**(yt-dlp #9667 实测:带错值反可能被拒),
+  因此 detail/resolve 走 Argus 链、不拼 a_bogus;search 保留 a_bogus+Argus。
+- **UIFID_TEMP / ttwid 获取链**(首页只下发 `__ac_nonce` 挑战):
+  ① GET douyin.com → `__ac_nonce`
+  ② 纯算 `__ac_signature`(`acsig.cpp::acSignature`,CSDN 145899104 还原,
+     本机 golden 1:1 对拍)→ 注入 jar
+  ③ 再 GET 首页 → `ttwid` + `UIFID_TEMP` + `web_sign_token`(.douyin.com 域)
+  ④ 任一环节失败 → 回退 `ttwid.bytedance.com/ttwid/union/register/`
+  实测:二跳返回 1MB 真实 HTML(非挑战页),三 cookie 齐备。
+- **search 匿名已关闭**:`status_code=2483`「请先登录,再继续搜索吧」。
+  provider 显式返回 `Err::NeedAuth`,提示在设置粘贴 douyin.com 的 cookie
+  (credentials["cookie"] 注入 jar,与 bilibili 同口径);登录后可搜。
+- **流档位**:`bit_rate[].gear_name` 实际形如 `normal_1080_0` /
+  `adapt_low_540_1`,映射为 `1080P/720P/540P`(`_3~4位数字段_` 规则);
+  `bitRate` 升序;默认档取最低码率(带宽友好),不命中→最低档+degraded。
