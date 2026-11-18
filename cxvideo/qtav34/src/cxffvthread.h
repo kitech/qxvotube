@@ -74,7 +74,13 @@ protected:
 
             CxPkt p = vQueue->take();
             if (p.pkt == 0 && !p.eos)
-                continue; // 停止唤醒空载体
+            {
+                if (p.flush) {                    // seek flush 标记
+                    if (decoder != 0) decoder->flush();
+                    renderPts0 = (p.flushMs > 0) ? p.flushMs : -1;
+                }
+                continue; // 停止唤醒空载体 / flush 标记
+            }
 
             if (p.eos) {
                 drain();

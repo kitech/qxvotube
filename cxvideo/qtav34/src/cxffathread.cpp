@@ -13,7 +13,19 @@ void CXFFmpegAudioThread::run()
             break;
         CxPkt p = aQueue->take();
         if (p.pkt == 0 && !p.eos)
+        {
+            if (p.flush) {
+                if (dec != 0) dec->flush();
+                if (out != 0) out->clear();
+                if (m_clock != 0) {
+                    m_clock->reset();
+                    if (p.flushMs > 0) m_clock->updateValue(p.flushMs);
+                }
+                renderPts0 = (p.flushMs > 0) ? p.flushMs : -1;
+                m_lastMs = -1;
+            }
             continue;
+        }
         if (p.eos) {
             while (!stopFlag) {
                 AVFrame* fr = dec->decode(0);

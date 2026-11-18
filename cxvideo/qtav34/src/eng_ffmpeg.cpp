@@ -27,7 +27,7 @@ CXEngineFfmpeg::CXEngineFfmpeg()
       m_ao(0), m_clock(0),
       m_paused(false), m_running(false),
       m_durMs(0), m_curMs(0), m_vIdx(-1), m_aIdx(-1), m_sIdx(-1),
-      m_seekPend(0), m_eosPend(0),
+      m_seekPend(0), m_seekTarget(0), m_eosPend(0),
       m_aCount(0), m_sCount(0), m_audioPrompt(-1), m_subPrompt(-1),
       m_rateCur(1.0), m_volCur(100), m_muteCur(false)
 {
@@ -179,7 +179,8 @@ bool CXEngineFfmpeg::open(const QString& url)
         m_clock = 0;
     }
 
-    m_demux = new CxDemuxThread(fmt, m_vq, m_vIdx, m_aq, m_aIdx, m_sq, m_sIdx);
+    m_demux = new CxDemuxThread(fmt, m_vq, m_vIdx, m_aq, m_aIdx, m_sq, m_sIdx,
+                                this);
     m_vthread = new CXFFmpegVideoThread(m_vq, m_dec, this);
     m_vthread->setRate(1.0);
     if (m_clock != 0)
@@ -427,34 +428,24 @@ bool CXEngineFfmpeg::stop()
 
 bool CXEngineFfmpeg::seek(long ms)
 {
-    if (m_fmtCtx == 0)
+    if (m_fmtCtx == 0 || m_demux == 0)
         return false;
-    int sIdx = (m_vIdx >= 0) ? m_vIdx : m_aIdx; // 纯音频亦能 seek
+    const int sIdx = (m_vIdx >= 0) ? m_vIdx : m_aIdx; // 纯音频亦能 seek
     if (sIdx < 0)
         return false;
-    AVRational tb = FMT_CTX()->streams[sIdx]->time_base;
-    long long target = av_rescale_q(ms, AV_TIME_BASE_Q, tb);
-    if (av_seek_frame(FMT_CTX(), sIdx, target, AVSEEK_FLAG_BACKWARD) < 0) {
-        emit noticedError((int)CxErrSeek, m_url);
-        return false;
-    }
-    if (m_dec != 0)
-        m_dec->flush();
-    if (m_adec != 0)
-        m_adec->flush();
-    if (m_vq != 0)
-        m_vq->reset();
-    if (m_aq != 0)
-        m_aq->reset();
-    if (m_ao != 0)
-        m_ao->clear();
-    if (m_clock != 0)
-        m_clock->reset();
-    if (m_vthread != 0)
-        m_vthread->setRenderPts0(ms);
-    if (m_athread != 0)
-        m_athread->setRenderPts0(ms);
+    if (ms < 0) ms = 0;
+    if (m_durMs > 1000 && ms > m_durMs - 1000) ms = m_durMs - 1000;
+    m_curMs = ms;
+    /* UI 先动,不等解码(首帧到位后 vthread 再投 SeekDone) */
+    emit positionChanged(ms);
     m_seekPend = 1;
+    m_seekTarget = ms;
+    m_seekT.start();
+    /* demux 可能正阻塞在"队列满 push":先腾位,再投 seek 请求 */
+    if (m_vq != 0) m_vq->clear();
+    if (m_aq != 0) m_aq->clear();
+    if (m_sq != 0) m_sq->clear();
+    m_demux->requestSeek(ms, sIdx);
     return true;
 }
 
@@ -626,6 +617,12 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
     switch (ev->ev) {
     case CxFFmpegEvFrame: {
         if (ev->frame != 0) {
+            /* seek 期间:只接受目标 ±2s 内的帧事件。队列里可能残留 seek 前
+             * 投递的旧帧(前进/后退两个方向),会造成进度条短暂回跳/跳变。
+             * 帧随事件析构释放(~CxFFmpegUiEvent)。 */
+            if (m_seekPend && (ev->ms > m_seekTarget + 2000
+                               || ev->ms + 2000 < m_seekTarget))
+                break;
             m_curMs = ev->ms;
             if (p_renderer != 0)
                 p_renderer->showFrame(ev->frame);
@@ -652,6 +649,7 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
     case CxFFmpegEvSeekDone:
         if (m_seekPend) {
             m_seekPend = 0;
+            m_seekTarget = 0;
             emit seekFinished(ev->ms);
         }
         break;

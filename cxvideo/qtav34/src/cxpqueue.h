@@ -11,7 +11,10 @@ struct CxPkt {
     AVPacket* pkt;   // 拥有者交接:消费方 av_packet_free
     int streamIdx;
     bool eos;
-    CxPkt() : pkt(0), streamIdx(-1), eos(false) { }
+    /* seek 后 flush 标记:不携带 pkt;消费线程据此 flush 解码器/时钟 */
+    bool flush;
+    long flushMs;    // seek 目标(渲染/时钟基准)
+    CxPkt() : pkt(0), streamIdx(-1), eos(false), flush(false), flushMs(0) { }
 };
 
 class CxPacketQueue {

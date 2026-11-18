@@ -6,6 +6,7 @@
 #include "cxrenderer.h" // M3-B inline setEq/screenshot 需完整型
 #include "cxffdec.h"    // M4-A inline hwName() 需完整型
 #include <qstringlist.h>
+#include <qdatetime.h>
 
 // 自研 FFmpeg 内核(M2;detail.md 第 5 节)
 // - M2.0:demux + vthread 双线程;sws→QImage 经事件回投渲染
@@ -121,6 +122,8 @@ private:
     int m_aIdx;
     int m_sIdx;
     int m_seekPend;
+    QTime m_seekT;          /* seek 看门狗起点 */
+    long m_seekTarget;      /* 本次 seek 目标(丢弃迟到旧帧事件) */
     int m_eosPend; // 活动线程 EOS 计数(视频+音频+字幕都完才 finished)
     int m_aCount;
     int m_sCount;

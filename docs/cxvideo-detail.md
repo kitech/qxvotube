@@ -485,3 +485,33 @@ LIBS += -lmpv -lavformat -lavcodec -lswscale -lswresample -lopenal
 ## 附:实现顺序(对照里程碑)
 
 M0 落 `cxvideo_global.h/cxthread/cxengine.h/cxvideoplayer.h` stub(接口可链、Qt3/Qt6 编译绿)→ M1 eng_mpv → M2 eng_ffmpeg 软解 → M3 全功能 → M4 硬解 → M5 接入 qlvotube[主推]+qskvotube → CI 四路绿。
+
+## seek 线程模型(2026-11-18 修复)
+
+**症状**:播放中 seek 后进度/画面冻结(点击进度条与快捷键同样)。
+
+**根因(两处)**:
+
+1. **AVFormatContext 跨线程并发**:旧 `seek()` 在 GUI 线程直接
+   `av_seek_frame`,而 `CxDemuxThread` 正在另一线程 `av_read_frame`。
+   libavformat 非线程安全 → 读错误被当成 EOF → demux 线程 `postEos()` 后
+   **退出**,随后队列 `reset()/clear()` 又把 EOS 包清掉 → 消费线程永久等包。
+2. **时间基换算漏乘 1000**:`av_rescale_q(ms, AV_TIME_BASE_Q, tb)` 把毫秒
+   当微秒输入 → 目标只有实际值的 1/1000(如 179782ms → 0.18s),于是从
+   片头逐帧解码到目标;长视频表现为"seek 后停播很久",短视频(30s)被掩盖。
+
+**修复**:
+
+- seek 全部下沉到 `CxDemuxThread`(`requestSeek`,单线程独占 fmtCtx):
+  `av_seek_frame` → 清队列 → 向 v/a/s 队列各投一个 **flush 标记**
+  (`CxPkt.flush/flushMs`);失败仅上报 `CxErrSeek`,不再退出线程。
+- 消费线程各自处理 flush 标记:vthread `decoder->flush()` +
+  `renderPts0=flushMs`;athread `dec/flush + ao->clear + clock->reset +
+  clock->updateValue(flushMs)`(时钟不再停在 -1)。
+- `CXEngineFfmpeg::seek()` 只做 clamp + `emit positionChanged` +
+  `requestSeek`(UI 先动),另加 3s 看门狗(无帧则上报,不静默冻结)。
+- 修正换算:`av_rescale_q(ms * 1000LL, AV_TIME_BASE_Q, tb)`。
+- seek 期间 UI 只接受目标 ±2s 内的帧事件,丢弃队列中残留旧帧(防进度回跳)。
+
+**实测**(Qt3,GUI):本地 30s 文件与 B站在线长视频;`9/j/l/0-9/End`、
+暂停后 seek、连续 4~5 次快速 seek 均正确落点并持续播放。
