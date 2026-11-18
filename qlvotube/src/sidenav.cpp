@@ -162,6 +162,7 @@ void SideNav::retranslateUi()
     m_groupCreated = _("nav.created");
     m_groupCollected = _("nav.collected");
     m_groupCategories = _("nav.categories");
+    m_groupVideoCats = siteText("nav.video_categories", "视频分类");
     if (m_search)
         m_search->setPlaceholders(_("nav.search"), _("nav.search"));
     if (m_siteLabel) m_siteLabel->setText(siteText("nav.site", "视频站点"));
@@ -212,6 +213,32 @@ void SideNav::setCategories(const QStringList& hot, const QStringList& groupName
     update();
 }
 
+void SideNav::setVideoCategories(const QStringList& names,
+                                 const QStringList& keys,
+                                 const QString& currentKey)
+{
+    m_videoCatNames = names;
+    m_videoCatKeys = keys;
+    m_curVideoCat = currentKey;
+    relayout();
+    update();
+}
+
+void SideNav::clearVideoCategories()
+{
+    m_videoCatNames.clear();
+    m_videoCatKeys.clear();
+    m_curVideoCat = QString();
+    relayout();
+    update();
+}
+
+void SideNav::setCurrentVideoCategory(const QString& key)
+{
+    m_curVideoCat = key;
+    update();
+}
+
 void SideNav::relayout()
 {
     m_items.clear();
@@ -228,6 +255,21 @@ void SideNav::relayout()
     it.kind = NavMyMusic; it.id = -3; it.text = m_navMine; it.cat = QString();
     it.y = y; it.h = kItemH; y += kItemH;
     m_items.push_back(it);
+
+    /* 视频源动态分类(站点下拉之后、音乐分类之前) */
+    if (!m_videoCatKeys.isEmpty()) {
+        y += 8;
+        it.kind = NavHeader; it.id = 0; it.text = m_groupVideoCats;
+        it.cat = QString();
+        it.y = y; it.h = kGroupH; y += kGroupH;
+        m_items.push_back(it);
+        for (int i = 0; i < (int)m_videoCatKeys.size(); ++i) {
+            it.kind = NavVideoCategory; it.id = 0;
+            it.text = m_videoCatNames[i]; it.cat = m_videoCatKeys[i];
+            it.y = y; it.h = kItemH; y += kItemH;
+            m_items.push_back(it);
+        }
+    }
 
     if (!m_hotCats.isEmpty() || !m_catGroups.isEmpty()) {
         y += 8;
@@ -409,6 +451,8 @@ void SideNav::paintEvent(QPaintEvent*)
             selected = (!m_currentCat.isEmpty() && m_currentCat == it.cat);
         else if (it.kind == NavHotPlaylists)
             selected = (!m_currentCat.isEmpty() && m_currentCat == QString::fromUtf8(kHotViewKey));
+        else if (it.kind == NavVideoCategory)
+            selected = (m_curVideoCat == it.cat);
         bool hovered = ((int)i == m_hover);
         if (hovered)
             p.fillRect(r, pal.hoverBg);
@@ -440,6 +484,14 @@ void SideNav::mousePressEvent(QMouseEvent* e)
         m_currentCat = it.cat;
         m_current = -1;
         emit categorySelected(it.cat);
+        update();
+        return;
+    }
+    if (it.kind == NavVideoCategory) {
+        m_curVideoCat = it.cat;
+        m_current = -1;
+        m_currentCat = QString();
+        emit videoCategorySelected(it.cat);
         update();
         return;
     }

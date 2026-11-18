@@ -33,6 +33,12 @@ public:
     void setVideoSites(const QStringList& ids);
     QString currentSiteId() const;
 
+    /* 视频源动态分类(左侧栏;首个「推荐」= 空 key) */
+    void setVideoCategories(const QStringList& names, const QStringList& keys,
+                            const QString& currentKey);
+    void clearVideoCategories();
+    void setCurrentVideoCategory(const QString& key);
+
 public slots:
     void onNavScroll(int v);
     void onSiteChanged(int index);
@@ -44,6 +50,7 @@ signals:
     void actionTriggered(int actionId);
     void loginRequested();
     void siteChanged(const QString& providerId);
+    void videoCategorySelected(const QString& key);
     void searchSubmitted(const QString& kw);
 
 protected:
@@ -62,6 +69,7 @@ private:
         NavHotPlaylists,/* 推荐 → 热门歌单 */
         NavRank,        /* 排行榜 → 暂缓提示 */
         NavMyMusic,     /* 我的音乐 → 需登录提示 */
+        NavVideoCategory, /* 视频源动态分类(key 存在 cat 字段) */
     };
     struct NavItem {
         NavKind kind;
@@ -101,6 +109,10 @@ private:
     QStringList m_catGroups;      /* 组名（按序） */
     QStringList m_catGroupCounts; /* 与组名对应：该组分类个数 */
     QStringList m_catMatrix;      /* 与组名对应：该组全部分类名 */
+    QStringList m_videoCatNames;
+    QStringList m_videoCatKeys;
+    QString m_groupVideoCats;
+    QString m_curVideoCat;
 };
 
 #endif // SIDENAV_H

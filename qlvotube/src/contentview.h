@@ -19,7 +19,7 @@ struct VideoCard {
     VideoCard() : durationMs(0), playCount(0), publishMs(0) {}
 };
 
-/* 分类 chip(key 由站点动态提供;空 key = 推荐) */
+/* 分类项(仅数据载体;渲染在 SideNav 左侧栏) */
 struct CategoryChip {
     QString key, name;
     CategoryChip() {}
@@ -52,12 +52,9 @@ public:
     /* CategoryGridMode：远端分类宫格 */
     void showCategoryGrid(const QStringList& cats);
 
-    /* VideoGridMode：分类 chips + 封面网格 + 加载更多/触底翻页 + 错误条 */
-    void showVideoGrid(const QString& title, const std::vector<CategoryChip>& chips,
-                       const QString& activeKey);
-    void setVideoChips(const std::vector<CategoryChip>& chips,
-                       const QString& activeKey);
-    void setActiveChip(const QString& key);   /* 仅切高亮，不动列表 */
+    /* VideoGridMode：封面网格 + 加载更多/触底翻页 + 错误条
+     * (分类选择在 SideNav 左侧栏,本视图不再画 chips 行) */
+    void showVideoGrid(const QString& title);
     void appendVideoCards(const std::vector<VideoCard>& cards, bool hasMore);
     void replaceVideoCards(const std::vector<VideoCard>& cards, bool hasMore);
     void clearVideoCards();
@@ -76,7 +73,6 @@ signals:
     void categoryActivated(const QString& cat);
     void loadMoreRequested();
     void backRequested();
-    void chipActivated(const QString& key);
     void videoActivated(const QString& id);
     void videoContextMenu(const QString& id, const QPoint& globalPos);  /* M7 */
 
@@ -107,8 +103,6 @@ private:
     QRect backRect() const;
     QRect loadMoreRect() const;
     QRect retryRect() const;
-    QRect chipRect(int i) const;
-    int   chipContentWidth() const;
     QRect cardRect(int i) const;
     int    gridCols() const;
     int    gridCardH() const;
@@ -119,12 +113,9 @@ private:
     std::vector<Row> m_rows;
     std::vector<RemotePlaylistCard> m_cards;
     std::vector<VideoCard> m_videos;
-    std::vector<CategoryChip> m_chips;
-    QString m_activeChip;
     QString m_gridErr;
     void maybeLoadMore();  /* 触底翻页(滚轮/拖条共用) */
     int m_lastMoreAt;      /* 触底翻页节流(time(0),1s) */
-    int m_chipScroll;      /* chips 横向偏移(滚轮横向滚动) */
     QStringList m_gridCats;
     LimeScrollBar* m_scrollBar;
     int m_scrollY;

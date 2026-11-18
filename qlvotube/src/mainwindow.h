@@ -42,6 +42,7 @@ public:
     void startAutoplayFiles();
 
 protected:
+    bool eventFilter(QObject* o, QEvent* e);
     virtual void closeEvent(QCloseEvent* event);
     virtual void customEvent(CustomEventBase* event);
     virtual void dragEnterEvent(QDragEnterEvent* event); /* 拖拽导入视频 */
@@ -72,7 +73,7 @@ private slots:
     void onNavAction(int action);
     /* 视频源(providers):切站点 / 切分类 / 点卡片 / 翻页 */
     void onSiteChanged(const QString& providerId);
-    void onChipActivated(const QString& key);
+    void onVideoCategorySelected(const QString& key);
     void onVideoActivated(const QString& id);
     void onVideoContextMenu(const QString& id, const QPoint& globalPos);  /* M7 */
     void onPlayerContextMenu(const QPoint& globalPos);                    /* M7 */
@@ -119,6 +120,18 @@ private slots:
     void onSeekRequested(int ms); // 与 PlayerBar::seekRequested(int) 同型
 
 private:
+    /* 快捷键(YouTube/MPV 惯例;搜索框聚焦时自动让行) */
+    bool shortcutsDisabledByFocus() const;
+    void seekBy(long deltaMs);
+    void adjustVolume(int deltaPct);
+    void toggleMuteShortcut();
+    void adjustRate(double delta);
+    void toggleFullscreen();
+    void showShortcutHelp();
+    QRect m_normGeom;
+    bool m_fullscreen = false;
+    long m_durMs = 0;   /* 引擎时长(ffmpeg 的 duration() 可能返回 0) */
+
     struct MenuItemRef {
         const char* key;
         bool darkToggle;

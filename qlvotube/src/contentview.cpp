@@ -21,7 +21,6 @@
 #include <ctime>
 
 namespace {
-const int kChipH = 40;
 const int kCardTextH = 46;
 const int kCardGap = 12;
 const int kMinCardW = 200;
@@ -64,10 +63,16 @@ QString fmtCount(qint64 n)
 ContentView::ContentView(QWidget* parent)
     : QWidget(parent), m_pl(0), m_mode(TracksMode), m_scrollBar(0), m_scrollY(0),
       m_scrollDelta(0), m_hover(-1), m_current(-1), m_playlistId(-1),
-      m_headerH(64), m_rowH(48), m_lastMoreAt(0), m_chipScroll(0),
+      m_headerH(64), m_rowH(48), m_lastMoreAt(0),
       m_hasMore(false), m_loadingNow(false)
 {
     setMouseTracking(true);
+    /* 可聚焦:点击网格后把焦点从搜索框拿回,快捷键(空格/方向键)才生效 */
+#if QT_VERSION >= 0x040000
+    setFocusPolicy(Qt::StrongFocus);
+#else
+    setFocusPolicy(QWidget::StrongFocus);   /* Qt3:枚举在 QWidget 内 */
+#endif
     m_scrollBar = new LimeScrollBar(Qt::Vertical, this);
     QObject::connect(m_scrollBar, SIGNAL(valueChanged(int)), this, SLOT(onScroll(int)));
     retranslateUi();
@@ -166,40 +171,20 @@ void ContentView::showCategoryGrid(const QStringList& cats)
     update();
 }
 
-void ContentView::showVideoGrid(const QString& title,
-                                const std::vector<CategoryChip>& chips,
-                                const QString& activeKey)
+void ContentView::showVideoGrid(const QString& title)
 {
     m_mode = VideoGridMode;
     m_pl = 0;
     m_playlistId = -1;
     m_listTitle = title;
-    m_chips = chips;
-    m_activeChip = activeKey;
     m_scrollY = 0;
     m_hover = -1;
     m_current = -1;
     m_gridErr = QString();
     m_hasMore = true;
     m_loadingNow = true;
-    m_chipScroll = 0;
     rebuildRows();
     updateScrollBar();
-    update();
-}
-
-void ContentView::setVideoChips(const std::vector<CategoryChip>& chips,
-                                const QString& activeKey)
-{
-    m_chips = chips;
-    m_activeChip = activeKey;
-    m_chipScroll = 0;
-    update();
-}
-
-void ContentView::setActiveChip(const QString& key)
-{
-    m_activeChip = key;
     update();
 }
 
@@ -210,7 +195,6 @@ void ContentView::replaceVideoCards(const std::vector<VideoCard>& cards,
     m_hasMore = hasMore;
     m_loadingNow = false;
     m_gridErr = QString();
-    m_chipScroll = 0;
     m_scrollY = 0;              /* 新分类/搜索回到顶部 */
     rebuildRows();
     updateScrollBar();
@@ -304,7 +288,7 @@ void ContentView::rebuildRows()
         for (int i = 0; i < (int)m_videos.size(); ++i) {
             Row r;
             r.index = i;
-            r.y = m_headerH + kChipH + (i / cols) * step;
+            r.y = m_headerH + (i / cols) * step;
             r.h = gridCardH();
             m_rows.push_back(r);
         }
@@ -328,7 +312,7 @@ int ContentView::totalHeight() const
         return last.y + last.h + 8;
     }
     if (m_mode == VideoGridMode) {
-        int h = m_headerH + kChipH;
+        int h = m_headerH;
         if (!m_rows.empty()) {
             const int cols = gridCols();
             const int rows = (int)((m_rows.size() + cols - 1) / cols);
@@ -357,7 +341,7 @@ QRect ContentView::loadMoreRect() const
     if (m_mode == VideoGridMode) {
         const int cols = gridCols();
         const int rows = (int)((m_rows.size() + cols - 1) / cols);
-        const int y = m_headerH + kChipH + rows * (gridCardH() + kCardGap) + 8;
+        const int y = m_headerH + rows * (gridCardH() + kCardGap) + 8;
         return QRect(width() / 2 - 60, y, 120, 32);
     }
     return QRect(width() / 2 - 90, m_headerH + (int)m_rows.size() * 56 + 6, 180, 36);
@@ -367,35 +351,8 @@ QRect ContentView::retryRect() const
 {
     const int cols = gridCols();
     const int rows = (int)((m_rows.size() + cols - 1) / cols);
-    const int y = m_headerH + kChipH + rows * (gridCardH() + kCardGap) + 30;
+    const int y = m_headerH + rows * (gridCardH() + kCardGap) + 30;
     return QRect(width() / 2 - 50, y, 100, 28);
-}
-
-QRect ContentView::chipRect(int i) const
-{
-    QFontMetrics fm(font());
-    int x = 20 - m_chipScroll;
-    for (int k = 0; k < i && k < (int)m_chips.size(); ++k) {
-        const QString nm = m_chips[k].name.isEmpty()
-                               ? _("content.cat_recommend") : m_chips[k].name;
-        x += qMax(56, qFontWidth(fm, nm) + 24) + 8;
-    }
-    const QString name = (i < (int)m_chips.size() && !m_chips[i].name.isEmpty())
-                             ? m_chips[i].name : _("content.cat_recommend");
-    const int w = qMax(56, qFontWidth(fm, name) + 24);
-    return QRect(x, m_headerH + 6, w, 28);
-}
-
-int ContentView::chipContentWidth() const
-{
-    QFontMetrics fm(font());
-    int w = 20;
-    for (int i = 0; i < (int)m_chips.size(); ++i) {
-        const QString nm = m_chips[i].name.isEmpty()
-                               ? _("content.cat_recommend") : m_chips[i].name;
-        w += qMax(56, qFontWidth(fm, nm) + 24) + 8;
-    }
-    return w;
 }
 
 QRect ContentView::cardRect(int i) const
@@ -403,7 +360,7 @@ QRect ContentView::cardRect(int i) const
     const int cols = gridCols();
     const int cardW = (width() - 40 - (cols - 1) * kCardGap) / cols;
     const int x = 20 + (i % cols) * (cardW + kCardGap);
-    const int y = m_headerH + kChipH + (i / cols) * (gridCardH() + kCardGap);
+    const int y = m_headerH + (i / cols) * (gridCardH() + kCardGap);
     return QRect(x, y, cardW, gridCardH());
 }
 
@@ -483,23 +440,6 @@ void ContentView::resizeEvent(QResizeEvent* e)
 
 void ContentView::wheelEvent(QWheelEvent* e)
 {
-    /* 光标在 chips 行 → 横向滚动分类(网格不跟动)
-     * Qt5.14+ 用 position(),Qt3/Qt4/旧 Qt5 用 pos() */
-#if QT_VERSION >= 0x050E00
-    const QPoint wheelPos = e->position().toPoint();
-#else
-    const QPoint wheelPos = e->pos();
-#endif
-    if (m_mode == VideoGridMode
-        && wheelPos.y() >= m_headerH && wheelPos.y() < m_headerH + kChipH
-        && chipContentWidth() > width() - 12) {
-        const int chipSteps = qWheelDeltaY(e) / 120;
-        if (chipSteps == 0) return;
-        const int maxChip = qMax(0, chipContentWidth() - (width() - 20));
-        m_chipScroll = qBound(0, m_chipScroll - chipSteps * 120, maxChip);
-        update();
-        return;
-    }
     m_scrollDelta += qWheelDeltaY(e);
     int steps = m_scrollDelta / 120;
     if (steps == 0) return;
@@ -588,25 +528,6 @@ void ContentView::paintEvent(QPaintEvent*)
     p.drawLine(0, m_headerH - 1, width(), m_headerH - 1);
 
     p.setClipRect(0, m_headerH, width(), height() - m_headerH);
-
-    if (m_mode == VideoGridMode) {
-        /* 分类 chips：站点动态提供（空 key = 推荐），吸顶不随滚动 */
-        for (int i = 0; i < (int)m_chips.size(); ++i) {
-            QRect cr = chipRect(i);
-            if (cr.left() > width() - 12) continue;   /* 右侧越界(横向滚动后) */
-            if (cr.right() < 0) continue;             /* 左侧越界 */
-            const bool on = (m_chips[i].key == m_activeChip);
-            p.setPen(Qt::NoPen);
-            p.setBrush(on ? pal.accent : pal.hoverBg);
-            muiDrawRoundRect(p, cr, cr.height() / 2, cr.height() / 2);
-            p.setPen(on ? pal.accentText : pal.textPrimary);
-            p.setFont(small);
-            const QString name = m_chips[i].name.isEmpty()
-                                     ? _("content.cat_recommend")
-                                     : m_chips[i].name;
-            p.drawText(cr, Qt::AlignCenter, name);
-        }
-    }
 
     if (m_mode == TracksMode) {
         if (m_pl) {
@@ -724,7 +645,7 @@ void ContentView::paintEvent(QPaintEvent*)
         for (size_t i = 0; i < m_rows.size(); ++i) {
             const Row& row = m_rows[i];
             int y = row.y - m_scrollY;
-            if (y + row.h < m_headerH + kChipH || y > height()) continue;
+            if (y + row.h < m_headerH || y > height()) continue;
             const VideoCard& c = m_videos[row.index];
             QRect cr = cardRect((int)i);
             cr.moveTop(y);
@@ -808,7 +729,7 @@ void ContentView::paintEvent(QPaintEvent*)
 
         /* footer：错误+重试 / 加载中 / 加载更多 / 空态 */
         const int rows = (int)((m_rows.size() + cols - 1) / cols);
-        QRect fr(0, m_headerH + kChipH
+        QRect fr(0, m_headerH
                         + rows * (gridCardH() + kCardGap) - m_scrollY,
                  width(), kFooterH);
         p.setFont(small);
@@ -843,6 +764,7 @@ void ContentView::paintEvent(QPaintEvent*)
 
 void ContentView::mousePressEvent(QMouseEvent* e)
 {
+    setFocus();   /* 点内容区 = 退出文本输入焦点,启用播放器快捷键 */
     /* M7:右键交给 contextMenuEvent,不能顺带激活条目 */
     if (e->button() != Qt::LeftButton)
         return;
@@ -854,18 +776,6 @@ void ContentView::mousePressEvent(QMouseEvent* e)
         }
     }
     if (m_mode == VideoGridMode) {
-        for (int i = 0; i < (int)m_chips.size(); ++i) {
-            if (chipRect(i).contains(e->pos())) {
-                if (getenv("QLVOTUBE_DEBUG") != 0)
-#if QT_VERSION >= 0x060000
-                    qDebug() << "grid: chip" << m_chips[i].key;
-#else
-                    qDebug("grid: chip %s", qToUtf8(m_chips[i].key).data());
-#endif
-                emit chipActivated(m_chips[i].key);
-                return;
-            }
-        }
         if (!m_gridErr.isEmpty() && retryRect().contains(e->pos())) {
             emit loadMoreRequested();     /* 重试 = 重拉当前页 */
             return;
@@ -927,10 +837,6 @@ void ContentView::mouseMoveEvent(QMouseEvent* e)
 {
     if (m_mode == VideoGridMode) {
         int h = rowAt(e->pos());
-        if (h < 0) {
-            for (int i = 0; i < (int)m_chips.size(); ++i)
-                if (chipRect(i).contains(e->pos())) { h = 2000000 + i; break; }
-        }
         if (h < 0 && !m_gridErr.isEmpty() && retryRect().contains(e->pos()))
             h = 3000000;
         if (h < 0 && m_hasMore && !m_loadingNow

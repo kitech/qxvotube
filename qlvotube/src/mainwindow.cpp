@@ -51,6 +51,7 @@
 #include <QDebug>
 #endif
 #include <qlineedit.h>
+#include <qcombobox.h>
 #include <qsplitter.h>
 #include <qdatetime.h>
 #include <qfiledialog.h>
@@ -329,8 +330,9 @@ void MainWindow::buildCentralWidget()
                      this, SLOT(onTrackActivated(int, int)));
     QObject::connect(sideNav, SIGNAL(siteChanged(const QString&)),
                      this, SLOT(onSiteChanged(const QString&)));
-    QObject::connect(contentView, SIGNAL(chipActivated(const QString&)),
-                     this, SLOT(onChipActivated(const QString&)));
+    QObject::connect(sideNav, SIGNAL(videoCategorySelected(const QString&)),
+                     this, SLOT(onVideoCategorySelected(const QString&)));
+    qApp->installEventFilter(this);   /* 全局快捷键(搜索框聚焦时让行) */
     QObject::connect(contentView, SIGNAL(videoActivated(const QString&)),
                      this, SLOT(onVideoActivated(const QString&)));
     QObject::connect(contentView, SIGNAL(loadMoreRequested()),
@@ -1126,6 +1128,7 @@ void MainWindow::onSiteChanged(const QString& providerId)
 #endif
 
     m_curProv->cancel();
+    sideNav->clearVideoCategories();
     m_videoTitles.clear();
     m_videoCards.clear();
     m_videoIds.clear();
@@ -1143,7 +1146,7 @@ void MainWindow::onSiteChanged(const QString& providerId)
     const QString siteKey = QString::fromUtf8("site.") + providerId;
     QString siteName = _(qToUtf8(siteKey).data());
     if (siteName.isEmpty() || siteName == siteKey) siteName = providerId;
-    contentView->showVideoGrid(siteName, std::vector<CategoryChip>(), QString());
+    contentView->showVideoGrid(siteName);
 
     qxv::VideoProvider* p = m_curProv;
     const int gen = m_gridGen;
@@ -1271,13 +1274,11 @@ void MainWindow::onSearchSubmitted(const QString& kw)
     m_videoQueue.clear();
     m_videoMode = false;
     m_videoIdx = -1;
-    contentView->showVideoGrid(
-        _("content.search_result").arg(kw),
-        m_chipList, QString());
+    contentView->showVideoGrid(_("content.search_result").arg(kw));
     loadVideoPage(1);
 }
 
-void MainWindow::onChipActivated(const QString& key)
+void MainWindow::onVideoCategorySelected(const QString& key)
 {
     if (!m_curProv || key == m_gridChip) return;
     m_gridChip = key;
@@ -1286,7 +1287,7 @@ void MainWindow::onChipActivated(const QString& key)
     m_gridIsSearch = false;
     ++m_gridGen;                       /* 作废旧分类在途响应 */
     m_curProv->cancel();
-    contentView->setActiveChip(key);   /* 先高亮，旧卡片继续显示 */
+    sideNav->setCurrentVideoCategory(key);   /* 左栏高亮 */
     contentView->setVideoGridLoading(true);
     m_gridLoading = false;
     loadVideoPage(1);
@@ -1737,6 +1738,7 @@ void MainWindow::onPlayerPosition(long ms)
 
 void MainWindow::onPlayerDuration(long ms)
 {
+    m_durMs = ms;
     if (playerBar) playerBar->setDuration((int)ms);
 }
 
@@ -2108,7 +2110,15 @@ void MainWindow::customEvent(CustomEventBase* event)
             }
             m_gridChip = chips.front().key;
             m_chipList = chips;
-            contentView->setVideoChips(chips, m_gridChip);
+            /* 动态分类 → 左侧栏(「推荐」+各分类),高亮首个 */
+            QStringList names, keys;
+            for (int i = 0; i < (int)chips.size(); ++i) {
+                names.append(chips[i].name.isEmpty()
+                                 ? _("content.cat_recommend")
+                                 : chips[i].name);
+                keys.append(chips[i].key);
+            }
+            sideNav->setVideoCategories(names, keys, m_gridChip);
             m_gridPage = 1;
             m_gridLoading = false;
             loadVideoPage(1);
@@ -2235,3 +2245,178 @@ void MainWindow::customEvent(CustomEventBase* event)
     QMainWindow::customEvent(event);
 }
 
+
+// ── 播放器快捷键(2026-11-18) ────────────────────────────────────────
+// 惯例参考:YouTube 官方(空格/K 播放暂停、←→ ±5s、J/L ±10s、↑↓ 音量、
+// M 静音、F 全屏、0-9 百分比、Shift+,/. 倍速、C 字幕、? 帮助)。
+// 统一装在 qApp 事件过滤层:焦点在文本输入时让行(搜索框可正常输入空格)。
+namespace {
+
+bool isTextInputWidget(QWidget* w)
+{
+    if (w == 0) return false;
+    if (w->inherits("QLineEdit") || w->inherits("QTextEdit")) return true;
+    /* 只有可编辑下拉框才算文本输入(站点下拉获焦时快捷键仍生效) */
+    if (w->inherits("QComboBox")) {
+#if QT_VERSION >= 0x040000
+        return ((QComboBox*)w)->isEditable();
+#else
+        return ((QComboBox*)w)->editable();   /* Qt3 命名 */
+#endif
+    }
+    return false;
+}
+
+} // namespace
+
+bool MainWindow::shortcutsDisabledByFocus() const
+{
+#if QT_VERSION >= 0x040000
+    QWidget* w = QApplication::focusWidget();
+#else
+    QWidget* w = qApp != 0 ? qApp->focusWidget() : 0;   /* Qt3 为实例方法 */
+#endif
+    return isTextInputWidget(w);
+}
+
+void MainWindow::seekBy(long deltaMs)
+{
+    if (m_player == 0 || m_player->engine() == 0) return;
+    const long dur = m_durMs > 0 ? m_durMs : m_player->duration();
+    long pos = m_player->position() + deltaMs;
+    if (pos < 0) pos = 0;
+    if (dur > 1000 && pos > dur - 1000) pos = dur - 1000;
+    m_player->seek(pos);
+    SharedStatusBar::instance()->showMessage(
+        qFromUtf8("%1s / %2s").arg(pos / 1000).arg(dur / 1000), 1200);
+}
+
+void MainWindow::adjustVolume(int deltaPct)
+{
+    if (m_player == 0) return;
+    int v = m_player->volume() + deltaPct;
+    if (v < 0) v = 0;
+    if (v > 100) v = 100;
+    m_player->setVolume(v);
+    if (playerBar) playerBar->setVolume(v);   /* 静默更新,无信号回环 */
+    SharedStatusBar::instance()->showMessage(
+        qFromUtf8("音量 %1%").arg(v), 1200);
+}
+
+void MainWindow::toggleMuteShortcut()
+{
+    if (m_player == 0) return;
+    const bool on = !m_player->isMuted();
+    m_player->setMute(on);
+    if (playerBar) playerBar->setMuted(on);
+    SharedStatusBar::instance()->showMessage(
+        on ? qFromUtf8("静音") : qFromUtf8("取消静音"), 1200);
+}
+
+void MainWindow::adjustRate(double delta)
+{
+    if (m_player == 0) return;
+    double r = m_player->rate() + delta;
+    if (r < 0.25) r = 0.25;
+    if (r > 2.0) r = 2.0;
+    m_player->setRate(r);
+    if (playerBar) playerBar->setRate(r);
+    SharedStatusBar::instance()->showMessage(
+        qFromUtf8("倍速 %1x").arg(r, 0, 'f', 2), 1200);
+}
+
+void MainWindow::toggleFullscreen()
+{
+    m_fullscreen = !m_fullscreen;
+    if (m_fullscreen) {
+        m_normGeom = geometry();
+        showFullScreen();
+    } else {
+        showNormal();
+        if (!m_normGeom.isEmpty()) setGeometry(m_normGeom);
+    }
+}
+
+void MainWindow::showShortcutHelp()
+{
+    QMessageBox::information(this, _("shortcut.title"), _("shortcut.help"));
+}
+
+bool MainWindow::eventFilter(QObject* o, QEvent* e)
+{
+    if (e->type() != QEvent::KeyPress || !isActiveWindow())
+        return QMainWindow::eventFilter(o, e);
+    if (shortcutsDisabledByFocus())
+        return QMainWindow::eventFilter(o, e);
+    QKeyEvent* ke = (QKeyEvent*)e;
+    const int k = ke->key();
+#if QT_VERSION >= 0x040000
+    const bool shift = (ke->modifiers() & Qt::ShiftModifier) != 0;
+#else
+    const bool shift = (ke->state() & Qt::ShiftButton) != 0;
+#endif
+    switch (k) {
+    case Qt::Key_Space:
+    case Qt::Key_K:
+        onPlayPause();
+        return true;
+    case Qt::Key_Left:
+        seekBy(shift ? -1000 : -5000);
+        return true;
+    case Qt::Key_Right:
+        seekBy(shift ? 1000 : 5000);
+        return true;
+    case Qt::Key_J:
+        seekBy(-10000);
+        return true;
+    case Qt::Key_L:
+        seekBy(10000);
+        return true;
+    case Qt::Key_Up:
+        adjustVolume(5);
+        return true;
+    case Qt::Key_Down:
+        adjustVolume(-5);
+        return true;
+    case Qt::Key_M:
+        toggleMuteShortcut();
+        return true;
+    case Qt::Key_F:
+        toggleFullscreen();
+        return true;
+    case Qt::Key_Escape:
+        if (m_fullscreen) { toggleFullscreen(); return true; }
+        break;
+    case Qt::Key_H:
+    case Qt::Key_F1:
+        showShortcutHelp();
+        return true;
+    case Qt::Key_Home:
+        if (m_player && m_player->engine()) { m_player->seek(0); return true; }
+        break;
+    case Qt::Key_End:
+        if (m_player && m_player->engine() && m_durMs > 1000) {
+            m_player->seek(m_durMs - 1000);
+            return true;
+        }
+        break;
+    case Qt::Key_C:
+        onCycleSubtitle();
+        return true;
+    default:
+        break;
+    }
+    if (k >= Qt::Key_0 && k <= Qt::Key_9 && m_player != 0
+        && m_player->engine() != 0 && m_durMs > 0) {
+        const int d = k - Qt::Key_0;
+        m_player->seek(m_durMs * d / 10);
+        return true;
+    }
+    /* Qt3 会把 Shift+,/. 直接报成 '<'/'>'(Key_Less/Key_Greater) */
+    if (k == Qt::Key_Less || k == '<')
+        { adjustRate(-0.25); return true; }
+    if (k == Qt::Key_Greater || k == '>')
+        { adjustRate(0.25); return true; }
+    if (k == Qt::Key_Question) { showShortcutHelp(); return true; }
+    return QMainWindow::eventFilter(o, e);
+}
