@@ -6,6 +6,7 @@
 #include <qstring.h>
 #include <qimage.h>
 #include <deque>
+#include <vector>
 
 // M4-A:硬解探活由 initHw 落位;hw 帧当场下载为系统内存帧
 
@@ -48,6 +49,7 @@ private:
     AVFrame* m_out;        // 交给调用方的当期帧
     SwsContext* m_sws;
     int m_swsW, m_swsH, m_swsPix;
+    std::vector<unsigned char> m_swsBuf;  // sws 目标安全缓冲(带行尾/尾部 padding)
     bool m_flushed;
     std::deque<AVFrame*> m_stash;
     QString m_codecName;

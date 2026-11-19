@@ -2,6 +2,7 @@
 #include "cxframe.h"
 #include "cffhw.h"
 #include <stdio.h>
+#include <string.h>
 
 // M4-A:get_format 回调(命中 hw pixfmt 才走硬路径;未命中取首个软路格式)
 static int cxCurHwPix = AV_PIX_FMT_NONE;
@@ -261,12 +262,28 @@ QImage CxDecoder::convert(AVFrame* avf)
     }
     uint8_t* dst[4] = { 0, 0, 0, 0 };
     int dstLine[4] = { 0, 0, 0, 0 };
-    dst[0] = img.bits();
-    dstLine[0] = img.bytesPerLine();
+    // mac/libswscale 的 SIMD 输出会写满向量块,紧凑 QImage(w*4) 在行尾/末行越界
+    // (竖屏 360x640 末行写越过分配尾页 → EXC_BAD_ACCESS)。改为写带 padding 的
+    // 独立缓冲,再逐行拷回 QImage,对所有平台统一规避。
+    const int align = 64;
+    const int rowBytes = avf->width * 4;
+    const int stride = ((rowBytes + align) / align) * align;
+    const size_t need = (size_t)stride * (avf->height + 1);
+    if (m_swsBuf.size() < need) {
+        m_swsBuf.resize(need);
+    }
+    unsigned char* base = &m_swsBuf[0];
+    dst[0] = base;
+    dstLine[0] = stride;
     if (sws_scale(m_sws, (const uint8_t* const*)avf->data, avf->linesize, 0,
                   avf->height, dst, dstLine) <= 0) {
         qWarning("[dec] sws_scale rc<=0 %dx%d", avf->width, avf->height);
         return QImage();
+    }
+    unsigned char* ob = img.bits();
+    const int obpl = img.bytesPerLine();
+    for (int y = 0; y < avf->height; y++) {
+        memcpy(ob + (size_t)y * obpl, base + (size_t)y * stride, rowBytes);
     }
     return img;
 }
