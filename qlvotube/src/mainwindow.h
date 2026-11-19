@@ -140,6 +140,7 @@ private:
     void toggleMuteShortcut();
     void adjustRate(double delta);
     void toggleFullscreen();
+    void toggleVideoFullscreen();   /* F:视频全屏(仅 videoPane 提升为顶层) */
     void showShortcutHelp();
     /* 播放模式/连播(qlmusic 语义) */
     void advanceNext(bool fromAuto);
@@ -150,6 +151,7 @@ private:
     void restoreQueueSnapshot();
     QRect m_normGeom;
     bool m_fullscreen = false;
+    bool m_videoFullscreen = false;  /* 视频全屏态(与 m_fullscreen 互斥) */
     long m_durMs = 0;   /* 引擎时长(ffmpeg 的 duration() 可能返回 0) */
     int m_repeatMode = 0;          /* 0 off 1 all 2 one */
     bool m_shuffle = false;

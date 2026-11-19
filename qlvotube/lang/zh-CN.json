@@ -102,6 +102,7 @@
     "dark_label": "深色模式",
     "proxy_label": "启用代理（墙外站点）",
     "proxyurl_label": "代理地址",
+    "novideo_label": "无视频播放模式（仅保存设置）",
     "videoout_tab": "视频输出",
     "videoout_label": "输出后端",
     "videoout_hint": "auto = 无 GL 优先(xv→x11→sdl→raster→gl),改动下次启动生效。",
@@ -153,6 +154,7 @@
 ,
   "shortcut": {
     "title": "快捷键",
-    "help": "空格 / K：播放 / 暂停\n← / →：快退 / 快进 5 秒（Shift 为 1 秒）\nJ / L：快退 / 快进 10 秒\n↑ / ↓：音量 ±5%\nM：静音切换\nF：全屏（Esc 退出全屏）\n0–9：跳到 0%–90%\nHome / End：开头 / 结尾\nShift+, / Shift+.：减速 / 加速（0.25 步进）\nC：字幕轨切换\nH / F1 / ?：本帮助"
+    "help": "空格 / K：播放 / 暂停\n← / →：快退 / 快进 5 秒（Shift 为 1 秒）\nJ / L：快退 / 快进 10 秒\n↑ / ↓：音量 ±5%\nM：静音切换\nF：视频全屏\nF11：应用全屏\nF12：日志/调试窗口（未实现）\nEsc：退出全屏\n0–9：跳到 0%–90%\nHome / End：开头 / 结尾\nShift+, / Shift+.：减速 / 加速（0.25 步进）\nC：字幕轨切换\nH / F1 / ?：本帮助",
+    "log_todo": "日志/调试窗口未实现"
   }
 }

@@ -53,7 +53,8 @@ bool Config::saveRoot(cJSON* root) { return saveConfig(root); }
 
 static const std::map<std::string, std::string>& defaultValues() {
     static const std::map<std::string, std::string> m = {
-        {"uilang", "zh-CN"}
+        {"uilang", "zh-CN"},
+        {"player.novideo", "0"}
     };
     return m;
 }

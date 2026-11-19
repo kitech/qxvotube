@@ -102,6 +102,7 @@
     "dark_label": "深色模式",
     "proxy_label": "啟用代理（境外網站）",
     "proxyurl_label": "代理位址",
+    "novideo_label": "無視訊播放模式（僅儲存設定）",
     "videoout_tab": "視訊輸出",
     "videoout_label": "輸出後端",
     "videoout_hint": "auto = 無 GL 優先(xv→x11→sdl→raster→gl),變更下次啟動生效。",
@@ -153,6 +154,7 @@
 ,
   "shortcut": {
     "title": "快速鍵",
-    "help": "空格 / K：播放 / 暫停\n← / →：倒轉 / 快轉 5 秒（Shift 為 1 秒）\nJ / L：倒轉 / 快轉 10 秒\n↑ / ↓：音量 ±5%\nM：靜音切換\nF：全螢幕（Esc 退出）\n0–9：跳到 0%–90%\nHome / End：開頭 / 結尾\nShift+, / Shift+..：減速 / 加速（0.25 步進）\nC：字幕軌切換\nH / F1 / ?：本說明"
+    "help": "空格 / K：播放 / 暫停\n← / →：倒轉 / 快轉 5 秒（Shift 為 1 秒）\nJ / L：倒轉 / 快轉 10 秒\n↑ / ↓：音量 ±5%\nM：靜音切換\nF：視訊全螢幕\nF11：程式全螢幕\nF12：日誌/除錯視窗（未實作）\nEsc：退出全螢幕\n0–9：跳到 0%–90%\nHome / End：開頭 / 結尾\nShift+, / Shift+..：減速 / 加速（0.25 步進）\nC：字幕軌切換\nH / F1 / ?：本說明",
+    "log_todo": "日誌/除錯視窗未實作"
   }
 }

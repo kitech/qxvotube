@@ -1527,11 +1527,18 @@ void MainWindow::openSettings()
         "proxy/url", "", _("settings.proxyurl_label"), page);
     page->addLabeledControl(_("settings.proxyurl_label"), proxyUrlItem->lineEdit());
 
+    /* 无视频播放模式(仅持久化,暂不接播放逻辑) */
+    BoolConfigItem* noVideoItem = new BoolConfigItem(
+        "player/novideo", Config::value("player.novideo") == qFromUtf8("1"),
+        _("settings.novideo_label"), page);
+    page->addLabeledControl(_("settings.novideo_label"), noVideoItem->checkBox());
+
     dlg->addCategory(_("settings.general_tab"), page);
     dlg->registerConfigItem(langItem);
     dlg->registerConfigItem(darkItem);
     dlg->registerConfigItem(proxyOnItem);
     dlg->registerConfigItem(proxyUrlItem);
+    dlg->registerConfigItem(noVideoItem);
 
     /* —— 视频输出页(M6):选择播放渲染后端 ——
      * 列表按当前构建实际可用的后端生成(cxAvailableVideoOuts),
@@ -1609,6 +1616,10 @@ void MainWindow::onSettingsSaved(const SettingsChangedMap& changed)
     }
     if (changed.contains("proxy/url")) {
         Config::setValue("proxy.url", changed["proxy/url"].toString());
+    }
+    if (changed.contains("player/novideo")) {
+        Config::setValue("player.novideo",
+            changed["player/novideo"].toBool() ? qFromUtf8("1") : qFromUtf8("0"));
     }
     if (changed.contains("video/quality")) {
         Config::setValue("video.quality", changed["video/quality"].toString());
@@ -2738,6 +2749,33 @@ void MainWindow::toggleFullscreen()
     }
 }
 
+void MainWindow::toggleVideoFullscreen()
+{
+    if (videoPane == 0) {
+        return;
+    }
+    if (!m_videoFullscreen) {
+        m_videoFullscreen = true;
+#ifdef QT3_BUILD
+        videoPane->reparent(0, QPoint(0, 0), false);
+#else
+        videoPane->setParent(0, Qt::Window);
+#endif
+        videoPane->showFullScreen();
+    } else {
+        m_videoFullscreen = false;
+#ifdef QT3_BUILD
+        videoPane->reparent(centerStack, QPoint(0, 0), false);
+        centerStack->addWidget(videoPane, 1);   /* 原 index:contentView=0,videoPane=1 */
+#else
+        videoPane->setParent(centerStack);
+        centerStack->insertWidget(1, videoPane);
+#endif
+        qStackSetCurrent(centerStack, videoPane);
+        videoPane->showNormal();
+    }
+}
+
 void MainWindow::showShortcutHelp()
 {
     QMessageBox::information(this, _("shortcut.title"), _("shortcut.help"));
@@ -2753,9 +2791,17 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e)
     const int k = ke->key();
 #if QT_VERSION >= 0x040000
     const bool shift = (ke->modifiers() & Qt::ShiftModifier) != 0;
+    const bool ctrl  = (ke->modifiers() & Qt::ControlModifier) != 0;
+    const bool alt   = (ke->modifiers() & Qt::AltModifier) != 0;
 #else
     const bool shift = (ke->state() & Qt::ShiftButton) != 0;
+    const bool ctrl  = (ke->state() & Qt::ControlButton) != 0;
+    const bool alt   = (ke->state() & Qt::AltButton) != 0;
 #endif
+    /* Ctrl/Alt 组合让给系统/浏览器(尤其 Ctrl+F),不吞掉 */
+    if (ctrl || alt) {
+        return QMainWindow::eventFilter(o, e);
+    }
     switch (k) {
     case Qt::Key_Space:
     case Qt::Key_K:
@@ -2783,9 +2829,19 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e)
         toggleMuteShortcut();
         return true;
     case Qt::Key_F:
+        if (m_fullscreen) { toggleFullscreen(); }   /* 应用全屏 → 视频全屏,状态互斥 */
+        toggleVideoFullscreen();
+        return true;
+    case Qt::Key_F11:
+        if (m_videoFullscreen) { toggleVideoFullscreen(); }
         toggleFullscreen();
         return true;
+    case Qt::Key_F12:
+        SharedStatusBar::instance()->showMessage(
+            _("shortcut.log_todo"), 2000);
+        return true;
     case Qt::Key_Escape:
+        if (m_videoFullscreen) { toggleVideoFullscreen(); return true; }
         if (m_fullscreen) { toggleFullscreen(); return true; }
         break;
     case Qt::Key_H:

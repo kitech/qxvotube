@@ -102,6 +102,7 @@
     "dark_label": "Dark mode",
     "proxy_label": "Enable proxy (overseas sites)",
     "proxyurl_label": "Proxy URL",
+    "novideo_label": "No-video playback mode (setting only)",
     "videoout_tab": "Video output",
     "videoout_label": "Output backend",
     "videoout_hint": "auto = no-GL first (xv→x11→sdl→raster→gl); takes effect on next start.",
@@ -153,6 +154,7 @@
 ,
   "shortcut": {
     "title": "Keyboard shortcuts",
-    "help": "Space / K: Play / pause\nLeft / Right: Seek -/+ 5s (Shift: 1s)\nJ / L: Seek -/+ 10s\nUp / Down: Volume +/-5%\nM: Toggle mute\nF: Toggle fullscreen (Esc to exit)\n0-9: Jump to 0%-90%\nHome / End: Start / end\nShift+, / Shift+.: Slower / faster (0.25 step)\nC: Cycle subtitle track\nH / F1 / ?: This help"
+    "help": "Space / K: Play / pause\nLeft / Right: Seek -/+ 5s (Shift: 1s)\nJ / L: Seek -/+ 10s\nUp / Down: Volume +/-5%\nM: Toggle mute\nF: Video fullscreen\nF11: Application fullscreen\nF12: Log/debug window (not implemented)\nEsc: Exit fullscreen\n0-9: Jump to 0%-90%\nHome / End: Start / end\nShift+, / Shift+.: Slower / faster (0.25 step)\nC: Cycle subtitle track\nH / F1 / ?: This help",
+    "log_todo": "Log/debug window not implemented"
   }
 }

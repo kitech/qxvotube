@@ -148,7 +148,8 @@ PlayerBar::PlayerBar(QWidget* parent)
       m_volume(100), m_lastVolume(100), m_rate(1.0), m_muted(false),
       m_repeatMode(0), m_shuffle(false), m_autoSkip(true),
       m_dlPct(0), m_dlVisible(false),
-      m_dlHideTimer(0), m_volumePopup(0), m_volumeSlider(0), m_muteCheck(0)
+      m_dlHideTimer(0), m_volumePopup(0), m_volumeSlider(0), m_muteCheck(0),
+      m_subtitleLine(qFromUtf8("无字幕资源"))
 {
     setMouseTracking(true);
     setFixedHeight(80);
@@ -240,13 +241,16 @@ QRect PlayerBar::repeatRect() const  { int cx = width() / 2; return QRect(cx + 1
 QRect PlayerBar::shuffleRect() const { int cx = width() / 2; return QRect(cx + 43, 19, 20, 20); }
 QRect PlayerBar::downloadRect() const{ int cx = width() / 2; return QRect(cx + 99, 19, 20, 20); }
 QRect PlayerBar::autoSkipRect() const{ int cx = width() / 2; return QRect(cx - 155, 19, 20, 20); }
-/* 底部单行字幕(进度条下方剩余空间) */
-QRect PlayerBar::subtitleLineRect() const { return QRect(14, 68, width() - 28, 12); }
+/* 单行字幕:右侧 EQ 按钮下方一行(夹在按钮行 y42 与进度条 y58 之间),
+ * 右对齐到 width-14;不再占底部整行。绘制/命中均走此矩形。 */
+QRect PlayerBar::subtitleLineRect() const { return QRect(width() - 174, 44, 160, 13); }
 
 void PlayerBar::setSubtitleLine(const QString& text)
 {
-    if (m_subtitleLine == text) return;
-    m_subtitleLine = text;
+    /* 空文本归一为占位提示:字幕行始终可见,点击仍可打开列表 */
+    const QString s = text.isEmpty() ? qFromUtf8("无字幕资源") : text;
+    if (m_subtitleLine == s) return;
+    m_subtitleLine = s;
     update();
 }
 
