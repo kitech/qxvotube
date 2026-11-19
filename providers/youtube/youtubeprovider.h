@@ -28,6 +28,7 @@ public:
     void resolve(const QString& id, ResolveCb cb) override;
     void resolveQuality(const QString& id, const QString& quality,
                         ResolveCb cb) override;
+    void subtitles(const QString& id, SubtitlesCb cb) override;
 
     void setProxy(const ProxyConfig& p) override { m_proxy = p; }
     void setCredentials(const QVariantMap& c) override { m_cred = c; }

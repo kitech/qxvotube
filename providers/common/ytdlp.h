@@ -32,12 +32,19 @@ struct Format {
     bool audioOnly() const { return vcodec == qFromUtf8("none"); }
 };
 
+// 字幕轨道元数据(仅 url/ext,内容由 provider 层下载解析)
+struct SubTrackInfo {
+    QString lang, name, ext, url;
+    bool automatic = false;
+};
+
 struct Info {
     bool ok = false;
     QString err;
     QString title;
     QString hlsMaster;   // HLS 多码率主播放列表(hls_variant),含音频
     QList36<Format> formats;
+    QList36<SubTrackInfo> subTracks;   // 字幕轨道(-J 已返回,未下载内容)
 };
 
 // 是否可用:显式 env 优先;否则探测 PATH 里是否有 yt-dlp

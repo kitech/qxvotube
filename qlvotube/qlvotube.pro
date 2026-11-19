@@ -29,7 +29,7 @@ SOURCES = src/main.cpp src/mainwindow.cpp src/appearance.cpp src/config.cpp \
           src/videothumbcache.cpp \
           src/videorendererfactory.cpp \
           src/videoinfodialog.cpp \
-          src/commentdialog.cpp \
+          src/commentdialog.cpp src/subtitledialog.cpp \
           ../qlappcom/eventpoller.cpp \
           ../vendor/stb/stb_image.c   # stb_image 实现体唯一来源
 
@@ -47,7 +47,7 @@ HEADERS = src/mainwindow.h src/appearance.h src/config.h src/globaluiutil.h \
           src/videothumbcache.h \
           src/videorendererfactory.h \
           src/videoinfodialog.h \
-          src/commentdialog.h \
+          src/commentdialog.h src/subtitledialog.h \
           ../qlappcom/eventpoller.h
 
 include(../qlcomp/qlite.pri)

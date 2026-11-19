@@ -33,6 +33,12 @@ public:
     void resolve(const QString& id, ResolveCb cb) override;
     void resolveQuality(const QString& id, const QString& quality,
                         ResolveCb cb) override;
+    // 字幕空壳:红果无公开字幕接口(硬字幕烧录在画面,需 ASR/OCR) → 显式不支持
+    void subtitles(const QString& id, SubtitlesCb cb) override {
+        Q_UNUSED(id);
+        cb(Result::fail(Err::Unsupported,
+            qFromUtf8("红果无公开字幕接口")), QList36<SubtitleTrack>());
+    }
 
     void setProxy(const ProxyConfig& p) override { m_proxy = p; }
     void setCredentials(const QVariantMap& c) override { m_cred = c; }

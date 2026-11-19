@@ -39,6 +39,12 @@ public:
     void resolve(const QString& id, ResolveCb cb) override;
     void resolveQuality(const QString& id, const QString& quality,
                         ResolveCb cb) override;
+    // 字幕空壳:小红书无公开字幕接口(硬字幕烧录在画面,需 ASR/OCR) → 显式不支持
+    void subtitles(const QString& id, SubtitlesCb cb) override {
+        Q_UNUSED(id);
+        cb(Result::fail(Err::Unsupported,
+            qFromUtf8("小红书无公开字幕接口")), QList36<SubtitleTrack>());
+    }
     void userVideos(const QString& uid, int page, SearchCb cb) override;
     void comments(const QString& id, const QString& cursor, CommentsCb cb) override;
 

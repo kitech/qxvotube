@@ -12,6 +12,7 @@
 #include "common/localstream/localstream.h"
 #include "common/autherror.h"
 
+#include <stdio.h>
 #include <functional>
 
 // InnerTube(游客口径,yt-dlp/pytubefix 同款):
@@ -795,6 +796,111 @@ void YoutubeProvider::resolveProgressive(const QString& id, const QString& quali
             }, p.visitorData, true);
         };
         ctx->go(1);
+    });
+}
+
+// ── 字幕(仅 YouTube 经 yt-dlp;2026-11-19) ──────────────────────
+// json3 逐句:{events:[{tStartMs,dDurationMs,segs:[{utf8}]}]}
+static QList36<qxv::SubtitleCue> parseSubJson3(const QByteArray& bytes)
+{
+    QList36<qxv::SubtitleCue> out;
+    JRoot root(bytes);
+    if (!root.ok()) return out;
+    cJSON* evs = jarr(root.p, "events");
+    for (int i = 0; i < jsize(evs); ++i) {
+        const cJSON* ev = jat(evs, i);
+        const qint64 st = jint(ev, "tStartMs"), dur = jint(ev, "dDurationMs");
+        QString text;
+        cJSON* segs = jarr(ev, "segs");
+        for (int j = 0; j < jsize(segs); ++j)
+            text += jstr(jat(segs, j), "utf8");
+        qxv::SubtitleCue c;
+        c.startMs = st; c.endMs = st + dur; c.text = text;
+        out.append(c);
+    }
+    return out;
+}
+
+// VTT 时间串 "HH:MM:SS.mmm"(或 SRT 逗号) → 毫秒;失败返回 -1
+static qint64 subTimeMs(const QString& s)
+{
+    const QByteArray b = qToUtf8(s);
+    long h = 0, m = 0, sec = 0, ms = 0;
+    if (sscanf(b.data(), "%ld:%ld:%ld.%ld", &h, &m, &sec, &ms) != 4 &&
+        sscanf(b.data(), "%ld:%ld:%ld,%ld", &h, &m, &sec, &ms) != 4)
+        return -1;
+    return (qint64)(((h * 60 + m) * 60 + sec) * 1000 + ms);
+}
+
+// WebVTT:"HH:MM:SS.mmm --> HH:MM:SS.mmm" 后跟文本
+static QList36<qxv::SubtitleCue> parseSubVtt(const QByteArray& bytes)
+{
+    QList36<qxv::SubtitleCue> out;
+    const QStringList lines = qStrSplit(
+        qFromUtf8(bytes.data(), (int)bytes.size()), qFromUtf8("\n"), false);
+    for (int i = 0; i < lines.size(); ++i) {
+        const int arrow = qIndexOf(lines[i], qFromUtf8("-->"));
+        if (arrow < 0) continue;
+        const qint64 a = subTimeMs(qTrim(lines[i].left(arrow)));
+        QString b = qTrim(lines[i].mid(arrow + 3));
+        const int sp = qIndexOf(b, qFromUtf8(" "));   // 去掉行内位置参数
+        if (sp >= 0) b = b.left(sp);
+        const qint64 e = subTimeMs(b);
+        if (a < 0 || e < 0) continue;
+        qxv::SubtitleCue c;
+        c.startMs = a; c.endMs = e;
+        if (i + 1 < lines.size() && !qTrim(lines[i + 1]).isEmpty())
+            c.text = qTrim(lines[++i]);
+        if (!c.text.isEmpty()) out.append(c);
+    }
+    return out;
+}
+
+void YoutubeProvider::subtitles(const QString& id, SubtitlesCb cb)
+{
+    const QString url = qFromUtf8("https://www.youtube.com/watch?v=%1").arg(id);
+    const QString proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
+    ytdlp::fetch(url, proxy, [this, proxy, cb](const ytdlp::Info& info) {
+        if (!info.ok || info.subTracks.isEmpty()) {
+            cb(Result::fail(Err::Unsupported,
+                info.ok ? qFromUtf8("youtube: 该视频无字幕轨") : info.err),
+               QList36<qxv::SubtitleTrack>());
+            return;
+        }
+        // 轨道优先级:人工中文 > 人工英文 > 自动中文 > 自动英文 > 第一条
+        const ytdlp::SubTrackInfo* pick = 0;
+        for (int pass = 0; pass < 5 && !pick; ++pass) {
+            for (int i = 0; i < info.subTracks.size(); ++i) {
+                const ytdlp::SubTrackInfo& t = info.subTracks[i];
+                const bool zh = t.lang.startsWith(qFromUtf8("zh"));
+                const bool en = t.lang.startsWith(qFromUtf8("en"));
+                if ((pass == 0 && !t.automatic && zh) ||
+                    (pass == 1 && !t.automatic && en) ||
+                    (pass == 2 &&  t.automatic && zh) ||
+                    (pass == 3 &&  t.automatic && en) ||
+                    (pass == 4)) { pick = &t; break; }
+            }
+        }
+        const ytdlp::SubTrackInfo chosen = *pick;   // 值拷贝:回调内 info 已析构
+        NetRequest req;
+        req.url = chosen.url; req.proxy = proxy; req.timeoutSec = 25;
+        req.autoCookie = false; req.maxAttempts = 2;
+        if (!m_jarInit) { m_net.setCookieJar(&m_jar); m_jarInit = true; }
+        m_net.send(req, [cb, chosen](const NetResponse& r) {
+            if (!r.ok() || r.body.isEmpty()) {
+                cb(Result::fail(Err::Network,
+                    qFromUtf8("youtube: 字幕下载失败 status=%1").arg(r.status)),
+                   QList36<qxv::SubtitleTrack>());
+                return;
+            }
+            qxv::SubtitleTrack t;
+            t.lang = chosen.lang; t.name = chosen.name;
+            t.automatic = chosen.automatic;
+            t.cues = chosen.ext == qFromUtf8("json3")
+                   ? parseSubJson3(r.body) : parseSubVtt(r.body);
+            QList36<qxv::SubtitleTrack> out; out.append(t);
+            cb(Result::ok(), out);
+        });
     });
 }
 } // namespace qxv

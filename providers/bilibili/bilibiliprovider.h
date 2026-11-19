@@ -25,6 +25,12 @@ public:
     void resolve(const QString& id, ResolveCb cb) override;
     void resolveQuality(const QString& id, const QString& quality,
                         ResolveCb cb) override;
+    // 字幕空壳:B站字幕需登录态(游客 /x/player/v2 subtitles=[]),本项目免登录主线 → 显式不支持
+    void subtitles(const QString& id, SubtitlesCb cb) override {
+        Q_UNUSED(id);
+        cb(Result::fail(Err::Unsupported,
+            qFromUtf8("B站字幕需登录态,游客态不支持")), QList36<SubtitleTrack>());
+    }
 
     void setProxy(const ProxyConfig& p) override { m_proxy = p; }
     void setCredentials(const QVariantMap& c) override { m_cred = c; }

@@ -47,6 +47,30 @@ static void parseJson(const QByteArray& out, Info* r) {
     JRoot root(out);
     if (!root.ok()) { r->err = qFromUtf8("yt-dlp JSON 解析失败"); return; }
     r->title = jstr(root.p, "title");
+    // 字幕轨道:subtitles=人工, automatic_captions=自动;优先 json3,其次 vtt/srv3
+    const char* maps[2] = { "subtitles", "automatic_captions" };
+    for (int m = 0; m < 2; ++m) {
+        cJSON* obj = jobj(root.p, maps[m]);
+        for (cJSON* it = obj ? obj->child : 0; it; it = it->next) {
+            if (!cJSON_IsArray(it)) continue;
+            QString url, ext, name;
+            for (int i = 0; i < jsize(it); ++i) {
+                const cJSON* f = jat(it, i);
+                const QString e = jstr(f, "ext");
+                if (e == qFromUtf8("json3")) { url = jstr(f, "url"); ext = e;
+                    name = jstr(f, "name"); break; }
+                if (url.isEmpty() && (e == qFromUtf8("vtt") || e == qFromUtf8("srv3"))) {
+                    url = jstr(f, "url"); ext = e; name = jstr(f, "name");
+                }
+            }
+            if (url.isEmpty()) continue;
+            SubTrackInfo t;
+            t.lang = qFromUtf8(it->string ? it->string : "");
+            t.name = name; t.ext = ext; t.url = url;
+            t.automatic = (m == 1);
+            r->subTracks.append(t);
+        }
+    }
     cJSON* formats = jarr(root.p, "formats");
     for (int i = 0; i < jsize(formats); ++i) {
         const cJSON* f = jat(formats, i);

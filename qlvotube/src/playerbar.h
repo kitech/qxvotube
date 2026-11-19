@@ -26,6 +26,8 @@ public:
     void setAutoSkip(bool on);           /* 播放失败自动跳过 */
     /* 下载进度 pie:0-100 / -1 未定 / -2 失败 / 100 完成(短暂留痕后隐) */
     void setDownloadState(int pct);
+    /* 底部单行字幕(YouTube via yt-dlp);空串=不显示 */
+    void setSubtitleLine(const QString& text);
     void retranslateUi();
     void toggleVolumePopup();
     void onPopupVolume(int v);           /* 自绘滑条 → volumeChanged */
@@ -43,6 +45,7 @@ signals:
     void eqRequested();
     void shotRequested();
     void subtitleRequested();   /* M5-A3:字幕轨循环 */
+    void subtitleListRequested(); /* 点击底部字幕行 → 打开字幕列表 */
     void repeatClicked();
     void shuffleClicked();
     void autoSkipClicked();
@@ -62,7 +65,7 @@ private slots:
 private:
     enum Hit { HitNone, HitPrev, HitPlay, HitNext, HitProgress,
                HitVol, HitRate, HitEq, HitShot, HitSub, HitDownload,
-               HitRepeat, HitShuffle, HitAutoSkip };
+               HitRepeat, HitShuffle, HitAutoSkip, HitSubLine };
     void setProgressFromX(int x);
     QRect playRect() const;
     QRect prevRect() const;
@@ -76,6 +79,7 @@ private:
     QRect repeatRect() const;
     QRect shuffleRect() const;
     QRect autoSkipRect() const;
+    QRect subtitleLineRect() const;
     QRect downloadRect() const;
 
     Track m_track;
@@ -94,6 +98,7 @@ private:
     bool m_autoSkip;
     int m_dlPct;                         /* -1 未定 / 0-100 / -2 失败 */
     bool m_dlVisible;
+    QString m_subtitleLine;              /* 底部当前字幕行(空=不显示) */
     void* m_dlHideTimer;                 /* QTimer* */
     void* m_volumePopup;                 /* VolumePopupFrame* */
     void* m_volumeSlider;                /* VolumePanelSlider* */

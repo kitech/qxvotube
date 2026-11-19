@@ -40,7 +40,8 @@
 #include "renderer_gl.h"     /* M5-A:ffmpeg 路 GL 渲染器 */
 #include "videorendererfactory.h"   /* M6:输出后端可配置(cxvideo-vo.md) */
 #include "videoinfodialog.h"        /* M7:视频详情弹窗 */
-#include "commentdialog.h"          /* 评论窗口 */
+#include "commentdialog.h"
+#include "subtitledialog.h"          /* 字幕列表窗口 */
 #include <qclipboard.h>
 #include "appearance.h"
 #include <qlabel.h>
@@ -166,6 +167,8 @@ MainWindow::MainWindow(QWidget* parent)
     , m_curProv(0)
     , m_commentDlg(0)
     , m_commentProv(0)
+    , m_subDlg(0)
+    , m_subCueIdx(-1)
     , m_gridPage(1)
     , m_gridHasMore(false)
     , m_gridLoading(false)
@@ -408,6 +411,8 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onTakeScreenshot()));
         QObject::connect(playerBar, SIGNAL(subtitleRequested()),
                          this, SLOT(onCycleSubtitle()));
+        QObject::connect(playerBar, SIGNAL(subtitleListRequested()),
+                         this, SLOT(openSubtitleList()));
     }
 
     /* 播放引擎接线(掌面延迟:首次选曲时真正 setEngine) */
@@ -1421,6 +1426,8 @@ void MainWindow::playVideoAt(int index)
     const QString id = m_videoIds[index];
     if (queuePanel) queuePanel->setCurrentTrack(m_videoQueue[index]);
     if (playerBar) playerBar->setTrack(m_videoQueue[index]);
+    /* 字幕:播放时自动拉(仅 YouTube;其它源空壳显式 Unsupported) */
+    requestSubtitles(id);
     if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
         qDebug() << "video activated" << id << "idx" << index;
@@ -1812,6 +1819,43 @@ void MainWindow::onCommentLoadMore() {
     requestComments(m_commentCursor);
 }
 
+/* 字幕:播放时自动拉(仅 YouTube 经 yt-dlp;其它源空壳返回 Unsupported)。
+ * 失败/无字幕静默:底部行清空,不弹错、不造假。 */
+void MainWindow::requestSubtitles(const QString& id)
+{
+    if (m_curProv == 0) return;
+    m_subtitleId = id;                 /* 代际:id 变则旧结果丢弃 */
+    m_subtitleTracks.clear();
+    m_subCueIdx = -1;
+    if (playerBar) playerBar->setSubtitleLine(QString());
+    qxv::VideoProvider* p = m_curProv;
+    p->subtitles(id, [this, id](const qxv::Result& r,
+                               const QList36<qxv::SubtitleTrack>& tracks) {
+        SubtitleUiEvent* ev = new SubtitleUiEvent;
+        ev->result = r;
+        ev->tracks = tracks;
+        ev->id = id;
+        QApplication::postEvent(this, ev);
+    });
+}
+
+/* 点击底部字幕行 → 打开字幕列表 */
+void MainWindow::openSubtitleList()
+{
+    if (m_subtitleTracks.isEmpty()) {
+        SharedStatusBar::instance()->showMessage(
+            qFromUtf8("当前视频无字幕"), 2500);
+        return;
+    }
+    if (m_subDlg == 0) m_subDlg = new SubtitleDialog(this);
+    const qxv::SubtitleTrack& t = m_subtitleTracks[0];
+    const QString name = t.name.isEmpty() ? t.lang : t.name;
+    m_subDlg->setTitle(name.isEmpty() ? QString() : name);
+    m_subDlg->setCues(t.cues, m_subCueIdx);
+    m_subDlg->show();
+    m_subDlg->raise();
+}
+
 /* 播放器右键:视频详情 / 复制直链 / 浏览器打开 */
 void MainWindow::onPlayerContextMenu(const QPoint& globalPos)
 {
@@ -2049,6 +2093,26 @@ void MainWindow::onPlayerPosition(long ms)
         }
     }
     if (playerBar) playerBar->setProgress((int)ms);
+    /* 底部单行字幕:按播放进度找当前 cue;无则在 cue 间留白 */
+    if (!m_subtitleTracks.isEmpty()) {
+        const QList36<qxv::SubtitleCue>& cues = m_subtitleTracks[0].cues;
+        int idx = m_subCueIdx;
+        if (idx < 0 || idx >= cues.size()
+            || ms < cues[idx].startMs || ms >= cues[idx].endMs) {
+            idx = -1;
+            for (int i = 0; i < cues.size(); ++i) {
+                if (ms >= cues[i].startMs && ms < cues[i].endMs) { idx = i; break; }
+                if (cues[i].startMs > ms) break;   /* 有序,提前退 */
+            }
+        }
+        if (idx != m_subCueIdx) {
+            m_subCueIdx = idx;
+            if (playerBar)
+                playerBar->setSubtitleLine(idx >= 0 ? cues[idx].text : QString());
+            if (m_subDlg != 0 && m_subDlg->isVisible())
+                m_subDlg->setCues(cues, idx);
+        }
+    }
 }
 
 void MainWindow::onPlayerDuration(long ms)
@@ -2369,6 +2433,20 @@ void MainWindow::dropEvent(QDropEvent* e)
 
 void MainWindow::customEvent(CustomEventBase* event)
 {
+    if (event->type() == SubtitleUiEventType) {
+        SubtitleUiEvent* e = static_cast<SubtitleUiEvent*>(event);
+        if (e->id != m_subtitleId) return;   /* 切视频后旧回调,丢弃 */
+        if (e->result.code == qxv::Err::Ok && !e->tracks.isEmpty()) {
+            m_subtitleTracks = e->tracks;
+            m_subCueIdx = -1;
+        } else {
+            /* 无字幕/失败:静默清空,不显示假数据 */
+            m_subtitleTracks.clear();
+            m_subCueIdx = -1;
+            if (playerBar) playerBar->setSubtitleLine(QString());
+        }
+        return;
+    }
     if (event->type() == CommentUiEventType) {
         CommentUiEvent* e = static_cast<CommentUiEvent*>(event);
         if (m_commentDlg != 0) {

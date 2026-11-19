@@ -240,6 +240,28 @@ QRect PlayerBar::repeatRect() const  { int cx = width() / 2; return QRect(cx + 1
 QRect PlayerBar::shuffleRect() const { int cx = width() / 2; return QRect(cx + 43, 19, 20, 20); }
 QRect PlayerBar::downloadRect() const{ int cx = width() / 2; return QRect(cx + 99, 19, 20, 20); }
 QRect PlayerBar::autoSkipRect() const{ int cx = width() / 2; return QRect(cx - 155, 19, 20, 20); }
+/* 底部单行字幕(进度条下方剩余空间) */
+QRect PlayerBar::subtitleLineRect() const { return QRect(14, 68, width() - 28, 12); }
+
+void PlayerBar::setSubtitleLine(const QString& text)
+{
+    if (m_subtitleLine == text) return;
+    m_subtitleLine = text;
+    update();
+}
+
+/* 单行截断(Qt3 无 QFontMetrics::elidedText,按宽度逐字裁) */
+static QString pbElideOneLine(QPainter& p, const QString& text, int maxW)
+{
+    if (text.isEmpty()) return text;
+    const QFontMetrics fm = p.fontMetrics();
+    if (qFontWidth(fm, text) <= maxW) return text;
+    const QString dots = qFromUtf8("…");
+    QString t = text;
+    while (!t.isEmpty() && qFontWidth(fm, t + dots) > maxW)
+        t.remove(t.length() - 1, 1);
+    return t + dots;
+}
 
 void PlayerBar::setProgressFromX(int x)
 {
@@ -447,6 +469,15 @@ void PlayerBar::paintEvent(QPaintEvent*)
     p.drawText(eqRect(), Qt::AlignCenter, "EQ");
     p.setPen(m_hover == HitShot ? pal.accent : pal.textMuted);
     p.drawText(shotRect(), Qt::AlignCenter, qFromUtf8("图"));
+
+    /* 底部单行字幕:点击打开字幕列表 */
+    if (!m_subtitleLine.isEmpty()) {
+        const QRect sr = subtitleLineRect();
+        p.setFont(small);
+        p.setPen(m_hover == HitSubLine ? pal.accent : pal.textMuted);
+        p.drawText(sr, Qt::AlignVCenter | Qt::AlignLeft,
+                   pbElideOneLine(p, m_subtitleLine, sr.width()));
+    }
 }
 
 void PlayerBar::mousePressEvent(QMouseEvent* e)
@@ -456,7 +487,9 @@ void PlayerBar::mousePressEvent(QMouseEvent* e)
                 width(), e->pos().x(), e->pos().y(),
                 volRect().x(), volRect().y(), rateRect().x(), rateRect().y(),
                 eqRect().x(), eqRect().y(), shotRect().x(), shotRect().y());
-    if (playRect().contains(e->pos())) {
+    if (!m_subtitleLine.isEmpty() && subtitleLineRect().contains(e->pos())) {
+        emit subtitleListRequested();
+    } else if (playRect().contains(e->pos())) {
         emit playPauseRequested();
     } else if (prevRect().contains(e->pos())) {
         emit prevRequested();
@@ -497,7 +530,8 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
         return;
     }
     Hit h = HitNone;
-    if (playRect().contains(e->pos())) h = HitPlay;
+    if (!m_subtitleLine.isEmpty() && subtitleLineRect().contains(e->pos())) h = HitSubLine;
+    else if (playRect().contains(e->pos())) h = HitPlay;
     else if (prevRect().contains(e->pos())) h = HitPrev;
     else if (nextRect().contains(e->pos())) h = HitNext;
     else if (progressRect().contains(e->pos())) h = HitProgress;

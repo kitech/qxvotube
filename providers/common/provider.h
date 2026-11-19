@@ -108,6 +108,14 @@ public:
         Q_UNUSED(id); Q_UNUSED(cursor);
         cb(Result::fail(Err::Unsupported, "comments not implemented"), {}, QString());
     }
+    // ── 字幕(缺省 Unsupported,失败显式 Err,不静默造假) ──
+    // 仅 YouTube 经 yt-dlp 实现。B站字幕需登录态(游客 /x/player/v2 subtitles=[]);
+    // 抖音/小红书/红果无公开字幕接口(烧录硬字幕需 ASR/OCR)。
+    virtual void subtitles(const QString& id, SubtitlesCb cb) {
+        Q_UNUSED(id);
+        cb(Result::fail(Err::Unsupported, "subtitles not implemented"),
+           QList36<SubtitleTrack>());
+    }
     virtual void userVideos(const QString& uid, int page, SearchCb cb) {
         Q_UNUSED(uid); Q_UNUSED(page);
         cb(Result::fail(Err::Unsupported, "userVideos not implemented"), {}, false);

@@ -51,6 +51,18 @@ struct CommentItem {
     qint64 replyCount = 0;  /* 该条评论的回复数(B站 rcount,API 直接给出,不递归计算) */
 };
 
+// 字幕:逐句时间轴(YouTube via yt-dlp;毫秒)。0 条=该视频无字幕,UI 不显示。
+struct SubtitleCue {
+    qint64 startMs = 0, endMs = 0;
+    QString text;
+};
+// 一条轨道:lang 语言码,name 显示名,automatic 是否自动字幕
+struct SubtitleTrack {
+    QString lang, name;
+    bool automatic = false;
+    QList36<SubtitleCue> cues;
+};
+
 // 错误分类(透传规则:中间层只附加 detail,不得覆盖底层 code)
 enum class Err {
     Ok = 0,
@@ -91,6 +103,7 @@ using DetailCb   = std::function<void(Result, const VideoItem&, const QList36<Vi
 using ResolveCb  = std::function<void(Result, const PlayResult&)>;
 using CommentsCb = std::function<void(Result, const QList36<CommentItem>&,
                                       const QString& nextCursor)>;
+using SubtitlesCb = std::function<void(Result, const QList36<SubtitleTrack>&)>;
 using ActionCb   = std::function<void(Result)>;
 
 } // namespace qxv

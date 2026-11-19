@@ -30,6 +30,7 @@ class CXRendererGl;
 class VideoPane;
 class CXVideoEqDialog;
 class CommentDialog;
+class SubtitleDialog;
 class QSplitter;
 
 class MainWindow : public QMainWindow {
@@ -85,6 +86,9 @@ private slots:
     void openComments(const QString& id);
     void requestComments(const QString& cursor);
     void onCommentLoadMore();
+    /* 字幕(YouTube via yt-dlp;播放时自动拉,底部一行 + 点击打开列表) */
+    void requestSubtitles(const QString& id);
+    void openSubtitleList();
     void onPlayerContextMenu(const QPoint& globalPos);                    /* M7 */
     void applyVideoInfo();                                                /* M7 */
     void onGridLoadMore();
@@ -229,6 +233,11 @@ private:
     qxv::VideoProvider* m_commentProv;    /* 评论请求所用源 */
     QString m_commentId;
     QString m_commentCursor;              /* 下一页游标(空=无更多) */
+    /* 字幕状态 */
+    SubtitleDialog* m_subDlg;             /* 懒创建 */
+    QList36<qxv::SubtitleTrack> m_subtitleTracks;
+    QString m_subtitleId;                 /* 当前字幕对应视频 id(防串台) */
+    int m_subCueIdx;                      /* 当前高亮 cue(-1=无) */
     int m_gridPage;
     bool m_gridHasMore;
     bool m_gridLoading;

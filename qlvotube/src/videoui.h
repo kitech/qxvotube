@@ -58,4 +58,16 @@ public:
     bool hasMore;
 };
 
+// 字幕异步结果(YouTube yt-dlp 回调 → GUI)
+const EventType34 SubtitleUiEventType = toEventType34(QEvent::User + 122);
+class SubtitleUiEvent : public CustomEventBase {
+public:
+    SubtitleUiEvent() : CustomEventBase(SubtitleUiEventType), gen(0) {}
+    qxv::Result result;
+    QList36<qxv::SubtitleTrack> tracks;
+    QString id;
+    QString title;       /* 视频标题(窗口抬头) */
+    int gen;             /* 与 m_gridGen 不符即丢弃(切源串台) */
+};
+
 #endif // VIDEOUI_H
