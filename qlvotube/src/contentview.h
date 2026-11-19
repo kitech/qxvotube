@@ -44,6 +44,7 @@ public:
     explicit ContentView(QWidget* parent = 0);
     void setLibrary(const std::vector<Playlist>& lib);
     void retranslateUi();
+    bool isVideoGridMode() const;   // 供 MainWindow 刷新时分流
 
     /* PlaylistListMode：远端歌单列表（热门歌单/分类列表） */
     void showPlaylistList(const QString& title, const std::vector<RemotePlaylistCard>& cards,
@@ -73,6 +74,7 @@ signals:
     void playlistActivated(qint64 remotePlaylistId);
     void categoryActivated(const QString& cat);
     void loadMoreRequested();
+    void refreshRequested();
     void backRequested();
     void videoActivated(const QString& id);
     void videoContextMenu(const QString& id, const QPoint& globalPos);  /* M7 */
@@ -103,6 +105,7 @@ private:
     int totalHeight() const;
     QRect playAllRect() const;
     QRect backRect() const;
+    QRect refreshRect() const;
     QRect loadMoreRect() const;
     QRect retryRect() const;
     QRect cardRect(int i) const;
@@ -132,6 +135,7 @@ private:
     QString m_playAll;
     QString m_listTitle;
     QString m_back;
+    QString m_refresh;
     QString m_loadMore;
     QString m_loading;
     bool m_hasMore;

@@ -97,6 +97,7 @@ void ContentView::retranslateUi()
 {
     m_playAll = _("content.playall");
     m_back = _("content.back");
+    m_refresh = qFromUtf8("刷新");   // 不依赖翻译资源,与"评"等文案同口径
     m_loadMore = _("content.load_more");
     m_loading = _("content.loading");
     update();
@@ -351,6 +352,13 @@ QRect ContentView::backRect() const
     return QRect(width() - 92, 34, 72, 24);
 }
 
+QRect ContentView::refreshRect() const
+{
+    return QRect(width() - 164, 34, 64, 24);   // 返回按钮左侧
+}
+
+bool ContentView::isVideoGridMode() const { return m_mode == VideoGridMode; }
+
 QRect ContentView::loadMoreRect() const
 {
     if (m_mode == VideoGridMode) {
@@ -560,7 +568,7 @@ void ContentView::paintEvent(QPaintEvent*)
         QString title = m_pl ? m_pl->name : QString();
         p.setFont(titleFont);
         p.setPen(pal.textPrimary);
-        p.drawText(QRect(20, 4, width() - 40, 30), Qt::AlignVCenter | Qt::AlignLeft, title);
+        p.drawText(QRect(20, 4, width() - 180, 30), Qt::AlignVCenter | Qt::AlignLeft, title);
 
         QRect pa = playAllRect();
         p.setPen(Qt::NoPen);
@@ -573,7 +581,7 @@ void ContentView::paintEvent(QPaintEvent*)
         /* List/Grid 模式：标题 + 返回按钮 */
         p.setFont(titleFont);
         p.setPen(pal.textPrimary);
-        p.drawText(QRect(20, 4, width() - 200, 30), Qt::AlignVCenter | Qt::AlignLeft, m_listTitle);
+        p.drawText(QRect(20, 4, width() - 260, 30), Qt::AlignVCenter | Qt::AlignLeft, m_listTitle);
 
         QRect br = backRect();
         p.setPen(Qt::NoPen);
@@ -582,6 +590,17 @@ void ContentView::paintEvent(QPaintEvent*)
         p.setPen(pal.textPrimary);
         p.setFont(small);
         p.drawText(br, Qt::AlignCenter, QString::fromUtf8("← ") + m_back);
+    }
+
+    /* 所有列表模式右上角:刷新按钮(在返回按钮左侧,两种模式通用) */
+    {
+        QRect rf = refreshRect();
+        p.setPen(Qt::NoPen);
+        p.setBrush(pal.hoverBg);
+        muiDrawRoundRect(p, rf, rf.height() / 2, rf.height() / 2);
+        p.setPen(pal.textPrimary);
+        p.setFont(small);
+        p.drawText(rf, Qt::AlignCenter, m_refresh);
     }
 
     p.setPen(pal.border);
@@ -834,6 +853,10 @@ void ContentView::mousePressEvent(QMouseEvent* e)
         return;
     if (m_mode == PlaylistListMode || m_mode == CategoryGridMode
         || m_mode == VideoGridMode) {
+        if (refreshRect().contains(e->pos())) {
+            emit refreshRequested();
+            return;
+        }
         if (backRect().contains(e->pos())) {
             emit backRequested();
             return;
@@ -889,6 +912,10 @@ void ContentView::mousePressEvent(QMouseEvent* e)
     }
 
     /* TracksMode */
+    if (refreshRect().contains(e->pos())) {
+        emit refreshRequested();
+        return;
+    }
     if (playAllRect().contains(e->pos())) {
         if (m_pl && !m_pl->tracks.empty()) {
             m_current = 0;

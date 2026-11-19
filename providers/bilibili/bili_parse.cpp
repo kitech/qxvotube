@@ -71,6 +71,9 @@ QList36<VideoItem> searchResult(cJSON* root) {
             vi.author = jstr(it, "author");
             vi.uid    = QString::number(jint(it, "mid"));
             vi.cover  = picUrl(jstr(it, "pic"));
+            // M7:搜索接口自带 pubdate(秒);分类页二级分区走搜索兜底也经此路
+            // 0=该源未提供,UI 按未知隐藏,不自造日期
+            vi.publishMs = (qint64)jint(it, "pubdate") * 1000;
             // duration:搜索接口是字符串(需解析),列表接口是数字秒(兼容)
             vi.durationMs = jint(it, "duration") * 1000;
             if (vi.durationMs <= 0) {

@@ -93,6 +93,7 @@ private slots:
     void applyVideoInfo();                                                /* M7 */
     void onGridLoadMore();
     void onSearchSubmitted(const QString& kw);
+    void onListRefresh();        // 列表右上角刷新按钮
     void onPlayPause();
     void onPrev();
     void onNext();
@@ -161,6 +162,7 @@ private:
     QString m_skipGuardId;
     class Downloader* m_dl = nullptr;
     void* m_bufTimer = nullptr;  // QTimer*:250ms 独立刷新缓冲进度
+    bool m_playFinished = false; // 当前项自然播完且未被自动切歌覆盖
 
     struct MenuItemRef {
         const char* key;
@@ -190,6 +192,7 @@ private:
     void setupVideoProviders();
     void loadVideoPage(int page);
     void playVideoAt(int index);
+    void replayCurrent();        // 按当前模式重播视频/argv/曲目(从头)
     void enterVideoMode(int index);      /* 网格 → 播放队列 */
     void showVideoError(const QString& where, const QString& serverMsg,
                         qxv::Err code);

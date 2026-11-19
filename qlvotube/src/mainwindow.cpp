@@ -543,6 +543,8 @@ void MainWindow::buildCentralWidget()
                      this, SLOT(openComments(const QString&)));
     QObject::connect(contentView, SIGNAL(loadMoreRequested()),
                      this, SLOT(onGridLoadMore()));
+    QObject::connect(contentView, SIGNAL(refreshRequested()),
+                     this, SLOT(onListRefresh()));
     QObject::connect(sideNav, SIGNAL(searchSubmitted(const QString&)),
                      this, SLOT(onSearchSubmitted(const QString&)));
 
@@ -1861,6 +1863,11 @@ void MainWindow::onPlayPause()
         m_player->pause();
     else if (m_player->state() == CxPaused)
         m_player->play();
+    else if (m_playFinished) {
+        /* 自然播完停在末帧:从头重播当前项,不再是空按无反应 */
+        m_playFinished = false;
+        replayCurrent();
+    }
     else if (m_curPlaylistId >= 0 && m_curTrackIndex >= 0) {
         /* 空闲状态点 Play:从选中曲目起播 */
         const Playlist* pl = findPlaylist(m_library, m_curPlaylistId);
@@ -1872,6 +1879,7 @@ void MainWindow::onPlayPause()
 /* ── 播放引擎回执(cxvideo M1)── */
 void MainWindow::onPlayerStarted()
 {
+    m_playFinished = false;   /* 新一段播放开始,清掉播完标记 */
     if (playerBar) playerBar->setPlaying(true);
     if (m_bufTimer != 0 && !((QTimer*)m_bufTimer)->isActive())
         ((QTimer*)m_bufTimer)->start(250);   // Qt3/Qt4 同签名
@@ -2297,6 +2305,7 @@ void MainWindow::onDownloadCurrent()
 
 void MainWindow::onPlayerFinished()
 {
+    m_playFinished = true;    /* 记录自然播完,供 onPlayPause 从头重播 */
     if (playerBar) playerBar->setPlaying(false);
     if (m_bufTimer != 0) ((QTimer*)m_bufTimer)->stop();
     if (playerBar) playerBar->setBufferedMs(0);
@@ -2308,6 +2317,38 @@ void MainWindow::onRefreshBuffered()
     if (playerBar == 0)
         return;
     playerBar->setBufferedMs(m_player != 0 ? m_player->bufferedMs() : 0);
+}
+
+void MainWindow::onListRefresh()
+{
+    if (contentView == 0)
+        return;
+    if (contentView->isVideoGridMode()) {
+        if (m_curProv == 0) return;
+        m_curProv->cancel();
+        m_gridPage = 1;
+        m_gridLoading = false;
+        ++m_gridGen;                      /* 作废旧在途响应 */
+        contentView->setVideoGridLoading(true);
+        loadVideoPage(1);                 /* 保留当前分类/搜索词,重拉首页 */
+    } else if (m_curProv != 0) {
+        onSiteChanged(m_curProv->id());   /* 歌单/分类宫格:重载当前站点 */
+    } else {
+        contentView->setLibrary(m_library); /* 本地库:重读 */
+    }
+}
+
+void MainWindow::replayCurrent()
+{
+    if (m_videoMode && !m_videoIds.empty() && m_videoIdx >= 0
+        && m_videoIdx < (int)m_videoIds.size()) {
+        playVideoAt(m_videoIdx);
+    } else if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0
+               && m_argvIdx >= 0 && m_argvIdx < (int)m_argvUrls.size()) {
+        playArgvAt(m_argvIdx);
+    } else if (m_curPlaylistId >= 0 && m_curTrackIndex >= 0) {
+        showTrackStub(m_curPlaylistId, m_curTrackIndex);
+    }
 }
 
 void MainWindow::onPlayerPosition(long ms)
@@ -3002,7 +3043,11 @@ void MainWindow::showShortcutHelp()
 
 bool MainWindow::eventFilter(QObject* o, QEvent* e)
 {
-    if (e->type() != QEvent::KeyPress || !isActiveWindow())
+    if (e->type() != QEvent::KeyPress)
+        return QMainWindow::eventFilter(o, e);
+    /* 视频全屏时 videoPane 提升为独立顶层窗,MainWindow 非 active;
+     * 此时仍要收 F/ESC 才能退出全屏、恢复原布局 */
+    if (!isActiveWindow() && !m_videoFullscreen)
         return QMainWindow::eventFilter(o, e);
     if (shortcutsDisabledByFocus())
         return QMainWindow::eventFilter(o, e);
