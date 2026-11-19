@@ -25,6 +25,37 @@ static QString picUrl(const QString& u) {
     return u;
 }
 
+// 搜索接口 duration 是 "M:SS"/"H:MM:SS" 字符串(如 "3:36"),而列表接口是数字秒。
+// 这里按冒号逐段累计成毫秒;空/非法返回 0(UI 侧按 0 隐藏时长,不自造数据)。
+// 用跨版本 qIndexOf/mid/toInt,不用 Qt4+ 才有的 QString::split。
+static qint64 durationTextMs(const QString& s) {
+    if (s.isEmpty()) {
+        return 0;
+    }
+    const QString sep = qFromUtf8(":");
+    qint64 secs = 0;
+    int from = 0;
+    while (true) {
+        const int colon = qIndexOf(s, sep, from);
+        if (colon < 0) {
+            break;
+        }
+        bool ok = false;
+        const int v = s.mid(from, colon - from).toInt(&ok);
+        if (!ok || v < 0) {
+            return 0;
+        }
+        secs = secs * 60 + v; // 每段统一 ×60 进位:分→秒→时
+        from = colon + 1;
+    }
+    bool ok = false;
+    const int last = s.mid(from).toInt(&ok);
+    if (!ok || last < 0) {
+        return 0;
+    }
+    return (secs * 60 + last) * 1000;
+}
+
 QList36<VideoItem> searchResult(cJSON* root) {
     QList36<VideoItem> out;
     cJSON* results = jarr(jobj(root, "data"), "result");
@@ -40,7 +71,16 @@ QList36<VideoItem> searchResult(cJSON* root) {
             vi.author = jstr(it, "author");
             vi.uid    = QString::number(jint(it, "mid"));
             vi.cover  = picUrl(jstr(it, "pic"));
+            // duration:搜索接口是字符串(需解析),列表接口是数字秒(兼容)
             vi.durationMs = jint(it, "duration") * 1000;
+            if (vi.durationMs <= 0) {
+                vi.durationMs = durationTextMs(jstr(it, "duration"));
+            }
+            // 搜索接口统计字段:play=播放数, review=评论数(非 stat 子对象)
+            vi.stats.viewCount = jint(it, "play");
+            vi.stats.replyCount = jint(it, "review");
+            vi.extra.insert(qFromUtf8("view"),
+                            (long long)vi.stats.viewCount); // UI 优先读 extra["view"]
             if (!vi.id.isEmpty()) out.append(vi);
         }
     }
