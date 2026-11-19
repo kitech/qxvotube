@@ -9,6 +9,12 @@
 #include <qevent.h>
 #include <qdatetime.h>
 #include <qfontmetrics.h>
+#ifdef QT3_BUILD
+#include <qpointarray.h>
+typedef QPointArray MuiPolygon;
+#else
+typedef QPolygon MuiPolygon;
+#endif
 #if QT_VERSION >= 0x040000
 #include <QDebug>
 #endif
@@ -62,6 +68,20 @@ static void drawStatBadge(QPainter& p, const QRect& r, const QString& text)
     p.setPen(QColor(255, 255, 255));
     p.drawText(r, Qt::AlignVCenter | Qt::AlignLeft,
                elideOneLine(p, text, r.width() - 8));
+}
+
+/* 当前播放标识:向右实心三角(自绘,不依赖 ▶ 字形/字体行高,Qt3/Qt4 一致) */
+static void drawPlayTriangle(QPainter& p, const QRect& r, const QColor& c)
+{
+    MuiPolygon tri(3);
+    tri.setPoint(0, r.left(), r.top());
+    tri.setPoint(1, r.left(), r.bottom());
+    tri.setPoint(2, r.right(), r.center().y());
+    const QPen oldPen = p.pen();
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    p.drawPolygon(tri);
+    p.setPen(oldPen);
 }
 
 /* 播放次数：>=1e8 → x.x亿，>=1e4 → x.x万，其余原样 */
@@ -576,9 +596,6 @@ void ContentView::paintEvent(QPaintEvent*)
     bold.setBold(true);
     QFont small = font();
     small.setPointSize(qMax(7, small.pointSize() - 1));
-    /* 行首播放标识：比 small 大 50%（当前播放 ▶ 独立绘制，避免小字号缺字形） */
-    QFont markerFont = small;
-    markerFont.setPointSize(qMax(10, small.pointSize() * 3 / 2));
 
     /* ── 标题区 ── */
     if (m_mode == TracksMode) {
@@ -794,14 +811,10 @@ void ContentView::paintEvent(QPaintEvent*)
             QRect titleRect(cr.x(), cr.y() + coverH + 4, cr.width(), 18);
             int titleLeft = cr.x();
             if (!m_playingVideoId.isEmpty() && c.id == m_playingVideoId) {
-                /* 当前播放：单独大字号绘制 ▶（small 字号缺 U+25B6 字形） */
-                p.setFont(markerFont);
-                p.setPen(pal.accent);
-                p.drawText(titleRect, Qt::AlignVCenter | Qt::AlignLeft,
-                           qFromUtf8("▶"));
-                titleLeft += 16;
-                p.setFont(bold);
-                p.setPen(pal.textPrimary);
+                /* 当前播放:自绘向右三角(不依赖 ▶ 字形与字体行高) */
+                drawPlayTriangle(p, QRect(cr.x() + 2, titleRect.y() + 2, 12, 14),
+                                 pal.accent);
+                titleLeft += 18;
             }
             p.drawText(QRect(titleLeft, titleRect.y(),
                              titleRect.width() - (titleLeft - cr.x()),

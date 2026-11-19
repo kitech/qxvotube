@@ -14,6 +14,7 @@ public:
     explicit QueuePanel(QWidget* parent = 0);
     void setQueue(const std::vector<Track>& queue, int startIndex);
     void setCurrentTrack(const Track& t);
+    void setCurrentIndex(int index);   /* 仅更新高亮行,不动队列/滚动 */
     void retranslateUi();
 
 protected:

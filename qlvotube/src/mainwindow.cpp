@@ -1626,6 +1626,7 @@ void MainWindow::playVideoAt(int index)
     saveQueueSnapshot();
     const QString id = m_videoIds[index];
     if (queuePanel) queuePanel->setCurrentTrack(m_videoQueue[index]);
+    if (queuePanel) queuePanel->setCurrentIndex(index);   /* 高亮/三角跟随当前行 */
     if (playerBar) playerBar->setTrack(m_videoQueue[index]);
     if (contentView) contentView->setPlayingVideoId(id);   /* 列表 ▶ 标识 */
     /* 字幕:播放时自动拉(仅 YouTube;其它源空壳显式 Unsupported) */

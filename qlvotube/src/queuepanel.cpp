@@ -8,6 +8,26 @@
 #include <qpainter.h>
 #include <qevent.h>
 #include <qfontmetrics.h>
+#ifdef QT3_BUILD
+#include <qpointarray.h>
+typedef QPointArray MuiPolygon;
+#else
+typedef QPolygon MuiPolygon;
+#endif
+
+/* 当前播放标识:向右实心三角(自绘,不依赖 ▶ 字形/字体行高,Qt3/Qt4 一致) */
+static void drawPlayTriangle(QPainter& p, const QRect& r, const QColor& c)
+{
+    MuiPolygon tri(3);
+    tri.setPoint(0, r.left(), r.top());
+    tri.setPoint(1, r.left(), r.bottom());
+    tri.setPoint(2, r.right(), r.center().y());
+    const QPen oldPen = p.pen();
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    p.drawPolygon(tri);
+    p.setPen(oldPen);
+}
 
 QueuePanel::QueuePanel(QWidget* parent)
     : QWidget(parent), m_hasCurrent(false), m_currentIdx(-1),
@@ -32,6 +52,13 @@ void QueuePanel::setCurrentTrack(const Track& t)
     m_current = t;
     m_hasCurrent = true;
     updateScrollBar();
+    update();
+}
+
+void QueuePanel::setCurrentIndex(int index)
+{
+    if (m_currentIdx == index) return;
+    m_currentIdx = index;
     update();
 }
 
@@ -112,9 +139,6 @@ void QueuePanel::paintEvent(QPaintEvent*)
     bold.setBold(true);
     QFont small = font();
     small.setPointSize(qMax(7, small.pointSize() - 2));
-    /* 行首播放标识：比 small 大 50%（当前曲目 ▶ 独立绘制，避免小字号缺字形） */
-    QFont markerFont = small;
-    markerFont.setPointSize(qMax(10, small.pointSize() * 3 / 2));
 
     p.setFont(hdr);
     p.setPen(pal.textPrimary);
@@ -170,15 +194,9 @@ void QueuePanel::paintEvent(QPaintEvent*)
             p.fillRect(QRect(8, ry, width() - 16, 40), pal.activeBg);
         p.setFont(small);
         p.setPen(selected ? pal.accent : pal.textMuted);
-        /* 当前播放行：序号前 ▶（单独大字号绘制，避免小字号缺字形） */
-        if (selected) {
-            p.setFont(markerFont);
-            p.setPen(pal.accent);
-            p.drawText(QRect(4, ry, 12, 40), Qt::AlignVCenter | Qt::AlignLeft,
-                       qFromUtf8("▶"));
-            p.setFont(small);
-            p.setPen(pal.accent);
-        }
+        /* 当前播放行:序号前自绘向右三角(不依赖 ▶ 字形) */
+        if (selected)
+            drawPlayTriangle(p, QRect(5, ry + 13, 11, 14), pal.accent);
         p.drawText(QRect(16, ry, 22, 40), Qt::AlignVCenter | Qt::AlignLeft, QString::number((int)i + 1));
         p.setFont(selected ? bold : font());
         p.setPen(selected ? pal.accent : pal.textPrimary);
