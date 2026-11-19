@@ -153,6 +153,14 @@ bool CXRendererMetal::present(const QImage& img, const QRect& content)
         return false;
     }
     id<MTLCommandBuffer> cb = [(id<MTLCommandQueue>)m_queue commandBuffer];
+    // 先整幅 drawable 清黑:letterbox 区不得残留/透出背景窗口内容
+    MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = dr.texture;
+    rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+    id<MTLRenderCommandEncoder> re = [cb renderCommandEncoderWithDescriptor:rp];
+    [re endEncoding];
     id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
     [bl copyFromTexture:tex
             sourceSlice:0

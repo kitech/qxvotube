@@ -2264,6 +2264,13 @@ void MainWindow::onDownloadCurrent()
         const bool ok = m_dl->start(url, title, dur,
             [this](int pct) {
                 if (playerBar) playerBar->setDownloadState(pct);
+                if (pct >= 0) {
+                    SharedStatusBar::instance()->showMessage(
+                        qFromUtf8("下载中 %1%").arg(pct), 1200);
+                } else if (pct == -1) {
+                    SharedStatusBar::instance()->showMessage(
+                        qFromUtf8("下载中…"), 1200);
+                }
             },
             [this](bool ok2, const QString& path, const QString& err) {
                 if (playerBar) playerBar->setDownloadState(ok2 ? 100 : -2);

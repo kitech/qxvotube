@@ -46,6 +46,16 @@ void CXRendererXv::setErr(const char* why)
     ALOG_WARN("[cxvideo-xv]", why);
 }
 
+bool CXRendererXv::ready() const
+{
+    return m_port != 0;
+}
+
+QString CXRendererXv::lastError() const
+{
+    return m_err;
+}
+
 CXRendererXv::CXRendererXv(QWidget* parent)
 #ifdef QT3_BUILD
     : QWidget(parent, 0, WNoAutoErase), m_dpy(0), m_screen(0), m_win(0), m_gc(0),
@@ -53,7 +63,7 @@ CXRendererXv::CXRendererXv(QWidget* parent)
     : QWidget(parent), m_dpy(0), m_screen(0), m_win(0), m_gc(0),
 #endif
       m_port(0), m_formatId(0), m_xvImg(0), m_buf(0), m_vw(0), m_vh(0),
-      m_sws(0), m_fmtCount(0), m_visualChecked(false)
+      m_sws(0), m_clearGc(0), m_fmtCount(0), m_visualChecked(false)
 {
     ::memset(m_fmtDepth, 0, sizeof(m_fmtDepth));
     ::memset(m_fmtVisual, 0, sizeof(m_fmtVisual));
@@ -181,10 +191,35 @@ void CXRendererXv::freeXv()
         XFreeGC(m_dpy, m_gc);
         m_gc = 0;
     }
+    if (m_clearGc != 0) {
+        XFreeGC(m_dpy, m_clearGc);
+        m_clearGc = 0;
+    }
     XCloseDisplay(m_dpy);
     m_dpy = 0;
     m_vw = 0;
     m_vh = 0;
+}
+
+void CXRendererXv::clearScreen()
+{
+    if (m_dpy == 0 || m_port == 0)
+        return;
+    if (m_win == 0)
+        m_win = (Window)winId();
+    if (m_win == 0)
+        return;
+    if (m_clearGc == 0)
+        m_clearGc = XCreateGC(m_dpy, m_win, 0, 0);
+    if (m_clearGc == 0)
+        return;
+    XSetForeground(m_dpy, m_clearGc, BlackPixel(m_dpy, m_screen));
+    /* 让 X server 维护窗口背景:遮挡恢复/expose 时由 X 用黑背景重绘,
+     * 避免 WNoAutoErase 窗口在 expose 时透出后面的窗口。不改变当前内容。 */
+    XSetWindowBackground(m_dpy, m_win, BlackPixel(m_dpy, m_screen));
+    XFillRectangle(m_dpy, m_win, m_clearGc, 0, 0,
+                   (unsigned int)width(), (unsigned int)height());
+    XFlush(m_dpy);
 }
 
 bool CXRendererXv::ensureConvert(int w, int h)
@@ -284,6 +319,8 @@ bool CXRendererXv::present(const QImage& img, const QRect& content)
     dstStride[1] = dstStride[2] = dstStride[3] = 0;
     sws_scale((SwsContext*)m_sws, planes, strides, 0, src.height(),
               dstData, dstStride);
+    /* 播放中每帧只走 XvPutImage:清屏在 paintEvent 低频触发,
+     * 避免每帧 XFillRectangle 与 XvPutImage 竞争产生黑线块。 */
     XvPutImage(m_dpy, m_port, m_win, m_gc, m_xvImg,
                0, 0, m_xvImg->width, m_xvImg->height,
                content.x(), content.y(),
@@ -294,6 +331,9 @@ bool CXRendererXv::present(const QImage& img, const QRect& content)
 
 void CXRendererXv::paintEvent(QPaintEvent*)
 {
+    /* expose/resize 等低频事件里先把 letterbox 区填黑(并由 XSetWindowBackground
+     * 保证后续 expose 也用黑背景),再叠当前帧;播放中每帧只 XvPutImage。 */
+    clearScreen();
     if (m_img.isNull())
         return;
     present(m_img, letterbox(size(), m_img.size()));
@@ -303,6 +343,7 @@ void CXRendererXv::resizeEvent(QResizeEvent* e)
 {
     QWidget::resizeEvent(e);
     setTargetSize(e->size());
+    clearScreen();   // resize 后新露出的 letterbox 区填黑(仅此一次,非每帧)
     if (!m_img.isNull())
         present(m_img, letterbox(e->size(), m_img.size()));
 }

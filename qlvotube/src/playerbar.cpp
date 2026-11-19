@@ -254,6 +254,20 @@ void PlayerBar::setSubtitleLine(const QString& text)
     update();
 }
 
+/* 下载圈 tooltip:给出可读的进度/状态文字,与饼图视觉互补 */
+static QString pbDownloadTip(bool visible, int pct)
+{
+    if (!visible)
+        return qFromUtf8("点击下载");
+    if (pct == 100)
+        return qFromUtf8("下载完成 100%");
+    if (pct == -2)
+        return qFromUtf8("下载失败,点击重试");
+    if (pct < 0)
+        return qFromUtf8("下载中…(进度未知)");
+    return qFromUtf8("下载中 ") + QString::number(pct) + qFromUtf8("%");
+}
+
 /* 单行截断(Qt3 无 QFontMetrics::elidedText,按宽度逐字裁) */
 static QString pbElideOneLine(QPainter& p, const QString& text, int maxW)
 {
@@ -364,27 +378,39 @@ void PlayerBar::paintEvent(QPaintEvent*)
         p.restore();
     }
 
-    /* 下载 pie(0-100 扇形 / -1 转圈 / -2 失败斜杠) */
-    if (m_dlVisible) {
+    /* 下载指示器(常驻):空闲=下载箭头;进行中=扇形/转圈;失败=斜杠;完成=满圈 */
+    {
         QRect dr = downloadRect();
-        const QColor dlCol = (m_hover == HitDownload) ? pal.accent
-                           : (m_dlPct == -2 ? QColor(0xCC, 0x44, 0x44) : pal.textMuted);
+        const QColor dlCol = (m_hover == HitDownload) ? pal.accent : pal.textMuted;
         p.save();
         p.setPen(QPen(dlCol, 1));
         p.setBrush(Qt::NoBrush);
         p.drawEllipse(dr.left() + 1, dr.top() + 1, dr.width() - 2, dr.height() - 2);
-        if (m_dlPct == -2) {
+        if (!m_dlVisible) {
+            /* 空闲:向下箭头(下载图标),常驻可见 */
+            int mx = dr.center().x();
             p.setPen(QPen(dlCol, 2));
+            p.drawLine(mx, dr.top() + 4, mx, dr.bottom() - 5);
+            p.drawLine(mx - 4, dr.bottom() - 9, mx, dr.bottom() - 4);
+            p.drawLine(mx + 4, dr.bottom() - 9, mx, dr.bottom() - 4);
+        } else if (m_dlPct == -2) {
+            p.setPen(QPen(QColor(0xCC, 0x44, 0x44), 2));
             p.drawLine(dr.left() + 5, dr.top() + 16, dr.left() + 16, dr.top() + 5);
         } else if (m_dlPct < 0) {
             p.setPen(QPen(pal.accent, 2));
             p.drawArc(dr.left() + 3, dr.top() + 3, dr.width() - 6,
                       dr.height() - 6, 45 * 16, -120 * 16);
-        } else if (m_dlPct > 0) {
+        } else {
             p.setBrush(pal.accent);
             p.setPen(Qt::NoPen);
             p.drawPie(dr.left() + 2, dr.top() + 2, dr.width() - 4,
                       dr.height() - 4, 90 * 16, -m_dlPct * 3600 / 100);
+            if (dr.right() + 34 <= rateRect().left() - 4) {
+                p.setPen(pal.textMuted);
+                p.drawText(QRect(dr.right() + 2, dr.top(), 30, dr.height()),
+                           Qt::AlignVCenter, QString::number(m_dlPct)
+                                             + qFromUtf8("%"));
+            }
         }
         p.restore();
     }
@@ -544,7 +570,7 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
     else if (ccRect().contains(e->pos())) h = HitSub;
     else if (eqRect().contains(e->pos())) h = HitEq;
     else if (shotRect().contains(e->pos())) h = HitShot;
-    else if (m_dlVisible && downloadRect().contains(e->pos())) h = HitDownload;
+    else if (downloadRect().contains(e->pos())) h = HitDownload;
     else if (repeatRect().contains(e->pos())) h = HitRepeat;
     else if (shuffleRect().contains(e->pos())) h = HitShuffle;
     else if (autoSkipRect().contains(e->pos())) h = HitAutoSkip;
@@ -552,6 +578,11 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
         m_hover = h;
         update();
     }
+    /* 悬停下载圈时显示进度 tooltip;移开即清除 */
+    if (m_hover == HitDownload)
+        showTempTooltip(this, downloadRect(), pbDownloadTip(m_dlVisible, m_dlPct));
+    else
+        showTempTooltip(this, downloadRect(), QString());
 }
 
 void PlayerBar::mouseReleaseEvent(QMouseEvent*)
@@ -570,6 +601,7 @@ void PlayerBar::leaveEvent(QEvent* e)
         m_hover = HitNone;
         update();
     }
+    showTempTooltip(this, downloadRect(), QString());
 }
 
 // ── 播放模式 / 下载进度 / 音量弹层(2026-11-18,qlmusic 移植) ──
@@ -599,31 +631,21 @@ void PlayerBar::setShuffle(bool on)
 void PlayerBar::setDownloadState(int pct)
 {
     if (pct == 100) {
-        /* 完成:短暂留痕(1.2s 后隐藏) */
+        /* 完成:保持满圈常驻,不隐藏 */
         m_dlPct = 100;
         m_dlVisible = true;
         update();
-        if (m_dlHideTimer == 0)
-            m_dlHideTimer = new QTimer(this);
-        QTimer* t = (QTimer*)m_dlHideTimer;
-        QObject::disconnect(t, 0, this, 0);
-        QObject::connect(t, SIGNAL(timeout()), this, SLOT(onDlHide()));
-#if QT_VERSION >= 0x040000
-        t->setSingleShot(true);
-        t->start(1200);
-#else
-        t->start(1200, true);   /* Qt3: start(ms, singleShot) */
-#endif
-        return;
-    }
-    if (pct < 0) {
-        m_dlPct = (pct == -2) ? -2 : -1;
     } else {
-        m_dlPct = qBound(0, pct, 100);
+        if (pct < 0)
+            m_dlPct = (pct == -2) ? -2 : -1;
+        else
+            m_dlPct = qBound(0, pct, 100);
+        m_dlVisible = true;
+        update();
     }
-    m_dlVisible = true;
-    if (m_dlHideTimer != 0) ((QTimer*)m_dlHideTimer)->stop();
-    update();
+    /* 悬停下载圈时同步刷新 tooltip 文字 */
+    if (m_hover == HitDownload)
+        showTempTooltip(this, downloadRect(), pbDownloadTip(m_dlVisible, m_dlPct));
 }
 
 void PlayerBar::onDlHide()

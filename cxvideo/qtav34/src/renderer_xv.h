@@ -28,8 +28,9 @@ public:
     bool saveScreenshot(const QString& p) { return CxRendererCore::saveScreenshot(p); }
 
     static bool isAvailable();
-    bool ready() const { return m_port != 0; }
-    QString lastError() const { return m_err; }
+    // 非内联:避免头文件布局变动时旧 .o 内联展开读到错位成员(跨 TU ODR 隐患)
+    bool ready() const;
+    QString lastError() const;
 
 protected:
     bool present(const QImage& img, const QRect& content);
@@ -40,6 +41,7 @@ protected:
 private:
     bool initXv();
     void freeXv();
+    void clearScreen();   // 全窗填黑:letterbox 区不得残留/透出背景窗口
     bool ensureConvert(int w, int h);
     void checkWindowVisual();     // 首帧核对窗口 visual 是否被 adaptor 支持
     void setErr(const char* why);
@@ -48,6 +50,7 @@ private:
     int      m_screen;
     Window   m_win;
     GC       m_gc;
+    GC       m_clearGc;   // 基于 m_win 的清屏 GC(与 m_gc 的 root drawable 分开)
     XvPortID m_port;
     int      m_formatId;
     XvImage* m_xvImg;
