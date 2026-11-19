@@ -223,7 +223,9 @@ QList36<CategoryItem> popularRegions(cJSON* root) {
             if (hits[order[i]] > hits[order[best]]) best = i;
         const QString k = order[best];
         qstrListRemoveOne(order, k);
-        out.append(CategoryItem(k, names[k]));
+        // 热度 = 该分区在热门视频里的出现次数,拼进显示名(UI 零改动)
+        out.append(CategoryItem(k, names[k] + qFromUtf8(" · ")
+                                + QString::number(hits[k])));
     }
     return out;
 }

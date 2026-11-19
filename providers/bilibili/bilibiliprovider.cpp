@@ -124,7 +124,29 @@ void BilibiliProvider::search(const QString& kw, int page, SearchCb cb) {
     });
 }
 
-// ── 分类:popular 条目自带 tid/tname(动态,无硬编码表) ─────────────
+// 固定分区表(50 项):20 主分区 + 30 个从 popular/ranking 接口采样的高频二级分区。
+// tid/name 均取自接口真实配对,非手敲;key 格式 "<tid>|<tname>" 与热门派生一致。
+static const char* kFixedRegions[][2] = {
+    // 主分区(20)
+    { "1", "动画" },    { "13", "番剧" },   { "167", "国创" },  { "3", "音乐" },
+    { "129", "舞蹈" },  { "4", "游戏" },    { "36", "知识" },   { "188", "科技" },
+    { "234", "运动" },  { "223", "汽车" },  { "160", "生活" },  { "211", "美食" },
+    { "217", "动物圈" },{ "119", "鬼畜" },  { "155", "时尚" },  { "5", "娱乐" },
+    { "181", "影视" },  { "177", "纪录片" },{ "23", "电影" },   { "11", "电视剧" },
+    // 二级分区(30,接口采样)
+    { "17", "单机游戏" }, { "171", "电子竞技" }, { "172", "手机游戏" },
+    { "21", "日常" },     { "31", "翻唱" },       { "28", "原创音乐" },
+    { "20", "宅舞" },     { "201", "科学科普" },  { "95", "数码" },
+    { "164", "健身" },    { "76", "美食制作" },   { "218", "喵星人" },
+    { "219", "汪星人" },  { "22", "鬼畜调教" },   { "26", "音MAD" },
+    { "157", "美妆护肤" },{ "241", "娱乐杂谈" },  { "182", "影视杂谈" },
+    { "183", "影视剪辑" },{ "145", "欧美电影" },  { "147", "国产电影" },
+    { "185", "国产剧" },  { "24", "MAD·AMV" },    { "130", "音乐综合" },
+    { "178", "科学·探索·自然" }, { "162", "绘画" }, { "138", "搞笑" },
+    { "212", "美食侦探" },{ "198", "街舞" },      { "173", "桌游棋牌" },
+};
+
+// ── 分类:固定表 + popular 热门派生合并(热门在前,显示热度) ─────────
 // 缓存 30min(分区变化极慢;失败不缓存,下次重试)
 static QList36<CategoryItem> g_regions;
 static long long g_regionsAt = 0;
@@ -160,12 +182,27 @@ void BilibiliProvider::categories(
             cb(res, {});
             return;
         }
-        QList36<CategoryItem> regs = bilibili::parse::popularRegions(root.p);
-        DBG_P(kMod, Info, "categories: %d regions from popular", regs.size());
-        if (regs.isEmpty()) {
-            DBG_P(kMod, Warn, "categories: 0 regions (popular 结构可能变更)");
-            cb(Result::fail(Err::Parse, qFromUtf8("bilibili: 分区表为空")), {});
-            return;
+        const QList36<CategoryItem> hot = bilibili::parse::popularRegions(root.p);
+        DBG_P(kMod, Info, "categories: %d hot regions from popular", hot.size());
+
+        // 热门在前(已带热度),固定表补齐未出现的分区(热度 0),按 key 去重
+        QList36<CategoryItem> regs;
+        QStringList seen;
+        for (int i = 0; i < hot.size(); ++i) {
+            regs.append(hot[i]);
+            seen.append(hot[i].key);
+        }
+        for (int i = 0;
+             i < (int)(sizeof(kFixedRegions) / sizeof(kFixedRegions[0])); ++i) {
+            const QString key = qFromUtf8(kFixedRegions[i][0])
+                                + qFromUtf8("|")
+                                + qFromUtf8(kFixedRegions[i][1]);
+            if (seen.contains(key)) {
+                continue;
+            }
+            regs.append(CategoryItem(key, qFromUtf8(kFixedRegions[i][1])
+                                          + qFromUtf8(" · 0")));
+            seen.append(key);
         }
         regs.prepend(CategoryItem(QString(), QString()));   // 推荐
         g_regions = regs;
