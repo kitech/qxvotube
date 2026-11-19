@@ -23,8 +23,10 @@ void CXFFmpegAudioThread::run()
                 }
                 renderPts0 = (p.flushMs > 0) ? p.flushMs : -1;
                 m_lastMs = -1;
+            } else {
+                break; // 空载体且非 flush:队列已 stopped,退出避免空转
             }
-            continue;
+            continue; // flush 标记已处理
         }
         if (p.eos) {
             while (!stopFlag) {

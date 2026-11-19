@@ -43,6 +43,15 @@ public:
                 frames -= (int)w;
                 continue;
             }
+            if (w == 0) {
+                // 设备暂停/不可写时 writei 返回 0:有界等待可写,超时即退出,
+                // 否则 frames 不减会在此无限空转烧满一个核(暂停 CPU 100%)
+                int r = snd_pcm_wait(m_h, 100);
+                if (r <= 0) {
+                    return false; // 超时/出错,交回上层退出本次写入
+                }
+                continue;
+            }
             if (w < 0 && snd_pcm_recover(m_h, (int)w, 0) < 0)
                 return false;
         }

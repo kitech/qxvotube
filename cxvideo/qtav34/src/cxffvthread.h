@@ -78,8 +78,10 @@ protected:
                 if (p.flush) {                    // seek flush 标记
                     if (decoder != 0) decoder->flush();
                     renderPts0 = (p.flushMs > 0) ? p.flushMs : -1;
+                } else {
+                    break; // 空载体且非 flush:队列已 stopped,退出避免空转
                 }
-                continue; // 停止唤醒空载体 / flush 标记
+                continue; // flush 标记已处理
             }
 
             if (p.eos) {
@@ -142,6 +144,9 @@ private:
             while (true) {
                 if (stopFlag)
                     return false;
+                if (paused) {
+                    return false; // 暂停时主时钟冻结,退回 run() 顶部由 waitIfPaused() 阻塞
+                }
                 long remain = (pts - m_ao->latencyMs()) - m_clock->value();
                 if (remain <= 0)
                     break;
