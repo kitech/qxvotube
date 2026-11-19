@@ -576,6 +576,9 @@ void ContentView::paintEvent(QPaintEvent*)
     bold.setBold(true);
     QFont small = font();
     small.setPointSize(qMax(7, small.pointSize() - 1));
+    /* 行首播放标识：比 small 大 50%（当前播放 ▶ 独立绘制，避免小字号缺字形） */
+    QFont markerFont = small;
+    markerFont.setPointSize(qMax(10, small.pointSize() * 3 / 2));
 
     /* ── 标题区 ── */
     if (m_mode == TracksMode) {
@@ -788,13 +791,23 @@ void ContentView::paintEvent(QPaintEvent*)
 
             p.setFont(bold);
             p.setPen(pal.textPrimary);
-            QString vt = c.title;
+            QRect titleRect(cr.x(), cr.y() + coverH + 4, cr.width(), 18);
+            int titleLeft = cr.x();
             if (!m_playingVideoId.isEmpty() && c.id == m_playingVideoId) {
-                vt = qFromUtf8("▶ ") + vt;   /* 当前播放:右箭头标识 */
+                /* 当前播放：单独大字号绘制 ▶（small 字号缺 U+25B6 字形） */
+                p.setFont(markerFont);
+                p.setPen(pal.accent);
+                p.drawText(titleRect, Qt::AlignVCenter | Qt::AlignLeft,
+                           qFromUtf8("▶"));
+                titleLeft += 16;
+                p.setFont(bold);
+                p.setPen(pal.textPrimary);
             }
-            p.drawText(QRect(cr.x(), cr.y() + coverH + 4, cr.width(), 18),
+            p.drawText(QRect(titleLeft, titleRect.y(),
+                             titleRect.width() - (titleLeft - cr.x()),
+                             titleRect.height()),
                        Qt::AlignVCenter | Qt::AlignLeft,
-                       elideOneLine(p, vt, cr.width()));
+                       elideOneLine(p, c.title, titleRect.width() - (titleLeft - cr.x())));
             p.setFont(small);
             p.setPen(pal.textMuted);
             QString sub = c.author;
