@@ -1629,6 +1629,7 @@ void MainWindow::playVideoAt(int index)
     if (queuePanel) queuePanel->setCurrentIndex(index);   /* 高亮/三角跟随当前行 */
     if (playerBar) playerBar->setTrack(m_videoQueue[index]);
     if (contentView) contentView->setPlayingVideoId(id);   /* 列表 ▶ 标识 */
+    if (videoPane) videoPane->setVideoTitle(m_videoQueue[index].title);   /* 视频页顶栏标题 */
     /* 字幕:播放时自动拉(仅 YouTube;其它源空壳显式 Unsupported) */
     requestSubtitles(id);
     if (getenv("QLVOTUBE_DEBUG") != 0) {

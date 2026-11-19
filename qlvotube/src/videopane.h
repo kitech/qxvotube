@@ -19,6 +19,7 @@ public:
     QWidget* surface() const { return m_surface; } // 交给 setHostWidget
     void setRendererWidget(QWidget* w);            // ffmpeg 路:GL 渲染器
     void setEngineLabel(const QString& name);
+    void setVideoTitle(const QString& title);       // 顶栏显示当前播放视频标题
     void setSubtitleText(const QString& text); // 空串=隐藏(M5-A3)
     // M7:顶栏右侧实时分辨率/档位(如 "1920×1080 · 720P")
     void setVideoInfoText(const QString& text);
@@ -38,6 +39,7 @@ private:
     QBoxLayout* m_lay;
     QPushButton* m_backBtn;
     QLabel* m_engineLabel;
+    QLabel* m_titleLabel;     /* 顶栏视频标题 */
     QLabel* m_infoLabel;      /* M7:分辨率/档位 */
     QLabel* m_subLabel;
 };

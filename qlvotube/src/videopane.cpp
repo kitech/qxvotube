@@ -6,7 +6,7 @@
 
 VideoPane::VideoPane(QWidget* parent)
     : QWidget(parent), m_surface(0), m_renderer(0), m_lay(0),
-      m_backBtn(0), m_engineLabel(0), m_subLabel(0)
+      m_backBtn(0), m_engineLabel(0), m_titleLabel(0), m_subLabel(0)
 {
 #ifdef QT3_BUILD
     setBackgroundColor(QColor(0, 0, 0)); // Qt3 无 palette/autoFill
@@ -25,7 +25,10 @@ VideoPane::VideoPane(QWidget* parent)
     m_backBtn = new QPushButton(qFromUtf8("<"), bar);
     m_backBtn->setFixedWidth(32);
     m_engineLabel = new QLabel(bar);
+    m_titleLabel = new QLabel(bar);
+    m_titleLabel->setText("");
     barLay->addWidget(m_backBtn, 0);
+    barLay->addWidget(m_titleLabel, 1);   /* 视频标题:占中间,过长自动省略 */
     barLay->addWidget(m_engineLabel, 1);
     /* M7:右侧实时分辨率/档位 */
     m_infoLabel = new QLabel(bar);
@@ -119,6 +122,12 @@ void VideoPane::setEngineLabel(const QString& name)
 {
     if (m_engineLabel != 0)
         m_engineLabel->setText(name);
+}
+
+void VideoPane::setVideoTitle(const QString& title)
+{
+    if (m_titleLabel != 0)
+        m_titleLabel->setText(title);
 }
 
 void VideoPane::setVideoInfoText(const QString& text)
