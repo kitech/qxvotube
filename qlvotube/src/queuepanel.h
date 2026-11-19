@@ -1,7 +1,7 @@
 #ifndef QUEUEPANEL_H
 #define QUEUEPANEL_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "musicmodel.h"
 #include <qwidget.h>
 

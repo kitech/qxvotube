@@ -1,6 +1,6 @@
 #include "userinfopanel.h"
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "musicstyle.h"
 #include "identicon.h"
 #include "translator.h"

@@ -1,5 +1,5 @@
 #include "videopane.h"
-#include "compat34.h"
+#include "qlcompat34.h"
 #include <qpushbutton.h>
 #include <qcolor.h>
 #include <qevent.h>

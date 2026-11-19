@@ -1,7 +1,7 @@
 #ifndef VIDEOINFODIALOG_H
 #define VIDEOINFODIALOG_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include <qdialog.h>
 #include <qstring.h>
 

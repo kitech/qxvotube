@@ -1,4 +1,4 @@
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "mainwindow.h"
 #include "translator.h"
 #include "appsetup.h"

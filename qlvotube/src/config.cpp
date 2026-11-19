@@ -1,5 +1,5 @@
 #include "config.h"
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "hjson_wrap.h"
 #ifdef QT3_BUILD
 #include <qdir.h>

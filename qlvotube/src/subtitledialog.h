@@ -1,7 +1,7 @@
 #ifndef SUBTITLEDIALOG_H
 #define SUBTITLEDIALOG_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "providers/common/result.h"
 #include <qdialog.h>
 #include <qstring.h>

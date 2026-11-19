@@ -1,7 +1,7 @@
 #ifndef VIDEOUI_H
 #define VIDEOUI_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "eventpoller.h"
 #include "providers/common/result.h"
 

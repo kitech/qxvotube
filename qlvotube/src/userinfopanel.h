@@ -1,7 +1,7 @@
 #ifndef USERINFOPANEL_H
 #define USERINFOPANEL_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include <qwidget.h>
 
 /* 用户信息区（两行式，同 SideNav 主题取色，自绘）。

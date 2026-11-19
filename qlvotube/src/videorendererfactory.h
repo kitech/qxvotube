@@ -1,7 +1,7 @@
 #ifndef VIDEORENDERERFACTORY_H
 #define VIDEORENDERERFACTORY_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include <qwidget.h>
 #include <qstring.h>
 #include <qstringlist.h>

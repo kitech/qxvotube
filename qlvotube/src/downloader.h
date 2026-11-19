@@ -1,5 +1,5 @@
 #pragma once
-#include "compat34.h"
+#include "qlcompat34.h"
 #include <functional>
 #include <qobject.h>
 #include <qstring.h>

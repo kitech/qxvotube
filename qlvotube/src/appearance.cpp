@@ -1,6 +1,6 @@
 #include "appearance.h"
 #include "translator.h"
-#include "compat34.h"
+#include "qlcompat34.h"
 #ifdef QT3_BUILD
 #include <qpushbutton.h>
 #else

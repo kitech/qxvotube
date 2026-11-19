@@ -1,7 +1,7 @@
 #ifndef APPEARANCE_H
 #define APPEARANCE_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include <vector>
 
 class QObject;

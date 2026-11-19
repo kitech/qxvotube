@@ -1,7 +1,7 @@
 #ifndef CONTENTVIEW_H
 #define CONTENTVIEW_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "musicmodel.h"
 #include <qwidget.h>
 #include <qrect.h>

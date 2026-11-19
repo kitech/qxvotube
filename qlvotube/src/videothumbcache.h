@@ -1,7 +1,7 @@
 #ifndef VIDEOTHUMBCACHE_H
 #define VIDEOTHUMBCACHE_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "eventpoller.h"
 
 #include <qwidget.h>

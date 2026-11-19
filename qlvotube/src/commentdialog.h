@@ -1,7 +1,7 @@
 #ifndef COMMENTDIALOG_H
 #define COMMENTDIALOG_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "providers/common/result.h"
 #include <qdialog.h>
 #include <qstring.h>

@@ -1,5 +1,5 @@
 #include "eqdialog.h"
-#include "compat34.h"
+#include "qlcompat34.h"
 #include <qslider.h>
 #include <qlabel.h>
 #include <qpushbutton.h>

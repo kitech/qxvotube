@@ -1,7 +1,7 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "appearance.h"
 #include "musicmodel.h"
 #include "contentview.h"

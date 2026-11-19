@@ -1,7 +1,7 @@
 #ifndef MUSICMODEL_H
 #define MUSICMODEL_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include <vector>
 
 struct Track {

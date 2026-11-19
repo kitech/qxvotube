@@ -34,7 +34,7 @@
 #include "videothumbcache.h"
 #include "translator.h"
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "cxvideoplayer.h"
 #include "cxengine.h"
 #include "renderer_gl.h"     /* M5-A:ffmpeg 路 GL 渲染器 */

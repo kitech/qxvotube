@@ -1,7 +1,7 @@
 #ifndef SIDENAV_H
 #define SIDENAV_H
 
-#include "compat34.h"
+#include "qlcompat34.h"
 #include "musicmodel.h"
 #include "LimeScrollBar.h"
 #include <qwidget.h>
