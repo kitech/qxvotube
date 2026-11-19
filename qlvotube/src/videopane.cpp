@@ -54,6 +54,10 @@ VideoPane::VideoPane(QWidget* parent)
 #endif
     m_lay->addWidget(m_surface, 1);
 
+    // 原生子件(macOS Qt4 WA_NativeWindow)在布局里可能不被撑开;
+    // 监听 surface 的真实 resize,强制同步 renderer 几何(版本无关)。
+    m_surface->installEventFilter(this);
+
     // 字幕叠加(位于 surface 底部;透明底 + 白字 + 黑描边效果靠背景半透明)
     m_subLabel = new QLabel(m_surface);
     m_subLabel->setText("");
@@ -87,6 +91,8 @@ void VideoPane::setRendererWidget(QWidget* w)
     // 不再用一次性 setGeometry（会绕过 min 且滞后于 surface 变化）
     QBoxLayout* rendererLay = qNewBoxLayout(m_surface, QBoxLayout::LeftToRight, 0, 0);
     rendererLay->addWidget(w, 1);
+    // 首帧兜底:布局尚未稳定时先按 surface 当前尺寸对齐一次
+    w->setGeometry(0, 0, m_surface->width(), m_surface->height());
     w->show();
     w->raise();
 }
@@ -132,4 +138,15 @@ void VideoPane::resizeEvent(QResizeEvent* e)
     QWidget::resizeEvent(e);
     // m_surface 由外层 m_lay 管理，renderer 由 m_surface 的布局管理；
     // 二者尺寸自动联动，不再手动 setGeometry（原实现高度沿用旧值会卡住）。
+}
+
+bool VideoPane::eventFilter(QObject* o, QEvent* e)
+{
+    if (o == m_surface && e->type() == QEvent::Resize && m_renderer != 0) {
+        // 用事件自带的新尺寸,避开旧实现"沿用 m_surface->height()"的 stale 值
+        QResizeEvent* re = static_cast<QResizeEvent*>(e);
+        QSize s = re->size();
+        m_renderer->setGeometry(0, 0, s.width(), s.height());
+    }
+    return QWidget::eventFilter(o, e);
 }

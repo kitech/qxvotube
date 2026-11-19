@@ -75,6 +75,23 @@ inline bool cxSdlMakeRenderer(SDL_Window* w, SDL_Renderer** out)
     return true;
 }
 
+// 逻辑尺寸:SDL2=SDL_RenderSetLogicalSize;SDL3 重命名为
+// SDL_SetRenderLogicalPresentation(4 参数)。设后所有绘制坐标为 widget 逻辑像素,
+// SDL 自动映射到物理输出(修 macOS Retina 下"画面只占 1/4"类症状)。
+// 两侧均为等比装入(letterbox),语义一致。
+inline bool cxSdlSetLogicalSize(SDL_Renderer* r, int w, int h)
+{
+    if (r == 0 || w <= 0 || h <= 0) {
+        return false;
+    }
+#if CX_SDL_MAJOR == 3
+    return SDL_SetRenderLogicalPresentation(
+        r, w, h, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+#else
+    return SDL_RenderSetLogicalSize(r, w, h) == 0;
+#endif
+}
+
 // 后端名(opengl/direct3d11/metal/software…):SDL 不保证"无 GL",日志要打出来。
 // SDL3 去掉了 SDL_RendererInfo,改用 SDL_GetRendererName。
 inline const char* cxSdlRendererName(SDL_Renderer* r)

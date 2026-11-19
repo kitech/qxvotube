@@ -5,6 +5,7 @@
 #include <qstring.h>
 
 class QBoxLayout;
+class QEvent;
 class QPushButton;
 class QLabel;
 
@@ -28,6 +29,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent* e);
+    bool eventFilter(QObject* o, QEvent* e);
     void contextMenuEvent(QContextMenuEvent* e);          /* M7 */
 
 private:

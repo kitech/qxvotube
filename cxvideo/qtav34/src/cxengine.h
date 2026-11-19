@@ -33,8 +33,9 @@ struct CxVideoInfo {
     QString quality;            // 实际档位(Stream.quality)
     QString requestedQuality;   // 用户请求档位
     bool    degraded;           // 请求档位被降级
+    double  dpr;                // 设备像素比(显示侧采集;1.0=标准/未知)
     CxVideoInfo()
-        : width(0), height(0), bitrateKbps(0), fps(0), degraded(false) {}
+        : width(0), height(0), bitrateKbps(0), fps(0), degraded(false), dpr(1.0) {}
 };
 
 // 引擎抽象(detail.md 第 3 节;UI 线程 API,线程→UI 经事件回投)

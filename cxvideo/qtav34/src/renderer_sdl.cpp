@@ -72,6 +72,9 @@ bool CXRendererSdl::initSdl()
         freeSdl();
         return false;
     }
+    // macOS Retina:外部 NSView 包装的 SDL 窗口输出是物理像素;
+    // 设逻辑尺寸后 SDL 自动做 逻辑→物理 映射,消除"只占 1/4"类症状。
+    cxSdlSetLogicalSize(m_r, width(), height());
     const char* nm = cxSdlRendererName(m_r);
     m_backend = nm != 0 ? QString::fromLatin1(nm) : QString();
     return true;
@@ -110,6 +113,9 @@ void CXRendererSdl::resizeEvent(QResizeEvent* e)
 {
     QWidget::resizeEvent(e);
     setTargetSize(e->size());
+    if (m_r != 0) {
+        cxSdlSetLogicalSize(m_r, e->size().width(), e->size().height());
+    }
     if (!m_img.isNull())
         present(m_img, letterbox(e->size(), m_img.size()));
 }

@@ -38,6 +38,7 @@
 #include "cxvideoplayer.h"
 #include "cxengine.h"
 #include "renderer_gl.h"     /* M5-A:ffmpeg 路 GL 渲染器 */
+#include "cxdpr.h"            /* 视频详情:设备像素比 dpr */
 #include "videorendererfactory.h"   /* M6:输出后端可配置(cxvideo-vo.md) */
 #include "videoinfodialog.h"        /* M7:视频详情弹窗 */
 #include "commentdialog.h"
@@ -1699,6 +1700,7 @@ void MainWindow::applyVideoInfo()
     vi.quality = m_curQuality.isEmpty() ? vi.quality : m_curQuality;
     vi.requestedQuality = m_curRequested;
     vi.degraded = m_curDegraded;
+    vi.dpr = cxDevicePixelRatio(videoPane->surface());
     if (vi.url.isEmpty())
         vi.url = m_curUrl;
     m_videoInfo = vi;

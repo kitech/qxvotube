@@ -79,6 +79,7 @@ CXVIDEO_HDR = \
     $$CXVIDEO/src/eng_mpv_cmd.h \
     $$CXVIDEO/src/eng_mpv.h \
     $$CXVIDEO/src/eng_ffmpeg.h \
+    $$CXVIDEO/src/cxdpr.h \
     $$CXVIDEO/src/cxvideoplayer.h
 
 INCLUDEPATH += $$CXVIDEO/src $$QLCOMP34
@@ -173,7 +174,13 @@ win32 {
     LIBS += -ld3d11 -ldxgi
     DEFINES += WITH_CX_RENDERER_D3D11
 }
+
+!macx {
+    SOURCES += $$CXVIDEO/src/cxdpr_other.cpp
+}
+
 macx {
+    OBJECTIVE_SOURCES += $$CXVIDEO/src/cxdpr_mac.mm
     OBJECTIVE_SOURCES += $$CXVIDEO/src/renderer_metal.mm
     HEADERS += $$CXVIDEO/src/renderer_metal.h
     LIBS += -framework Metal -framework QuartzCore -framework AppKit

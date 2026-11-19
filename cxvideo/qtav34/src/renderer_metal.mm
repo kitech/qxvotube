@@ -2,6 +2,7 @@
 
 #if defined(CX_OS_MAC) && defined(WITH_CX_RENDERER_METAL)
 
+#include "cxdpr.h"
 #include <qimage.h>
 #include <qevent.h>
 
@@ -28,7 +29,8 @@ CXRendererMetal::CXRendererMetal(QWidget* parent)
     setAttribute(Qt::WA_NoSystemBackground, true);
     setAttribute(Qt::WA_NativeWindow, true);
     setTargetSize(size());
-    initMetal();
+    // 延迟到首帧 present():此时 widget 已 reparent/show,NSView/window 有效
+    // (SDL 后端已验证此做法;构造期取 winId 会得到空 window)。
 }
 
 CXRendererMetal::~CXRendererMetal()
@@ -66,9 +68,13 @@ bool CXRendererMetal::initMetal()
     layer.device = dev;
     layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     layer.framebufferOnly = NO;                 // 允许 blit 写入 drawable
-    layer.contentsScale = nsw != nil ? [nsw backingScaleFactor] : 1.0;
-    layer.drawableSize = CGSizeMake(width() * layer.contentsScale,
-                                    height() * layer.contentsScale);
+    layer.contentsScale = nsw != nil ? [nsw backingScaleFactor] : cxDevicePixelRatio();
+    // 默认 kCAGravityResize 会二次缩放;显式 TopLeft,物理像素 1:1 呈现
+    layer.contentsGravity = kCAGravityTopLeft;
+    layer.frame = [v bounds];
+    // Apple 规范:drawableSize 用 convertSizeToBacking,勿手乘 scale
+    layer.drawableSize =
+        [v convertSizeToBacking:CGSizeMake((CGFloat)width(), (CGFloat)height())];
     [v setLayer:layer];
     m_layer = layer;
     return true;
@@ -79,12 +85,25 @@ bool CXRendererMetal::present(const QImage& img, const QRect& content)
     if (m_layer == 0 && !initMetal())
         return false;
     CAMetalLayer* layer = (CAMetalLayer*)m_layer;
-    double scale = layer.contentsScale > 0 ? layer.contentsScale : 1.0;
+    double dpr = cxDevicePixelRatio(this);
+    if (dpr <= 0.0) {
+        dpr = 1.0;
+    }
 
     QImage src = img;
     src = cxToRgb32(src);
-    if (src.width() != content.width() || src.height() != content.height())
-        src = cxScaleRgb(src, content.width(), content.height());
+    // 统一到物理像素:src 与 blit 目标同坐标系,消除"只占 drawable 一角"
+    int cw = (int)(content.width() * dpr + 0.5);
+    int ch = (int)(content.height() * dpr + 0.5);
+    if (cw < 1) {
+        cw = 1;
+    }
+    if (ch < 1) {
+        ch = 1;
+    }
+    if (src.width() != cw || src.height() != ch) {
+        src = cxScaleRgb(src, cw, ch);
+    }
     int sw = src.width();
     int sh = src.height();
     if (sw <= 0 || sh <= 0)
@@ -108,6 +127,31 @@ bool CXRendererMetal::present(const QImage& img, const QRect& content)
         [tex release];
         return false;
     }
+    // 每帧读真实 drawable 尺寸(Apple/sokol 规范),不缓存逻辑宽高
+    NSUInteger dtw = dr.texture.width;
+    NSUInteger dth = dr.texture.height;
+    if (dtw == 0 || dth == 0) {
+        [tex release];
+        return false;
+    }
+    int dx = (int)(content.x() * dpr + 0.5);
+    int dy = (int)(content.y() * dpr + 0.5);
+    if (dx < 0) {
+        dx = 0;
+    }
+    if (dy < 0) {
+        dy = 0;
+    }
+    if (dx + sw > (int)dtw) {
+        sw = (int)dtw - dx;
+    }
+    if (dy + sh > (int)dth) {
+        sh = (int)dth - dy;
+    }
+    if (sw <= 0 || sh <= 0) {
+        [tex release];
+        return false;
+    }
     id<MTLCommandBuffer> cb = [(id<MTLCommandQueue>)m_queue commandBuffer];
     id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
     [bl copyFromTexture:tex
@@ -118,8 +162,7 @@ bool CXRendererMetal::present(const QImage& img, const QRect& content)
               toTexture:dr.texture
        destinationSlice:0
        destinationLevel:0
-      destinationOrigin:MTLOriginMake((NSUInteger)(content.x() * scale),
-                                      (NSUInteger)(content.y() * scale), 0)];
+      destinationOrigin:MTLOriginMake((NSUInteger)dx, (NSUInteger)dy, 0)];
     [bl endEncoding];
     [cb presentDrawable:dr];
     [cb commit];
@@ -135,10 +178,18 @@ void CXRendererMetal::resizeEvent(QResizeEvent* e)
         CAMetalLayer* l = (CAMetalLayer*)m_layer;
         NSView* v = (NSView*)m_view;
         NSWindow* nsw = v != nil ? [v window] : nil;
-        if (nsw != nil)
+        if (nsw != nil) {
             l.contentsScale = [nsw backingScaleFactor];
-        l.drawableSize = CGSizeMake(e->size().width() * l.contentsScale,
-                                    e->size().height() * l.contentsScale);
+        }
+        CGSize bs = v != nil
+            ? [v convertSizeToBacking:
+                CGSizeMake((CGFloat)e->size().width(), (CGFloat)e->size().height())]
+            : CGSizeMake((CGFloat)e->size().width(), (CGFloat)e->size().height());
+        l.drawableSize = bs;
+        // 诊断:仅尺寸变化时打,便于日后核对 dpr 是否生效
+        qWarning("[dpr] metal logical=%dx%d physical=%dx%d dpr=%.2f",
+                 e->size().width(), e->size().height(),
+                 (int)bs.width, (int)bs.height, cxDevicePixelRatio(this));
     }
     if (!m_img.isNull())
         present(m_img, letterbox(e->size(), m_img.size()));

@@ -37,8 +37,12 @@ VideoInfoDialog::VideoInfoDialog(const CxVideoInfo& info, QWidget* parent)
     QString q = info.quality.isEmpty() ? na : info.quality;
     if (info.degraded && !info.requestedQuality.isEmpty())
         q += qFromUtf8("(请求 ") + info.requestedQuality + qFromUtf8(",已降级)");
+    QString dpr = na;
+    if (info.dpr > 0.01) {
+        dpr = QString::fromLatin1("%1x").arg(info.dpr, 0, 'f', 2);
+    }
 
-    const int kN = 7;
+    const int kN = 8;
     QString keys[kN];
     QString vals[kN];
     keys[0] = qFromUtf8("分辨率");   vals[0] = res;
@@ -48,6 +52,7 @@ VideoInfoDialog::VideoInfoDialog(const CxVideoInfo& info, QWidget* parent)
     keys[4] = qFromUtf8("帧率");     vals[4] = fps;
     keys[5] = qFromUtf8("档位");     vals[5] = q;
     keys[6] = qFromUtf8("地址");     vals[6] = cxMaskUrl(info.url.isEmpty() ? na : info.url);
+    keys[7] = qFromUtf8("DPR");      vals[7] = dpr;
 
     for (int i = 0; i < kN; ++i) {
         QBoxLayout* h = qNewBoxLayout(0, QBoxLayout::LeftToRight, 6, 0);
@@ -70,7 +75,7 @@ VideoInfoDialog::VideoInfoDialog(const CxVideoInfo& info, QWidget* parent)
     btns->addWidget(close, 0);
     lay->addLayout(btns);
 
-    resize(560, 300);
+    resize(560, 330);
 }
 
 void VideoInfoDialog::copyUrl()
