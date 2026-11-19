@@ -556,6 +556,10 @@ void MainWindow::buildCentralWidget()
 
     /* 播放模式/音量恢复(qlmusic:config.json 持久化) */
     m_dl = new Downloader(this);
+    /* 缓冲进度独立于播放进度刷新(播放/暂停都继续更新) */
+    m_bufTimer = new QTimer(this);
+    QObject::connect((QTimer*)m_bufTimer, SIGNAL(timeout()),
+                     this, SLOT(onRefreshBuffered()));
     m_repeatMode = Config::value("player.repeat").toInt();
     m_shuffle = Config::value("player.shuffle") == qFromUtf8("1");
     {
@@ -1869,6 +1873,8 @@ void MainWindow::onPlayPause()
 void MainWindow::onPlayerStarted()
 {
     if (playerBar) playerBar->setPlaying(true);
+    if (m_bufTimer != 0 && !((QTimer*)m_bufTimer)->isActive())
+        ((QTimer*)m_bufTimer)->start(250);   // Qt3/Qt4 同签名
     switchToPlayerView(true);
 }
 
@@ -1880,6 +1886,8 @@ void MainWindow::onPlayerPaused()
 void MainWindow::onPlayerStopped()
 {
     if (playerBar) playerBar->setPlaying(false);
+    if (m_bufTimer != 0) ((QTimer*)m_bufTimer)->stop();
+    if (playerBar) playerBar->setBufferedMs(0);
     switchToPlayerView(false);
 }
 
@@ -2290,7 +2298,16 @@ void MainWindow::onDownloadCurrent()
 void MainWindow::onPlayerFinished()
 {
     if (playerBar) playerBar->setPlaying(false);
+    if (m_bufTimer != 0) ((QTimer*)m_bufTimer)->stop();
+    if (playerBar) playerBar->setBufferedMs(0);
     advanceNext(true);   /* 自然播完:仅 repeat=all 环绕(qlmusic 语义) */
+}
+
+void MainWindow::onRefreshBuffered()
+{
+    if (playerBar == 0)
+        return;
+    playerBar->setBufferedMs(m_player != 0 ? m_player->bufferedMs() : 0);
 }
 
 void MainWindow::onPlayerPosition(long ms)

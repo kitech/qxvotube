@@ -32,6 +32,7 @@ public:
     bool setMute(bool on);
     long position() const;
     long duration() const;
+    long bufferedMs() const;     // demuxer-cache-time,回退 -duration
     // M7:mpv 侧能取多少填多少(码率无属性=0;codec 用 video-codec)
     CxVideoInfo videoInfo() const;
 

@@ -43,6 +43,7 @@ public:
     bool setMute(bool on);
     long position() const;
     long duration() const;
+    long bufferedMs() const;     // demux 已读包前沿(网络缓冲)
     const char* aoBackend() const; // M2.1:当前 AO 后端(诊断/自测)
     // M7:宽高/codec/码率/fps(open 时采集);hw/宽高/codec 再实时覆盖,
     // 因为硬解失败会在首帧时回落到软解(cxffdec 会清 m_hwName),不能快照。

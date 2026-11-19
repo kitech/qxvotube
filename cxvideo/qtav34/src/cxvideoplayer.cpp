@@ -140,6 +140,13 @@ long CXVideoPlayer::duration() const
     return 0;
 }
 
+long CXVideoPlayer::bufferedMs() const
+{
+    if (m_engine != 0)
+        return m_engine->bufferedMs();
+    return 0;
+}
+
 // ── M3-A:轨道 + 外挂字幕(passthrough)──
 
 int CXVideoPlayer::audioTrackCount() const

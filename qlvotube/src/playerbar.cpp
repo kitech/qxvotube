@@ -147,7 +147,7 @@ PlayerBar::PlayerBar(QWidget* parent)
       m_progressMs(0), m_durationMs(0), m_hover(HitNone), m_dragging(false),
       m_volume(100), m_lastVolume(100), m_rate(1.0), m_muted(false),
       m_repeatMode(0), m_shuffle(false), m_autoSkip(true),
-      m_dlPct(0), m_dlVisible(false),
+      m_dlPct(0), m_dlVisible(false), m_bufferedMs(0),
       m_dlHideTimer(0), m_volumePopup(0), m_volumeSlider(0), m_muteCheck(0),
       m_subtitleLine(qFromUtf8("无字幕资源"))
 {
@@ -240,6 +240,7 @@ QRect PlayerBar::shotRect() const  { return QRect(width() - 52, 22, 34, 20); }
 QRect PlayerBar::repeatRect() const  { int cx = width() / 2; return QRect(cx + 15, 19, 20, 20); }
 QRect PlayerBar::shuffleRect() const { int cx = width() / 2; return QRect(cx + 43, 19, 20, 20); }
 QRect PlayerBar::downloadRect() const{ int cx = width() / 2; return QRect(cx + 99, 19, 20, 20); }
+QRect PlayerBar::bufferedRect() const{ int cx = width() / 2; return QRect(cx + 121, 19, 20, 20); }
 QRect PlayerBar::autoSkipRect() const{ int cx = width() / 2; return QRect(cx - 155, 19, 20, 20); }
 /* 单行字幕:右侧 EQ 按钮下方一行(夹在按钮行 y42 与进度条 y58 之间),
  * 右对齐到 width-14;不再占底部整行。绘制/命中均走此矩形。 */
@@ -266,6 +267,17 @@ static QString pbDownloadTip(bool visible, int pct)
     if (pct < 0)
         return qFromUtf8("下载中…(进度未知)");
     return qFromUtf8("下载中 ") + QString::number(pct) + qFromUtf8("%");
+}
+
+/* 缓冲圈 tooltip:显示后端网络缓冲到的时间点与百分比 */
+static QString pbBufferedTip(long bufferedMs, int durationMs)
+{
+    if (bufferedMs <= 0 || durationMs <= 0)
+        return qFromUtf8("缓冲进度:未知");
+    const long v = qMin(bufferedMs, (long)durationMs);
+    const int pct = qBound(0, (int)(v * 100 / durationMs), 100);
+    return qFromUtf8("缓冲 ") + QString::number(pct) + qFromUtf8("% · 已缓存到 ")
+           + fmtMs((int)v);
 }
 
 /* 单行截断(Qt3 无 QFontMetrics::elidedText,按宽度逐字裁) */
@@ -341,6 +353,20 @@ void PlayerBar::paintEvent(QPaintEvent*)
     p.setPen(Qt::NoPen);
     p.setBrush(pal.border);
     muiDrawRoundRect(p, pr, 3, 3);
+    /* 缓冲段(accent 与背景对半混色):下载常快于播放,浅色段领先亮色播放头 */
+    if (m_hasTrack && m_durationMs > 0 && m_bufferedMs > 0) {
+        int br = (int)((double)qMin(m_bufferedMs, (long)m_durationMs)
+                       / m_durationMs * pr.width());
+        br = qBound(0, br, pr.width());
+        if (br > 0) {
+            const QColor& a = pal.accent;
+            const QColor& b = pal.surfaceBg;
+            QColor bc((a.red() + b.red()) / 2, (a.green() + b.green()) / 2,
+                      (a.blue() + b.blue()) / 2);
+            p.setBrush(bc);
+            muiDrawRoundRect(p, QRect(pr.x(), pr.y(), br, pr.height()), 3, 3);
+        }
+    }
     int ratio = m_hasTrack && m_durationMs > 0
                     ? (int)((double)m_progressMs / m_durationMs * pr.width()) : 0;
     ratio = qBound(0, ratio, pr.width());
@@ -409,6 +435,31 @@ void PlayerBar::paintEvent(QPaintEvent*)
                 p.setPen(pal.textMuted);
                 p.drawText(QRect(dr.right() + 2, dr.top(), 30, dr.height()),
                            Qt::AlignVCenter, QString::number(m_dlPct)
+                                             + qFromUtf8("%"));
+            }
+        }
+        p.restore();
+    }
+
+    /* 缓冲进度圈(常驻):与下载圈区分——读播放后端网络缓冲前沿 */
+    {
+        QRect br = bufferedRect();
+        const QColor rc = (m_hover == HitBuffered) ? pal.accent : pal.textMuted;
+        int bp = (m_durationMs > 0 && m_bufferedMs > 0)
+                 ? qBound(0, (int)(m_bufferedMs * 100 / m_durationMs), 100) : 0;
+        p.save();
+        p.setPen(QPen(rc, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(br.left() + 1, br.top() + 1, br.width() - 2, br.height() - 2);
+        if (bp > 0) {
+            p.setBrush(pal.accent);
+            p.setPen(Qt::NoPen);
+            p.drawPie(br.left() + 2, br.top() + 2, br.width() - 4,
+                      br.height() - 4, 90 * 16, -bp * 3600 / 100);
+            if (br.right() + 34 <= rateRect().left() - 4) {
+                p.setPen(pal.textMuted);
+                p.drawText(QRect(br.right() + 2, br.top(), 30, br.height()),
+                           Qt::AlignVCenter, QString::number(bp)
                                              + qFromUtf8("%"));
             }
         }
@@ -571,6 +622,7 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
     else if (eqRect().contains(e->pos())) h = HitEq;
     else if (shotRect().contains(e->pos())) h = HitShot;
     else if (downloadRect().contains(e->pos())) h = HitDownload;
+    else if (bufferedRect().contains(e->pos())) h = HitBuffered;
     else if (repeatRect().contains(e->pos())) h = HitRepeat;
     else if (shuffleRect().contains(e->pos())) h = HitShuffle;
     else if (autoSkipRect().contains(e->pos())) h = HitAutoSkip;
@@ -578,9 +630,12 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
         m_hover = h;
         update();
     }
-    /* 悬停下载圈时显示进度 tooltip;移开即清除 */
+    /* 悬停下载/缓冲圈时显示进度 tooltip;移开即清除 */
     if (m_hover == HitDownload)
         showTempTooltip(this, downloadRect(), pbDownloadTip(m_dlVisible, m_dlPct));
+    else if (m_hover == HitBuffered)
+        showTempTooltip(this, bufferedRect(),
+                        pbBufferedTip(m_bufferedMs, m_durationMs));
     else
         showTempTooltip(this, downloadRect(), QString());
 }
@@ -602,6 +657,7 @@ void PlayerBar::leaveEvent(QEvent* e)
         update();
     }
     showTempTooltip(this, downloadRect(), QString());
+    showTempTooltip(this, bufferedRect(), QString());
 }
 
 // ── 播放模式 / 下载进度 / 音量弹层(2026-11-18,qlmusic 移植) ──
@@ -646,6 +702,18 @@ void PlayerBar::setDownloadState(int pct)
     /* 悬停下载圈时同步刷新 tooltip 文字 */
     if (m_hover == HitDownload)
         showTempTooltip(this, downloadRect(), pbDownloadTip(m_dlVisible, m_dlPct));
+}
+
+void PlayerBar::setBufferedMs(long ms)
+{
+    const long v = ms > 0 ? ms : 0;
+    if (v == m_bufferedMs)
+        return;                       // 250ms 轮询,值不变则不重绘
+    m_bufferedMs = v;
+    if (m_hover == HitBuffered)
+        showTempTooltip(this, bufferedRect(),
+                        pbBufferedTip(m_bufferedMs, m_durationMs));
+    update();
 }
 
 void PlayerBar::onDlHide()

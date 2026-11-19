@@ -484,6 +484,23 @@ long CXEngineMpv::duration() const
     return m_durMs;
 }
 
+long CXEngineMpv::bufferedMs() const
+{
+    CxMpvApi& api = CxMpvApi::instance();
+    if (h_mpv == 0 || api.mpv_get_property == 0)
+        return 0;
+    double t = 0;
+    // demuxer-cache-time = 缓冲数据最后时间戳(秒);读不到不伪造
+    if (api.mpv_get_property(h_mpv, "demuxer-cache-time",
+                             (int)CxMpvFmtDouble, &t) == 0 && t > 0)
+        return (long)(t * 1000);
+    double d = 0;   // 回退属性官方注明不可靠、常不可用
+    if (api.mpv_get_property(h_mpv, "demuxer-cache-duration",
+                             (int)CxMpvFmtDouble, &d) == 0 && d > 0)
+        return position() + (long)(d * 1000);
+    return 0;
+}
+
 void CXEngineMpv::customEvent(CustomEventBase* e)
 {
     if (e->type() != toEventType34(kCxMpvEventRaw))

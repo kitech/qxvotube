@@ -26,6 +26,8 @@ public:
     void setAutoSkip(bool on);           /* 播放失败自动跳过 */
     /* 下载进度 pie:0-100 / -1 未定 / -2 失败 / 100 完成(短暂留痕后隐) */
     void setDownloadState(int pct);
+    /* 缓冲进度(ms):播放后端网络缓冲前沿;独立定时器刷新,常驻显示 */
+    void setBufferedMs(long ms);
     /* 底部单行字幕(YouTube via yt-dlp);空串=不显示 */
     void setSubtitleLine(const QString& text);
     void retranslateUi();
@@ -64,7 +66,7 @@ private slots:
 
 private:
     enum Hit { HitNone, HitPrev, HitPlay, HitNext, HitProgress,
-               HitVol, HitRate, HitEq, HitShot, HitSub, HitDownload,
+               HitVol, HitRate, HitEq, HitShot, HitSub, HitDownload, HitBuffered,
                HitRepeat, HitShuffle, HitAutoSkip, HitSubLine };
     void setProgressFromX(int x);
     QRect playRect() const;
@@ -81,6 +83,7 @@ private:
     QRect autoSkipRect() const;
     QRect subtitleLineRect() const;
     QRect downloadRect() const;
+    QRect bufferedRect() const;
 
     Track m_track;
     bool m_hasTrack;
@@ -98,6 +101,7 @@ private:
     bool m_autoSkip;
     int m_dlPct;                         /* -1 未定 / 0-100 / -2 失败 */
     bool m_dlVisible;
+    long m_bufferedMs;                   /* 播放后端缓冲前沿(ms),0=未知 */
     QString m_subtitleLine;              /* 底部当前字幕行(空=不显示) */
     void* m_dlHideTimer;                 /* QTimer* */
     void* m_volumePopup;                 /* VolumePopupFrame* */

@@ -605,6 +605,11 @@ long CXEngineFfmpeg::duration() const
     return m_durMs;
 }
 
+long CXEngineFfmpeg::bufferedMs() const
+{
+    return m_demux != 0 ? m_demux->bufferedMs() : 0;
+}
+
 void CXEngineFfmpeg::customEvent(CustomEventBase* e)
 {
     if (e->type() != toEventType34(kcxFFmpegEventRaw))

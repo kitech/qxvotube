@@ -18,11 +18,18 @@ public:
                   int sIdx = -1, QObject* sink = 0)
         : fmtCtx(fmt), vQueue(vq), aQueue(aq), sQueue(sq),
           vStream(vIdx), aStream(aIdx), sStream(sIdx),
-          sink(sink), stopFlag(false),
+          sink(sink), stopFlag(false), m_bufferedMs(0),
           seekMs(0), seekStream(-1), seekReq(false)
     { }
 
     void requestStop() { stopFlag = true; }
+
+    /* 缓冲前沿(ms):demux 已从网络读到的最后包时间戳;UI 线程读 */
+    long bufferedMs() const
+    {
+        QMutexLocker lk(&m_bufMx);
+        return m_bufferedMs;
+    }
 
     /* seek 由本线程执行:AVFormatContext 非线程安全,绝不能与
      * av_read_frame 并发(2026-11-18 修复:并发导致读错误→EOS→冻结) */
@@ -54,6 +61,7 @@ protected:
                 postEos();
                 break;
             }
+            notePkt(pkt);   // 记录缓冲前沿,先于 pushPkt(所有权移交)
             if (pkt->stream_index == vStream && vQueue != 0)
                 pushPkt(vQueue, pkt, vStream);
             else if (pkt->stream_index == aStream && aQueue != 0)
@@ -105,9 +113,34 @@ private:
     /* 清队列积压并由消费线程自 flush(解码器归消费线程所有,避免竞态) */
     void flushAndMark(long ms)
     {
+        {   // seek 后旧缓冲前沿失效,归零重新累计
+            QMutexLocker lk(&m_bufMx);
+            m_bufferedMs = 0;
+        }
         flushOne(vQueue, ms);
         flushOne(aQueue, ms);
         flushOne(sQueue, ms);
+    }
+
+    /* 把已读包的 PTS 折算成 ms 取最大值当缓冲前沿;无时间戳跳过 */
+    void notePkt(const AVPacket* pkt)
+    {
+        if (pkt == 0 || fmtCtx == 0)
+            return;
+        const int si = pkt->stream_index;
+        if (si < 0 || si >= fmtCtx->nb_streams)
+            return;
+        const long long ts = (pkt->pts != AV_NOPTS_VALUE)
+                             ? pkt->pts : pkt->dts;
+        if (ts == AV_NOPTS_VALUE)
+            return;
+        const long ms = (long)(av_rescale_q(
+            ts, fmtCtx->streams[si]->time_base, AV_TIME_BASE_Q) / 1000);
+        if (ms <= 0)
+            return;
+        QMutexLocker lk(&m_bufMx);
+        if (ms > m_bufferedMs)
+            m_bufferedMs = ms;
     }
 
     void flushOne(CxPacketQueue* q, long ms)
@@ -152,6 +185,8 @@ private:
     int sStream;
     QObject* sink;
     volatile bool stopFlag;
+    mutable QMutex m_bufMx;      // 保护 m_bufferedMs(demux 写/UI 读)
+    long m_bufferedMs;
     QMutex seekMx;
     long seekMs;
     int seekStream;

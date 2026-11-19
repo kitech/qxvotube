@@ -63,6 +63,12 @@ public:
 
     virtual long position() const { return 0; }
     virtual long duration() const { return 0; }
+    // 缓冲前沿(ms):后端已从网络读到、可供播放的最后时间点;
+    // 0=未知/不支持/本地完整(不伪造)。各后端:
+    //   ffmpeg = demux 已读包 PTS 最大值(见 cxffdemux.h);
+    //   libmpv = demuxer-cache-time,回退 demuxer-cache-duration;
+    //   cmdmpv = 进程型无 IPC/属性通道,恒 0。
+    virtual long bufferedMs() const { return 0; }
 
     // M3-A:轨道选择 + 外挂字幕(不支持的能力各自返回 false/0;cmdmpv 即此形)
     virtual int audioTrackCount() const { return 0; }

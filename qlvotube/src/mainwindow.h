@@ -129,6 +129,7 @@ private slots:
     void onPlayerFinished();
     void onPlayerPosition(long ms);
     void onPlayerDuration(long ms);
+    void onRefreshBuffered();    // 独立定时器:缓冲进度与播放进度分开刷新
     void onPlayerError(int code, const QString& msg);
     void onSeekRequested(int ms); // 与 PlayerBar::seekRequested(int) 同型
 
@@ -159,6 +160,7 @@ private:
     int m_errSkipRun = 0;
     QString m_skipGuardId;
     class Downloader* m_dl = nullptr;
+    void* m_bufTimer = nullptr;  // QTimer*:250ms 独立刷新缓冲进度
 
     struct MenuItemRef {
         const char* key;
