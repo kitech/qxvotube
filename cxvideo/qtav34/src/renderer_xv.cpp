@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "limelog.h"
 
 extern "C" {
 #include <libavutil/pixfmt.h>
@@ -42,7 +43,7 @@ bool CXRendererXv::isAvailable()
 void CXRendererXv::setErr(const char* why)
 {
     m_err = QString::fromLatin1(why);
-    fprintf(stderr, "[cxvideo-xv] %s\n", why);
+    ALOG_WARN("[cxvideo-xv]", why);
 }
 
 CXRendererXv::CXRendererXv(QWidget* parent)
@@ -139,11 +140,11 @@ bool CXRendererXv::initXv()
                 m_port = port;
                 m_formatId = want;
                 grabbed = true;
-                fprintf(stderr,
-                        "[cxvideo-xv] adaptor=%s port=%lu base=%lu fmt=0x%08x ports=%lu\n",
-                        ai[i].name, (unsigned long)port,
-                        (unsigned long)ai[i].base_id, (unsigned)m_formatId,
-                        (unsigned long)ai[i].num_ports);
+                ALOG_INFO("[cxvideo-xv] adaptor=", ai[i].name,
+                          " port=", (unsigned long)port,
+                          " base=", (unsigned long)ai[i].base_id,
+                          " fmt=0x", QString::number((unsigned)m_formatId, 16),
+                          " ports=", (unsigned long)ai[i].num_ports);
             }
         }
         if (!grabbed && haveYuv)
@@ -241,13 +242,13 @@ void CXRendererXv::checkWindowVisual()
     }
     if (!match) {
         m_err = QString::fromLatin1("visual-mismatch");
-        fprintf(stderr,
-                "[cxvideo-xv] WARN window depth=%d visual=0x%lx 不在 adaptor"
-                "支持列表内(XvPutImage 可能 BadMatch,建议改用 x11/gl)\n",
-                wa.depth, vid);
+        ALOG_WARN("[cxvideo-xv] WARN window depth=", wa.depth,
+                  " visual=0x", QString::number((unsigned long)vid, 16),
+                  " 不在 adaptor支持列表内(XvPutImage 可能 BadMatch,建议改用 x11/gl)");
     } else {
-        fprintf(stderr, "[cxvideo-xv] window depth=%d visual=0x%lx compatible\n",
-                wa.depth, vid);
+        ALOG_INFO("[cxvideo-xv] window depth=", wa.depth,
+                  " visual=0x", QString::number((unsigned long)vid, 16),
+                  " compatible");
     }
 }
 

@@ -13,6 +13,7 @@
 #include "cxffathread.h"
 #include "cffsthread.h"
 #include "cxframe.h"
+#include "limelog.h"
 #include <stdlib.h>
 #include <string>
 #include <qapplication.h>
@@ -328,25 +329,25 @@ void CXEngineFfmpeg::stopThreads()
         m_sq = 0;
     }
     if (!vLeak && m_dec != 0) {
-        fprintf(stderr, "cx: dec close begin\n");
+        ALOG_INFO("cx: dec close begin");
         m_dec->close();
-        fprintf(stderr, "cx: dec close done\n");
+        ALOG_INFO("cx: dec close done");
         delete m_dec;
         m_dec = 0;
     }
     if (!sLeak && m_sdec != 0) {
-        fprintf(stderr, "cx: sdec close begin\n");
+        ALOG_INFO("cx: sdec close begin");
         m_sdec->close();
-        fprintf(stderr, "cx: sdec close done\n");
+        ALOG_INFO("cx: sdec close done");
         delete m_sdec;
         m_sdec = 0;
     }
     m_subTl.clear(); // 内嵌时间轴重建;外挂 m_subTlExt 保留(重启不清)
     if (!audioLeak) {
         if (m_adec != 0) {
-            fprintf(stderr, "cx: adec close begin\n");
+            ALOG_INFO("cx: adec close begin");
             m_adec->close();
-            fprintf(stderr, "cx: adec close done\n");
+            ALOG_INFO("cx: adec close done");
             delete m_adec;
             m_adec = 0;
         }

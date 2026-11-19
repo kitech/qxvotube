@@ -45,6 +45,13 @@ greaterThan(QT_MAJOR_VERSION, 5) {
 # 宿主工程若已含 compat34(qlite)则不重复编,独立工程(cxvideo 自测)才补编:
 BASEHOST_HAS_CORE = $$find(SOURCES, compat34)
 isEmpty(BASEHOST_HAS_CORE): CXVIDEO_CPP = $$QLCOMP34/compatcore34.cpp $$CXVIDEO_CPP
+# limelog(ALOG_* 的 apiLogImpl)与 qthooks(Qt 消息 hook)归属 qlcomp;
+# 宿主已含(qlite.pri)则不重复编,独立工程(selftest/demo)才补编,
+# 否则 ALOG_* 链接报 undefined reference,且 qWarning 无时间/级别前缀。
+BASEHOST_HAS_LOG = $$find(SOURCES, limelog)
+isEmpty(BASEHOST_HAS_LOG): CXVIDEO_CPP = $$QLCOMP34/limelog.cpp $$CXVIDEO_CPP
+BASEHOST_HAS_HOOK = $$find(SOURCES, qthooks)
+isEmpty(BASEHOST_HAS_HOOK): CXVIDEO_CPP = $$QLCOMP34/qthooks.cpp $$CXVIDEO_CPP
 
 CXVIDEO_HDR = \
     $$CXVIDEO/src/cxvideo_global.h \

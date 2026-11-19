@@ -18,6 +18,7 @@ void cxMpvQuickUpdateHook(void* ctx);
 #endif // CXV_QUICK_BUILD
 #include "cxthread.h"
 #include "cxframe.h"
+#include "limelog.h"
 #include <qapplication.h>
 #include <qmutex.h>
 #include <qwaitcondition.h>
@@ -110,8 +111,9 @@ private:
                 double secs = *(double*)pr->data;
                 long ms = (long)(secs * 1000.0 + 0.5);
                 if (strcmp(pr->name, "time-pos") == 0) {
-                    if (getenv("CX_MPV_DEBUG") != 0)
-                        fprintf(stderr, "pos-ev %ld\n", ms);
+                    if (getenv("CX_MPV_DEBUG") != 0) {
+                        ALOG_DEBUG("pos-ev ", ms);
+                    }
                     post(CxMpvUiEvPos, ms, 0);
                 }
                 else if (strcmp(pr->name, "duration") == 0)
@@ -653,8 +655,9 @@ static bool cxMpvSetPropInt(CxMpvApi& api, void* h, const char* prop, int v)
         return false;
     long long val = v;
     int r = api.mpv_set_property(h, prop, (int)CxMpvFmtInt64, &val);
-    if (r < 0 && getenv("CX_MPV_DEBUG") != 0)
-        fprintf(stderr, "setEq: %s=%d ret=%d\n", prop, v, r);
+    if (r < 0 && getenv("CX_MPV_DEBUG") != 0) {
+        ALOG_DEBUG("setEq: ", prop, "=", v, " ret=", r);
+    }
     return r == 0;
 }
 
@@ -732,12 +735,12 @@ int cxEngineMpvProbeLib()
 {
     CxMpvApi& api = CxMpvApi::instance();
     if (!api.ensure()) {
-        fprintf(stderr, "probelib: ensure failed\n");
+        ALOG_ERROR("probelib: ensure failed");
         return 0;
     }
     void* mpv = api.mpv_create();
     if (mpv == 0) {
-        fprintf(stderr, "probelib: create failed\n");
+        ALOG_ERROR("probelib: create failed");
         return 1;
     }
     api.mpv_set_option_string(mpv, "ao", "null");
@@ -745,7 +748,7 @@ int cxEngineMpvProbeLib()
     api.mpv_set_option_string(mpv, "force-window", "no");
     int r = api.mpv_initialize(mpv);
     if (r < 0) {
-        fprintf(stderr, "probelib: initialize ret=%d\n", r);
+        ALOG_ERROR("probelib: initialize ret=", r);
         api.mpv_terminate_destroy(mpv);
         return 1;
     }
