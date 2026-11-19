@@ -75,6 +75,14 @@ img = cxToRgb32(img);
     QSize s = size();
     int iw = img.width();
     int ih = img.height();
+    // 诊断:widget vs 图像尺寸(仅尺寸变化时打,避免每帧刷屏)
+    static int s_lastW = -1, s_lastH = -1, s_lastIW = -1, s_lastIH = -1;
+    if (s_lastW != s.width() || s_lastH != s.height() ||
+        s_lastIW != iw || s_lastIH != ih) {
+        s_lastW = s.width(); s_lastH = s.height();
+        s_lastIW = iw; s_lastIH = ih;
+        qWarning("[rend] widget=%dx%d img=%dx%d", s_lastW, s_lastH, s_lastIW, s_lastIH);
+    }
     if (iw <= 0 || ih <= 0)
         return;
     double scale = double(s.width()) / iw;

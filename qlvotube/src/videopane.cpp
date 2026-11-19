@@ -83,7 +83,10 @@ void VideoPane::setRendererWidget(QWidget* w)
     w->setParent(m_surface);
 #endif
     m_renderer = w;
-    w->setGeometry(m_surface->rect());
+    // 交给 m_surface 的布局管理：minimumSize(320,180) 与 surface 尺寸变化自动生效；
+    // 不再用一次性 setGeometry（会绕过 min 且滞后于 surface 变化）
+    QBoxLayout* rendererLay = qNewBoxLayout(m_surface, QBoxLayout::LeftToRight, 0, 0);
+    rendererLay->addWidget(w, 1);
     w->show();
     w->raise();
 }
@@ -127,9 +130,6 @@ void VideoPane::contextMenuEvent(QContextMenuEvent* e)
 void VideoPane::resizeEvent(QResizeEvent* e)
 {
     QWidget::resizeEvent(e);
-    if (m_surface != 0)
-        m_surface->setGeometry(0, m_surface->y(), width(), m_surface->height());
-    // 渲染器子件跟随 surface(不跟则停在初建尺寸,画面缩在一角)
-    if (m_renderer != 0 && m_surface != 0)
-        m_renderer->setGeometry(0, 0, m_surface->width(), m_surface->height());
+    // m_surface 由外层 m_lay 管理，renderer 由 m_surface 的布局管理；
+    // 二者尺寸自动联动，不再手动 setGeometry（原实现高度沿用旧值会卡住）。
 }
