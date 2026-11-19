@@ -167,7 +167,9 @@ bool CxDecoderAudio::ensureSwr(AVFrame* in, int outCh, int outRate)
         swr_free(&m_swr);
         m_swr = 0;
     }
-    AVChannelLayout il, ol;
+    /* FFmpeg 要求 copy 的 dst 必须先初始化:内部会先 uninit(dst) 释放旧 map。
+     * 未初始化的栈变量 order 若为 CUSTOM 会对随机 u.map 调 av_freep → 崩溃。 */
+    AVChannelLayout il = {}, ol = {};
     if (av_channel_layout_copy(&il, inLayout) < 0)
         return false;
     av_channel_layout_default(&ol, outCh);
