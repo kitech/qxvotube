@@ -590,6 +590,8 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onNext()));
         QObject::connect(playerBar, SIGNAL(seekRequested(int)),
                          this, SLOT(onSeekRequested(int)));
+        QObject::connect(playerBar, SIGNAL(videoSurfaceRequested()),
+                         this, SLOT(onVideoSurfaceRequested()));
         QObject::connect(playerBar, SIGNAL(volumeChanged(int)),
                          this, SLOT(onVolumeChanged(int)));
         QObject::connect(playerBar, SIGNAL(muteChanged(bool)),
@@ -1376,6 +1378,7 @@ static QString cxResolveQuality(const QString& cfg)
 void MainWindow::onSiteChanged(const QString& providerId)
 {
     m_curProv = 0;
+    if (contentView) contentView->setPlayingVideoId(QString());
     for (int i = 0; i < m_providers.size(); ++i)
         if (m_providers[i]->id() == providerId) {
             m_curProv = m_providers[i];
@@ -1536,6 +1539,7 @@ void MainWindow::onSearchSubmitted(const QString& kw)
     m_videoCards.clear();
     m_videoIds.clear();
     m_videoQueue.clear();
+    if (contentView) contentView->setPlayingVideoId(QString());
     m_videoMode = false;
     m_videoIdx = -1;
     contentView->showVideoGrid(_("content.search_result").arg(kw));
@@ -1623,6 +1627,7 @@ void MainWindow::playVideoAt(int index)
     const QString id = m_videoIds[index];
     if (queuePanel) queuePanel->setCurrentTrack(m_videoQueue[index]);
     if (playerBar) playerBar->setTrack(m_videoQueue[index]);
+    if (contentView) contentView->setPlayingVideoId(id);   /* 列表 ▶ 标识 */
     /* 字幕:播放时自动拉(仅 YouTube;其它源空壳显式 Unsupported) */
     requestSubtitles(id);
     if (getenv("QLVOTUBE_DEBUG") != 0) {
@@ -1884,6 +1889,13 @@ void MainWindow::onPlayerStarted()
     if (m_bufTimer != 0 && !((QTimer*)m_bufTimer)->isActive())
         ((QTimer*)m_bufTimer)->start(250);   // Qt3/Qt4 同签名
     switchToPlayerView(true);
+    if (m_pendingSeekMs >= 0) {
+        const int target = m_pendingSeekMs;
+        m_pendingSeekMs = -1;
+        if (m_player != 0) {
+            m_player->seek(target);   /* 重播 started 后跳到拖动位置 */
+        }
+    }
 }
 
 void MainWindow::onPlayerPaused()
@@ -1911,6 +1923,11 @@ void MainWindow::switchToPlayerView(bool on)
 void MainWindow::onVideoBackRequested()
 {
     switchToPlayerView(false);
+}
+
+void MainWindow::onVideoSurfaceRequested()
+{
+    switchToPlayerView(true);
 }
 
 /* ── M7:顶栏分辨率/档位 ─────────────────────────────────────────── */
@@ -2580,9 +2597,17 @@ void MainWindow::onPlayerError(int code, const QString& msg)
 
 void MainWindow::onSeekRequested(int ms)
 {
+    if (m_playFinished) {
+        /* 播完态拖进度:先从头重播当前项,started 后跳到目标位置并继续播放 */
+        m_pendingSeekMs = ms;
+        m_playFinished = false;
+        replayCurrent();
+        return;
+    }
     /* cmdmpv 进程型 M1 暂不支持外控(M2 接 IPC);libmpv 内核可精细 seek */
-    if (m_player != 0 && m_player->engine() != 0)
+    if (m_player != 0 && m_player->engine() != 0) {
         m_player->seek(ms);
+    }
 }
 
 void MainWindow::onPrev()
@@ -2835,6 +2860,7 @@ void MainWindow::customEvent(CustomEventBase* event)
             }
             m_gridHasMore = e->hasMore;
             m_gridPage = e->page + 1;
+            if (contentView && e->page > 0) contentView->setVideoGridPage(e->page);
             m_gridLoading = false;
             return;
         }

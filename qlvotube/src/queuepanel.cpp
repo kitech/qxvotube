@@ -2,6 +2,7 @@
 #include "musicstyle.h"
 #include "translator.h"
 #include "identicon.h"
+#include "videothumbcache.h"
 
 #include <qglobal.h>
 #include <qpainter.h>
@@ -36,6 +37,17 @@ void QueuePanel::setQueue(const std::vector<Track>& queue, int startIndex)
     update();
 }
 
+void QueuePanel::customEvent(CustomEventBase* e)
+{
+    if (e->type() == ThumbReadyEventType) {
+        ThumbReadyEvent* te = static_cast<ThumbReadyEvent*>(e);
+        thumbcache::accept(te->url, te->image);
+        update();
+        return;
+    }
+    QWidget::customEvent(e);
+}
+
 void QueuePanel::paintEvent(QPaintEvent*)
 {
     const StyleParams::Palette& pal = muiPalette();
@@ -56,7 +68,21 @@ void QueuePanel::paintEvent(QPaintEvent*)
     int y = 46;
     if (m_hasCurrent) {
         int coverSize = qMin(width() - 48, 150);
-        QPixmap cover = generateIdenticon(m_current.coverSeed, coverSize);
+        QPixmap cover = thumbcache::pixmap(m_current.coverUrl);
+        if (cover.isNull()) {
+            if (!m_current.coverUrl.isEmpty()) {
+                thumbcache::request(m_current.coverUrl, this);
+            }
+            cover = generateIdenticon(m_current.coverSeed, coverSize);
+        }
+        if (cover.width() != coverSize || cover.height() != coverSize) {
+#ifdef QT3_BUILD
+            cover.resize(coverSize, coverSize);
+#else
+            cover = cover.scaled(coverSize, coverSize, Qt::IgnoreAspectRatio,
+                                 Qt::SmoothTransformation);
+#endif
+        }
         int cx = (width() - coverSize) / 2;
         p.drawPixmap(cx, y, cover);
         y += coverSize + 12;
@@ -85,7 +111,8 @@ void QueuePanel::paintEvent(QPaintEvent*)
             p.fillRect(QRect(8, y, width() - 16, 40), pal.activeBg);
         p.setFont(small);
         p.setPen(selected ? pal.accent : pal.textMuted);
-        p.drawText(QRect(16, y, 22, 40), Qt::AlignVCenter | Qt::AlignLeft, QString::number((int)i + 1));
+        p.drawText(QRect(16, y, 22, 40), Qt::AlignVCenter | Qt::AlignLeft,
+                   selected ? qFromUtf8("▶") : QString::number((int)i + 1));
         p.setFont(selected ? bold : font());
         p.setPen(selected ? pal.accent : pal.textPrimary);
         p.drawText(QRect(40, y + 3, width() - 56, 20), Qt::AlignVCenter | Qt::AlignLeft, t.title);

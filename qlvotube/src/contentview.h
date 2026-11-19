@@ -45,6 +45,8 @@ public:
     void setLibrary(const std::vector<Playlist>& lib);
     void retranslateUi();
     bool isVideoGridMode() const;   // 供 MainWindow 刷新时分流
+    void setPlayingVideoId(const QString& id);  // 当前播放视频(列表 ▶ 标识)
+    void setVideoGridPage(int page);            // 页码显示(0=不显示)
 
     /* PlaylistListMode：远端歌单列表（热门歌单/分类列表） */
     void showPlaylistList(const QString& title, const std::vector<RemotePlaylistCard>& cards,
@@ -140,6 +142,8 @@ private:
     QString m_loading;
     bool m_hasMore;
     bool m_loadingNow;
+    QString m_playingVideoId;   // 当前播放视频 id(空=无)
+    int m_gridPage;             // 视频列表当前页(0=未知)
 };
 
 #endif // CONTENTVIEW_H

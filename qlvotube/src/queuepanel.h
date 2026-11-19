@@ -15,6 +15,7 @@ public:
 
 protected:
     void paintEvent(QPaintEvent* e);
+    void customEvent(CustomEventBase* e);   // 封面解码完成
 
 private:
     Track m_current;

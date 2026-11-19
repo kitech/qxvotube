@@ -37,6 +37,7 @@ public:
 signals:
     void playStateChanged(bool playing);
     void playPauseRequested();
+    void videoSurfaceRequested();   // 点封面/标题 → 回视频播放页
     void prevRequested();
     void nextRequested();
     void seekRequested(int ms);
@@ -59,6 +60,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* e);
     void leaveEvent(QEvent* e);
     void wheelEvent(QWheelEvent* e);     /* 滚轮 = 音量 ±5 */
+    void customEvent(CustomEventBase* e);   // 封面解码完成
 
 private slots:
     void onMuteToggled(bool on);         /* 弹层静音勾选 */
@@ -69,6 +71,8 @@ private:
                HitVol, HitRate, HitEq, HitShot, HitSub, HitDownload, HitBuffered,
                HitRepeat, HitShuffle, HitAutoSkip, HitSubLine };
     void setProgressFromX(int x);
+    QRect coverRect() const;
+    QRect titleRect() const;
     QRect playRect() const;
     QRect prevRect() const;
     QRect nextRect() const;

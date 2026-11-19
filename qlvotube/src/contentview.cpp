@@ -79,7 +79,7 @@ ContentView::ContentView(QWidget* parent)
     : QWidget(parent), m_pl(0), m_mode(TracksMode), m_scrollBar(0), m_scrollY(0),
       m_scrollDelta(0), m_hover(-1), m_current(-1), m_playlistId(-1),
       m_headerH(64), m_rowH(48), m_lastMoreAt(0),
-      m_hasMore(false), m_loadingNow(false)
+      m_hasMore(false), m_loadingNow(false), m_gridPage(0)
 {
     setMouseTracking(true);
     /* 可聚焦:点击网格后把焦点从搜索框拿回,快捷键(空格/方向键)才生效 */
@@ -359,6 +359,20 @@ QRect ContentView::refreshRect() const
 
 bool ContentView::isVideoGridMode() const { return m_mode == VideoGridMode; }
 
+void ContentView::setPlayingVideoId(const QString& id)
+{
+    if (m_playingVideoId == id) return;
+    m_playingVideoId = id;
+    update();
+}
+
+void ContentView::setVideoGridPage(int page)
+{
+    if (m_gridPage == page) return;
+    m_gridPage = page;
+    update();
+}
+
 QRect ContentView::loadMoreRect() const
 {
     if (m_mode == VideoGridMode) {
@@ -592,6 +606,14 @@ void ContentView::paintEvent(QPaintEvent*)
         p.drawText(br, Qt::AlignCenter, QString::fromUtf8("← ") + m_back);
     }
 
+    if (m_mode == VideoGridMode && m_gridPage > 0) {
+        p.setFont(small);
+        p.setPen(pal.textMuted);
+        p.drawText(QRect(width() - 260, 4, 84, 30),
+                   Qt::AlignVCenter | Qt::AlignRight,
+                   qFromUtf8("第 %1 页").arg(m_gridPage));
+    }
+
     /* 所有列表模式右上角:刷新按钮(在返回按钮左侧,两种模式通用) */
     {
         QRect rf = refreshRect();
@@ -766,9 +788,13 @@ void ContentView::paintEvent(QPaintEvent*)
 
             p.setFont(bold);
             p.setPen(pal.textPrimary);
+            QString vt = c.title;
+            if (!m_playingVideoId.isEmpty() && c.id == m_playingVideoId) {
+                vt = qFromUtf8("▶ ") + vt;   /* 当前播放:右箭头标识 */
+            }
             p.drawText(QRect(cr.x(), cr.y() + coverH + 4, cr.width(), 18),
                        Qt::AlignVCenter | Qt::AlignLeft,
-                       elideOneLine(p, c.title, cr.width()));
+                       elideOneLine(p, vt, cr.width()));
             p.setFont(small);
             p.setPen(pal.textMuted);
             QString sub = c.author;
@@ -863,13 +889,21 @@ void ContentView::mousePressEvent(QMouseEvent* e)
         }
     }
     if (m_mode == VideoGridMode) {
-        if (!m_gridErr.isEmpty() && retryRect().contains(e->pos())) {
-            emit loadMoreRequested();     /* 重试 = 重拉当前页 */
-            return;
+        if (!m_gridErr.isEmpty()) {
+            QRect rr = retryRect();
+            rr.moveTop(rr.top() - m_scrollY);   /* 与绘制同一 viewport 坐标 */
+            if (rr.contains(e->pos())) {
+                emit loadMoreRequested();       /* 重试 = 重拉当前页 */
+                return;
+            }
         }
-        if (m_hasMore && !m_loadingNow && loadMoreRect().contains(e->pos())) {
-            emit loadMoreRequested();
-            return;
+        if (m_hasMore && !m_loadingNow) {
+            QRect lr = loadMoreRect();
+            lr.moveTop(lr.top() - m_scrollY);
+            if (lr.contains(e->pos())) {
+                emit loadMoreRequested();
+                return;
+            }
         }
         const int badge = badgeAt(e->pos());
         if (badge == 2) {                    /* 评论数徽标 → 评论窗口 */
@@ -935,11 +969,20 @@ void ContentView::mouseMoveEvent(QMouseEvent* e)
 {
     if (m_mode == VideoGridMode) {
         int h = rowAt(e->pos());
-        if (h < 0 && !m_gridErr.isEmpty() && retryRect().contains(e->pos()))
-            h = 3000000;
-        if (h < 0 && m_hasMore && !m_loadingNow
-            && loadMoreRect().contains(e->pos()))
-            h = 3000001;
+        if (h < 0 && !m_gridErr.isEmpty()) {
+            QRect rr = retryRect();
+            rr.moveTop(rr.top() - m_scrollY);
+            if (rr.contains(e->pos())) {
+                h = 3000000;
+            }
+        }
+        if (h < 0 && m_hasMore && !m_loadingNow) {
+            QRect lr = loadMoreRect();
+            lr.moveTop(lr.top() - m_scrollY);
+            if (lr.contains(e->pos())) {
+                h = 3000001;
+            }
+        }
         if (h != m_hover) { m_hover = h; update(); }
         return;
     }

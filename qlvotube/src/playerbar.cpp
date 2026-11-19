@@ -2,6 +2,7 @@
 #include "musicstyle.h"
 #include "translator.h"
 #include "identicon.h"
+#include "videothumbcache.h"
 
 #include <qglobal.h>
 #include <stdio.h>
@@ -302,6 +303,25 @@ void PlayerBar::setProgressFromX(int x)
     update();
 }
 
+void PlayerBar::customEvent(CustomEventBase* e)
+{
+    if (e->type() == ThumbReadyEventType) {
+        ThumbReadyEvent* te = static_cast<ThumbReadyEvent*>(e);
+        thumbcache::accept(te->url, te->image);
+        update();
+        return;
+    }
+    QWidget::customEvent(e);
+}
+
+QRect PlayerBar::coverRect() const { return QRect(14, 14, 52, 52); }
+
+QRect PlayerBar::titleRect() const
+{
+    const int right = qMax(112, width() / 2 - 124);  // 止于 prevRect 左侧
+    return QRect(72, 12, right - 72, 46);
+}
+
 void PlayerBar::paintEvent(QPaintEvent*)
 {
     const StyleParams::Palette& pal = muiPalette();
@@ -316,7 +336,21 @@ void PlayerBar::paintEvent(QPaintEvent*)
     small.setPointSize(qMax(7, small.pointSize() - 2));
 
     if (m_hasTrack) {
-        QPixmap cover = generateIdenticon(m_track.coverSeed, 52);
+        QPixmap cover = thumbcache::pixmap(m_track.coverUrl);
+        if (cover.isNull()) {
+            if (!m_track.coverUrl.isEmpty()) {
+                thumbcache::request(m_track.coverUrl, this);
+            }
+            cover = generateIdenticon(m_track.coverSeed, 52);
+        }
+        if (cover.width() != 52 || cover.height() != 52) {
+#ifdef QT3_BUILD
+            cover.resize(52, 52);
+#else
+            cover = cover.scaled(52, 52, Qt::IgnoreAspectRatio,
+                                 Qt::SmoothTransformation);
+#endif
+        }
         p.drawPixmap(14, 14, cover);
         p.setFont(bold);
         p.setPen(pal.textPrimary);
@@ -563,6 +597,11 @@ void PlayerBar::paintEvent(QPaintEvent*)
 
 void PlayerBar::mousePressEvent(QMouseEvent* e)
 {
+    if (m_hasTrack && (coverRect().contains(e->pos())
+                       || titleRect().contains(e->pos()))) {
+        emit videoSurfaceRequested();
+        return;
+    }
     if (getenv("QLVOTUBE_DEBUG") != 0)
         fprintf(stderr, "pbar w=%d click=%d,%d vol=%d,%d rate=%d,%d eq=%d,%d shot=%d,%d\n",
                 width(), e->pos().x(), e->pos().y(),

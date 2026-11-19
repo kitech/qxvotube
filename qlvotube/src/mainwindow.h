@@ -102,6 +102,7 @@ private slots:
     void onPlayerStarted();
     void switchToPlayerView(bool on);    /* M5-A 播放页切换 */
     void onVideoBackRequested();
+    void onVideoSurfaceRequested();  /* 点 playbar 封面/标题 → 回播放页 */
     void onQaAutoplay();     /* QA 钩子:QLVOTUBE_AUTOPLAY=<url> 自动起播 */
     void startQaTimeline();  /* 二期:QLVOTUBE_QA=1 六步自检调度 */
     /* 二期同步:QLVOTUBE_QA=1 六步自检(与 qskvotube 同格式 qa: step=) */
@@ -163,6 +164,7 @@ private:
     class Downloader* m_dl = nullptr;
     void* m_bufTimer = nullptr;  // QTimer*:250ms 独立刷新缓冲进度
     bool m_playFinished = false; // 当前项自然播完且未被自动切歌覆盖
+    int m_pendingSeekMs = -1;    // 播完后拖进度:待跳转位置(ms),-1=无
 
     struct MenuItemRef {
         const char* key;
