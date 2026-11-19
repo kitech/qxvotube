@@ -106,6 +106,13 @@
     "videoout_tab": "视频输出",
     "videoout_label": "输出后端",
     "videoout_hint": "auto = 无 GL 优先(xv→x11→sdl→raster→gl),改动下次启动生效。",
+    "test_audio_btn": "播放测试音（440Hz 正弦 2 秒）",
+    "test_video_btn": "播放测试视频（彩条 2 秒）",
+    "test_unsupported": "该后端不支持或不可用：%1",
+    "test_gen_fail": "测试音生成失败（无写权限？）",
+    "test_ffmpeg_fail": "测试视频生成失败（系统无 ffmpeg，不支持）",
+    "test_audio_playing": "正在播放测试音（后端：%1）…",
+    "test_video_playing": "正在播放测试视频（后端：%1）…",
     "quality_tab": "播放分辨率",
     "quality_label": "默认分辨率",
     "quality_hint": "默认 360P;auto = 各源默认。B站游客上限 720P,YouTube 360P 走渐进流。"

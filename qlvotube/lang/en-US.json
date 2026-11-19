@@ -106,6 +106,13 @@
     "videoout_tab": "Video output",
     "videoout_label": "Output backend",
     "videoout_hint": "auto = no-GL first (xv→x11→sdl→raster→gl); takes effect on next start.",
+    "test_audio_btn": "Play test tone (440Hz sine, 2s)",
+    "test_video_btn": "Play test video (color bars, 2s)",
+    "test_unsupported": "Backend unsupported or unavailable: %1",
+    "test_gen_fail": "Failed to generate test tone (no write permission?)",
+    "test_ffmpeg_fail": "Failed to generate test video (no ffmpeg on system, unsupported)",
+    "test_audio_playing": "Playing test tone (backend: %1)...",
+    "test_video_playing": "Playing test video (backend: %1)...",
     "quality_tab": "Playback quality",
     "quality_label": "Default quality",
     "quality_hint": "Default 360P; auto = provider default. Bilibili guests cap at 720P; YouTube 360P uses progressive."

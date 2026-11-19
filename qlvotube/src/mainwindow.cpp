@@ -73,6 +73,9 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <cmath>
+#include <stdint.h>
+#include <qcolor.h>
 
 #include "app_icon.xpm"
 
@@ -91,6 +94,193 @@ static QString cxShotDir()
 #endif
     return dir;
 }
+
+/* ===== 视频输出页播放测试:内嵌显示 + 跟随所选后端 ===== */
+/* 测试媒体目录(与截图共用 ~/.cache/qlvotube) */
+static QString cxTestMediaDir()
+{
+    QString dir = qGetHomePath() + "/.cache/qlvotube";
+#ifdef QT3_BUILD
+    QDir d; d.mkdir(dir);
+#else
+    QDir().mkpath(dir);
+#endif
+    return dir;
+}
+
+/* 2s 440Hz 正弦 S16 双声道 WAV(移植 qlmusic writeTestWav) */
+static bool writeTestWav(const QString& path, int seconds)
+{
+    const int sr = 44100, ch = 2;
+    const int dataBytes = sr * ch * 2 * seconds;
+    std::ofstream f(qToUtf8(path).data(), std::ios::binary | std::ios::trunc);
+    if (!f.is_open()) {
+        return false;
+    }
+    uint32_t sampleRate = sr, byteRate = sr * ch * 2;
+    uint16_t blockAlign = ch * 2, bits = 16, fmtTag = 1;
+    f.write("RIFF", 4);
+    { uint32_t v = 36 + dataBytes; f.write((char*)&v, 4); }
+    f.write("WAVEfmt ", 8);
+    { uint32_t v = 16; f.write((char*)&v, 4); }
+    f.write((char*)&fmtTag, 2);
+    f.write((char*)&ch, 2);
+    f.write((char*)&sampleRate, 4);
+    f.write((char*)&byteRate, 4);
+    f.write((char*)&blockAlign, 2);
+    f.write((char*)&bits, 2);
+    f.write("data", 4);
+    { uint32_t v = dataBytes; f.write((char*)&v, 4); }
+    const double pi = 3.14159265358979323846;
+    for (int i = 0; i < sr * seconds; i++) {
+        int16_t s = (int16_t)(sin(2.0 * pi * 440.0 * i / sr) * 0.25 * 32767.0);
+        f.write((char*)&s, 2);
+        f.write((char*)&s, 2);
+    }
+    return f.good();
+}
+
+/* 2s 彩条 + 440Hz mp4(复用 cxvideo selftest 的 lavfi 命令) */
+static bool writeTestVideo(const QString& path)
+{
+    const QString cmd = QString("ffmpeg -f lavfi -i testsrc=duration=2:size=640x360:rate=25 "
+                                "-f lavfi -i sine=frequency=440:duration=2 "
+                                "-map 0:v -map 1:a -pix_fmt yuv420p -shortest \"%1\" -y "
+                                "2>/dev/null </dev/null").arg(path);
+    return system(qToUtf8(cmd).data()) == 0;
+}
+
+/* 精简视频 surface:黑底,resize 同步 renderer 几何,切换时清理旧件 */
+class TestVideoSurface : public QWidget {
+public:
+    explicit TestVideoSurface(QWidget* parent = 0) : QWidget(parent), m_renderer(0)
+    {
+#ifdef QT3_BUILD
+        setBackgroundColor(QColor(0, 0, 0));
+#else
+        setAutoFillBackground(true);
+        QPalette p = palette();
+        p.setColor(QPalette::Window, QColor(0, 0, 0));
+        setPalette(p);
+#endif
+        setMinimumSize(320, 180);
+    }
+    void setRendererWidget(QWidget* w)
+    {
+        if (m_renderer != 0 && m_renderer != w) {
+            delete m_renderer;
+        }
+        m_renderer = w;
+        if (w != 0) {
+            w->setGeometry(0, 0, width(), height());
+            w->show();
+            w->raise();
+        }
+    }
+    void clearRenderer() { setRendererWidget(0); }
+protected:
+    void resizeEvent(QResizeEvent* e)
+    {
+        QWidget::resizeEvent(e);
+        if (m_renderer != 0) {
+            m_renderer->setGeometry(0, 0, width(), height());
+        }
+    }
+private:
+    QWidget* m_renderer;
+};
+
+/* 测试控件:内嵌 surface + 独立 player,后端源 = 传入的 combo(即 voutItem) */
+class TestPlaybackWidget : public QWidget {
+public:
+    TestPlaybackWidget(QComboBox* backendCombo, QWidget* parent = 0)
+        : QWidget(parent), m_combo(backendCombo), m_player(0), m_renderer(0)
+    {
+        QBoxLayout* lay = qNewBoxLayout(this, QBoxLayout::TopToBottom, 4, 4);
+        m_surface = new TestVideoSurface(this);
+        lay->addWidget(m_surface, 1);
+        QPushButton* audioBtn = new QPushButton(_("settings.test_audio_btn"), this);
+        LambdaSlot* audioSlot = new LambdaSlot(this, [this]() { playTest(true); });
+        connect(audioBtn, SIGNAL(clicked()), audioSlot, SLOT(call()));
+        lay->addWidget(audioBtn);
+        QPushButton* videoBtn = new QPushButton(_("settings.test_video_btn"), this);
+        LambdaSlot* videoSlot = new LambdaSlot(this, [this]() { playTest(false); });
+        connect(videoBtn, SIGNAL(clicked()), videoSlot, SLOT(call()));
+        lay->addWidget(videoBtn);
+    }
+    ~TestPlaybackWidget()
+    {
+        if (m_player != 0) {
+            m_player->stop();
+            delete m_player;
+        }
+    }
+private:
+    /* 按对话框当前选中后端确保就绪;out=实际生效后端,why=回退/失败原因 */
+    bool ensureReady(QString* out, QString* why)
+    {
+        const QString want = (m_combo != 0) ? m_combo->currentText() : qFromUtf8("auto");
+        if (m_player != 0 && m_player->engine() != 0 && want == m_backend) {
+            *out = m_backend;
+            *why = m_why;
+            return true;
+        }
+        if (m_player != 0) {
+            m_player->stop();
+            delete m_player;
+            m_player = 0;
+        }
+        m_surface->clearRenderer();
+        m_renderer = 0;
+        CxVideoOut vo = cxCreateVideoOut(m_surface, want, QString());
+        if (vo.widget == 0) {
+            *why = vo.why;
+            return false;
+        }
+        m_surface->setRendererWidget(vo.widget);
+        m_renderer = vo.renderer;
+        m_backend = want;
+        m_why = vo.why;
+        m_player = new CXVideoPlayer(this);
+        if (!m_player->setEngine(CxEngineFfmpeg)) {
+            *why = qFromUtf8("ffmpeg 引擎不可用");
+            m_surface->clearRenderer();
+            delete m_player;
+            m_player = 0;
+            return false;
+        }
+        m_player->setHostWidget(m_surface);
+        m_player->setRenderer(m_renderer);
+        *out = m_backend;
+        *why = m_why;
+        return true;
+    }
+    void playTest(bool audio)
+    {
+        QString out, why;
+        if (!ensureReady(&out, &why)) {
+            SharedStatusBar::instance()->showMessage(_("settings.test_unsupported").arg(why), 4000);
+            return;
+        }
+        const QString p = cxTestMediaDir() + (audio ? "/audio_test.wav" : "/video_test.mp4");
+        const bool ok = audio ? writeTestWav(p, 2) : writeTestVideo(p);
+        if (!ok) {
+            SharedStatusBar::instance()->showMessage(
+                audio ? _("settings.test_gen_fail") : _("settings.test_ffmpeg_fail"), 4000);
+            return;
+        }
+        m_player->open(p);
+        m_player->play();
+        SharedStatusBar::instance()->showMessage(
+            (audio ? _("settings.test_audio_playing") : _("settings.test_video_playing")).arg(out), 3000);
+    }
+    QComboBox* m_combo;
+    TestVideoSurface* m_surface;
+    CXVideoPlayer* m_player;
+    CXVideoRenderer* m_renderer;
+    QString m_backend;
+    QString m_why;
+};
 
 static const char* const kTopMenuKeys[] = {
     "menu.file", "menu.edit", "menu.tool", "menu.help"
@@ -1556,6 +1746,11 @@ void MainWindow::openSettings()
     vhint->setMinimumHeight(44);                          /* 换行文本给两行高度 */
 #endif
     vpage->addWidget(vhint);
+
+    /* 视频输出页播放测试:内嵌显示 + 两测试按钮,后端跟随本页 voutItem */
+    TestPlaybackWidget* tpw = new TestPlaybackWidget(voutItem->comboBox(), vpage);
+    vpage->addWidget(tpw, 1);
+
     dlg->addCategory(_("settings.videoout_tab"), vpage);
     dlg->registerConfigItem(voutItem);
 
