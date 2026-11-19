@@ -49,6 +49,21 @@ QString elideOneLine(QPainter& p, const QString& text, int maxW)
     return t + dots;
 }
 
+/* 封面统计徽标:半透明黑底 + 白字(Qt3 用不透明底色) */
+static void drawStatBadge(QPainter& p, const QRect& r, const QString& text)
+{
+    p.setPen(Qt::NoPen);
+#ifdef QT3_BUILD
+    p.setBrush(QColor(32, 32, 32));   /* Qt3 QColor 无 alpha 构造 */
+#else
+    p.setBrush(QColor(0, 0, 0, 170));
+#endif
+    muiDrawRoundRect(p, r, 3, 3);
+    p.setPen(QColor(255, 255, 255));
+    p.drawText(r, Qt::AlignVCenter | Qt::AlignLeft,
+               elideOneLine(p, text, r.width() - 8));
+}
+
 /* 播放次数：>=1e8 → x.x亿，>=1e4 → x.x万，其余原样 */
 QString fmtCount(qint64 n)
 {
@@ -364,6 +379,51 @@ QRect ContentView::cardRect(int i) const
     return QRect(x, y, cardW, gridCardH());
 }
 
+void ContentView::statBadgeRects(int i, QRect* viewRect, QRect* replyRect) const
+{
+    if (viewRect) *viewRect = QRect();
+    if (replyRect) *replyRect = QRect();
+    if (i < 0 || i >= (int)m_rows.size()) return;
+    const Row& row = m_rows[i];
+    QRect cr = cardRect(i);
+    cr.moveTop(row.y - m_scrollY);            /* 与 paint 同一 viewport 坐标 */
+    const int coverH = cr.width() * 9 / 16;
+    const VideoCard& c = m_videos[row.index];
+    const int room = cr.width() - (c.durationMs > 0 ? 64 : 12);  /* 给右下角时长留位 */
+    if (room < 24) return;                    /* 卡片过窄不画 */
+    QFont sf = font();
+    sf.setPointSize(qMax(7, sf.pointSize() - 1));   /* 与 paint 的 small 一致 */
+    QFontMetrics sfm(sf);
+    const int by = cr.y() + coverH - 21;
+    const int bh = 16;
+    int bx = cr.x() + 6;
+    if (c.playCount > 0) {
+        const int vw = qMin(qFontWidth(sfm, fmtCount(c.playCount)) + 12, room);
+        if (viewRect) *viewRect = QRect(bx, by, vw, bh);
+        bx += vw + 4;
+    }
+    if (c.replyCount > 0) {
+        const int maxw = room - (bx - (cr.x() + 6));
+        if (maxw >= 24) {
+            const int rw = qMin(qFontWidth(sfm, fmtCount(c.replyCount)
+                                          + qFromUtf8("评")) + 12, maxw);
+            if (replyRect) *replyRect = QRect(bx, by, rw, bh);
+        }
+    }
+}
+
+int ContentView::badgeAt(const QPoint& p) const
+{
+    if (m_mode != VideoGridMode) return 0;
+    for (int i = 0; i < (int)m_rows.size(); ++i) {
+        QRect vr, rr;
+        statBadgeRects(i, &vr, &rr);
+        if (rr.isValid() && rr.contains(p)) return 2;   /* 评论优先 */
+        if (vr.isValid() && vr.contains(p)) return 1;
+    }
+    return 0;
+}
+
 void ContentView::contextMenuEvent(QContextMenuEvent* e)
 {
     if (m_mode != VideoGridMode)
@@ -677,6 +737,14 @@ void ContentView::paintEvent(QPaintEvent*)
             }
             p.drawPixmap(cr.x(), cr.y(), cover);
 
+            /* 封面左下角:播放数(点击无动作) + 评论数(点击开评论窗口) */
+            QRect vr, rr;
+            statBadgeRects((int)i, &vr, &rr);
+            p.setFont(small);
+            if (vr.isValid()) drawStatBadge(p, vr, fmtCount(c.playCount));
+            if (rr.isValid())
+                drawStatBadge(p, rr, fmtCount(c.replyCount) + qFromUtf8("评"));
+
             p.setFont(bold);
             p.setPen(pal.textPrimary);
             p.drawText(QRect(cr.x(), cr.y() + coverH + 4, cr.width(), 18),
@@ -685,10 +753,6 @@ void ContentView::paintEvent(QPaintEvent*)
             p.setFont(small);
             p.setPen(pal.textMuted);
             QString sub = c.author;
-            if (c.playCount > 0) {
-                if (!sub.isEmpty()) sub += QString::fromUtf8(" · ");
-                sub += fmtCount(c.playCount);
-            }
             /* M7:发布日期(0=未知,不显示,避免假数据) */
             if (c.publishMs > 0) {
                 if (!sub.isEmpty()) sub += QString::fromUtf8(" · ");
@@ -784,6 +848,13 @@ void ContentView::mousePressEvent(QMouseEvent* e)
             emit loadMoreRequested();
             return;
         }
+        const int badge = badgeAt(e->pos());
+        if (badge == 2) {                    /* 评论数徽标 → 评论窗口 */
+            const int idx = rowAt(e->pos());
+            if (idx >= 0) emit commentBadgeClicked(m_videos[idx].id);
+            return;
+        }
+        if (badge == 1) return;              /* 播放数徽标 → 点击无动作 */
         const int idx = rowAt(e->pos());
         if (idx < 0) return;
         if (getenv("QLVOTUBE_DEBUG") != 0)

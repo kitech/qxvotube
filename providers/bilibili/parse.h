@@ -32,6 +32,9 @@ QList36<VideoItem> newlist(cJSON* root, int page, bool* hasMore);
 // /x/player/pagelist → parts(用于 pages 缺失兜底)
 QList36<VideoItem> pageList(cJSON* root, const QString& bvid);
 
+// /x/v2/reply → data.replies[](游客静默仅 3 条,如实返回不伪造)
+QList36<CommentItem> parseComments(cJSON* root);
+
 } // namespace parse
 } // namespace bilibili
 } // namespace qxv

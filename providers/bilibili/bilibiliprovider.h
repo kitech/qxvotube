@@ -20,6 +20,8 @@ public:
                                        const QList36<CategoryItem>&)>) override;
     void categoryFeed(const QString& key, int page, SearchCb cb) override;
     void detail(const QString& id, DetailCb cb) override;
+    void comments(const QString& id, const QString& cursor,
+                  CommentsCb cb) override;
     void resolve(const QString& id, ResolveCb cb) override;
     void resolveQuality(const QString& id, const QString& quality,
                         ResolveCb cb) override;

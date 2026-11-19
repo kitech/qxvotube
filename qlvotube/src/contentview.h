@@ -14,9 +14,10 @@ struct VideoCard {
     QString id, title, author, cover;
     qint64 durationMs;
     qint64 playCount;
+    qint64 replyCount;     /* 评论数(0=未知/该源未提供) */
     qint64 publishMs;      /* M7 */
     QString webUrl;        /* M7 */
-    VideoCard() : durationMs(0), playCount(0), publishMs(0) {}
+    VideoCard() : durationMs(0), playCount(0), replyCount(0), publishMs(0) {}
 };
 
 /* 分类项(仅数据载体;渲染在 SideNav 左侧栏) */
@@ -75,6 +76,7 @@ signals:
     void backRequested();
     void videoActivated(const QString& id);
     void videoContextMenu(const QString& id, const QPoint& globalPos);  /* M7 */
+    void commentBadgeClicked(const QString& id);   /* 封面评论数徽标点击 → 评论窗口 */
 
 protected:
     void paintEvent(QPaintEvent* e);
@@ -104,6 +106,8 @@ private:
     QRect loadMoreRect() const;
     QRect retryRect() const;
     QRect cardRect(int i) const;
+    void statBadgeRects(int i, QRect* viewRect, QRect* replyRect) const;  /* 封面左下角两徽标(绘制与命中共用) */
+    int  badgeAt(const QPoint& p) const;   /* 0=无 1=播放 2=评论 */
     int    gridCols() const;
     int    gridCardH() const;
 

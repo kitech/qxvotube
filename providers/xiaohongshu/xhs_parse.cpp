@@ -8,6 +8,24 @@ namespace parse {
 
 namespace {
 
+// interactInfo 字符串 → 数值("1.2万"→12000,"1.3w"→13000,解析失败=0)
+static qint64 parseCountStr(const QString& s) {
+    const QString t = qTrim(s);
+    if (t.isEmpty()) return 0;
+    bool ok = false;
+    double v = t.toDouble(&ok);
+    if (ok) return (qint64)v;
+    int cut = 0;
+    while (cut < t.length() && (t[cut].isDigit() || t[cut] == QChar('.'))) ++cut;
+    if (cut == 0) return 0;
+    v = t.left(cut).toDouble(&ok);
+    if (!ok) return 0;
+    const QString suffix = qToLower(qTrim(t.mid(cut)));
+    if (suffix.startsWith(qFromUtf8("万")) || suffix == qFromUtf8("w"))
+        v *= 10000;
+    return (qint64)v;
+}
+
 QString coverUrl(const cJSON* cover) {
     if (!cover) return QString();
     QString u = jstr(cover, "urlDefault");
@@ -149,6 +167,11 @@ Result noteDetail(cJSON* root, const QString& noteId, VideoItem* viOut,
     vi.extra.insert(qFromUtf8("likedCount"), jstr(inter, "likedCount"));
     vi.extra.insert(qFromUtf8("collectedCount"), jstr(inter, "collectedCount"));
     vi.extra.insert(qFromUtf8("commentCount"), jstr(inter, "commentCount"));
+    if (inter) {
+        vi.stats.replyCount    = parseCountStr(jstr(inter, "commentCount"));
+        vi.stats.likeCount     = parseCountStr(jstr(inter, "likedCount"));
+        vi.stats.favoriteCount = parseCountStr(jstr(inter, "collectedCount"));
+    }
 
     cJSON* images = jarr(note, "imageList");
     if (jsize(images) > 0) vi.cover = coverUrl(jat(images, 0));

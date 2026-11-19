@@ -327,6 +327,51 @@ static QString labelForQn(long long qn) {
     return qn >= 64 ? qFromUtf8("720P") : qFromUtf8("360P");
 }
 
+// B站评论:oid 需 aid(数字),先 view 换 aid 再拉 reply;cursor=下一页 pn,空=无更多
+void BilibiliProvider::comments(const QString& id, const QString& cursor,
+                                CommentsCb cb) {
+    QUrlQuery qv;
+    qv.addQueryItem("bvid", id);
+    apiGet("/x/web-interface/view", qv.toString(),
+           [this, cb, cursor](const NetResponse& r) {
+        if (!r.ok()) { cb(Result::fail(Err::Network, r.error), {}, QString()); return; }
+        JRoot root;
+        Result res = checkApi(r.body, root, credContext(m_cred));
+        if (res.code != Err::Ok) { cb(res, {}, QString()); return; }
+        const long long aid = jint(jobj(root.p, "data"), "aid");
+        if (aid <= 0) {
+            cb(Result::fail(Err::Parse, qFromUtf8("bilibili: no aid for comments")),
+               {}, QString());
+            return;
+        }
+        const int pn = cursor.isEmpty() ? 1 : cursor.toInt();
+        if (pn < 1) { cb(Result::fail(Err::Parse, qFromUtf8("bilibili: bad cursor")),
+                         {}, QString()); return; }
+        QUrlQuery qc;
+        qc.addQueryItem("type", "1");
+        qc.addQueryItem("oid", QString::number(aid));
+        qc.addQueryItem("sort", "1");
+        qc.addQueryItem("ps", "20");
+        qc.addQueryItem("pn", QString::number(pn));
+        qc.addQueryItem("nohot", "1");
+        apiGet("/x/v2/reply", qc.toString(),
+               [cb, pn](const NetResponse& r2) {
+            if (!r2.ok()) { cb(Result::fail(Err::Network, r2.error), {}, QString()); return; }
+            JRoot root2;
+            Result res2 = checkApi(r2.body, root2, credContext(QVariantMap()));
+            if (res2.code != Err::Ok) { cb(res2, {}, QString()); return; }
+            QList36<CommentItem> items = bilibili::parse::parseComments(root2.p);
+            const cJSON* page = jobj(jobj(root2.p, "data"), "page");
+            const int count = (int)jint(page, "count", 0);
+            const int size  = (int)jint(page, "size", 20);
+            // 游客接口 page.count 可能是全站总数且只回 3 条:仅当确有余量才给游标
+            const QString next = (size > 0 && pn * size < count)
+                                 ? QString::number(pn + 1) : QString();
+            cb(Result::ok(), items, next);
+        });
+    });
+}
+
 void BilibiliProvider::resolve(const QString& id, ResolveCb cb) {
     resolveQuality(id, QString(), std::move(cb));
 }

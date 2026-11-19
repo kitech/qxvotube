@@ -65,6 +65,14 @@ Result detailFromView(cJSON* root, VideoItem* viOut, QList36<VideoItem>* partsOu
         vi.webUrl = qFromUtf8("https://www.bilibili.com/video/") + vi.id;
     vi.extra.insert(qFromUtf8("view"),
                     (long long)jint(jobj(data, "stat"), "view"));
+    if (const cJSON* st = jobj(data, "stat")) {
+        vi.stats.viewCount     = jint(st, "view");
+        vi.stats.replyCount    = jint(st, "reply");
+        vi.stats.likeCount     = jint(st, "like");
+        vi.stats.favoriteCount = jint(st, "favorite");
+        vi.stats.coinCount     = jint(st, "coin");
+    }
+    vi.extra.insert(qFromUtf8("aid"), (long long)jint(data, "aid"));
     vi.extra.insert(qFromUtf8("cid"), QString::number(jint(data, "cid")));
 
     // 分P:part.id 用 "bvid.cid" 复合形式 → 可直接喂 resolve/resolveQuality
@@ -105,6 +113,10 @@ QList36<VideoItem> popular(cJSON* root, bool* hasMore) {
             vi.webUrl = qFromUtf8("https://www.bilibili.com/video/") + vi.id;
         vi.extra.insert(qFromUtf8("aid"), (long long)jint(it, "aid"));
         vi.extra.insert(qFromUtf8("tname"), jstr(it, "tname"));
+        if (const cJSON* st = jobj(it, "stat")) {
+            vi.stats.viewCount  = jint(st, "view");
+            vi.stats.replyCount = jint(st, "reply");   // 热门仅 view+reply
+        }
         if (!vi.id.isEmpty()) items.append(vi);
     }
     if (hasMore) *hasMore = !jbool(data, "no_more");
@@ -130,6 +142,10 @@ QList36<VideoItem> newlist(cJSON* root, int page, bool* hasMore) {
         // 播放量:stat.view(部分响应为 0,UI 侧按 0 隐藏,不自造数据)
         vi.extra.insert(qFromUtf8("view"),
                         (long long)jint(jobj(it, "stat"), "view"));
+        if (const cJSON* st = jobj(it, "stat")) {
+            vi.stats.viewCount  = jint(st, "view");
+            vi.stats.replyCount = jint(st, "reply");   // 列表仅 view+reply
+        }
         vi.extra.insert(qFromUtf8("aid"), (long long)jint(it, "aid"));
         vi.extra.insert(qFromUtf8("tname"), jstr(it, "tname"));
         if (!vi.id.isEmpty()) items.append(vi);
@@ -188,6 +204,25 @@ QList36<VideoItem> pageList(cJSON* root, const QString& bvid) {
         parts.append(part);
     }
     return parts;
+}
+
+// 游客评论:x/v2/reply data.replies[](游客静默仅 3 条,如实返回不伪造)
+QList36<CommentItem> parseComments(cJSON* root) {
+    QList36<CommentItem> out;
+    const cJSON* data = jobj(root, "data");
+    cJSON* arr = jarr(data, "replies");
+    for (int i = 0; i < jsize(arr); ++i) {
+        const cJSON* r = jat(arr, i);
+        CommentItem ci;
+        ci.id     = QString::number(jint(r, "rpid"));
+        ci.author = jstr(jobj(r, "member"), "uname");
+        ci.text   = jstr(jobj(r, "content"), "message");
+        ci.time   = jint(r, "ctime");
+        ci.replyCount = jint(r, "rcount");   /* API 直接给出的该条回复数,不递归 */
+        if (ci.replyCount <= 0) ci.replyCount = jint(r, "count");  /* 老字段兜底,仍非递归 */
+        if (!ci.id.isEmpty() || !ci.text.isEmpty()) out.append(ci);
+    }
+    return out;
 }
 
 } // namespace parse

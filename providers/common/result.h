@@ -21,12 +21,22 @@ struct Stream {
     QVariantMap extra;      // decryptionKey / headers / 码率等平台特有
 };
 
+// 互动统计:嵌入结构体 + 显式字段名(0=该源未提供,UI 按 0 隐藏,不造数据)
+struct VideoStats {
+    qint64 viewCount = 0;       // 播放
+    qint64 replyCount = 0;      // 评论
+    qint64 likeCount = 0;       // 点赞
+    qint64 favoriteCount = 0;   // 收藏
+    qint64 coinCount = 0;       // 投币
+};
+
 struct VideoItem {
     QString id, title, author, uid, cover;
     qint64 durationMs = 0;
     // M7:发布时间(0=未知,UI 显示 --)与网页地址(空=该源不提供)
     qint64 publishMs = 0;
     QString webUrl;
+    VideoStats stats;       // 互动统计(显式字段名)
     QVariantMap extra;      // 平台特有(如红果 series_id、B站 bvid/cid)
 };
 
@@ -35,7 +45,11 @@ struct PlayResult {
     VideoItem item;
 };
 
-struct CommentItem { QString id, author, text; qint64 time = 0; };
+struct CommentItem {
+    QString id, author, text;
+    qint64 time = 0;        /* 发布时间(Unix 秒) */
+    qint64 replyCount = 0;  /* 该条评论的回复数(B站 rcount,API 直接给出,不递归计算) */
+};
 
 // 错误分类(透传规则:中间层只附加 detail,不得覆盖底层 code)
 enum class Err {

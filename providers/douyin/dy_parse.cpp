@@ -74,6 +74,14 @@ void fillFromAweme(const cJSON* aw, VideoItem* vi) {
             vi->cover = QString::fromUtf8(c0->valuestring);
     }
     vi->webUrl = qFromUtf8("https://www.douyin.com/video/%1").arg(vi->id);
+    // statistics:网页端详情/搜索均带;play_count 站外常为 0,UI 按 0 隐藏
+    const cJSON* st = jobj(aw, "statistics");
+    if (st) {
+        vi->stats.viewCount     = jint(st, "play_count");
+        vi->stats.replyCount    = jint(st, "comment_count");
+        vi->stats.likeCount     = jint(st, "digg_count");
+        vi->stats.favoriteCount = jint(st, "collect_count");
+    }
 }
 
 // 详情解析:root.aweme_detail;缺失 → 风控/不存在,带 filter_detail.msg

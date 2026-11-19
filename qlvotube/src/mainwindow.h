@@ -29,6 +29,7 @@ class CXVideoRenderer;
 class CXRendererGl;
 class VideoPane;
 class CXVideoEqDialog;
+class CommentDialog;
 class QSplitter;
 
 class MainWindow : public QMainWindow {
@@ -81,6 +82,9 @@ private slots:
     void onDownloadCurrent();
     void onVideoActivated(const QString& id);
     void onVideoContextMenu(const QString& id, const QPoint& globalPos);  /* M7 */
+    void openComments(const QString& id);
+    void requestComments(const QString& cursor);
+    void onCommentLoadMore();
     void onPlayerContextMenu(const QPoint& globalPos);                    /* M7 */
     void applyVideoInfo();                                                /* M7 */
     void onGridLoadMore();
@@ -220,6 +224,11 @@ private:
     /* 视频源网格状态 */
     QList36<qxv::VideoProvider*> m_providers;
     qxv::VideoProvider* m_curProv;
+    /* 评论窗口状态 */
+    CommentDialog* m_commentDlg;          /* 懒创建 */
+    qxv::VideoProvider* m_commentProv;    /* 评论请求所用源 */
+    QString m_commentId;
+    QString m_commentCursor;              /* 下一页游标(空=无更多) */
     int m_gridPage;
     bool m_gridHasMore;
     bool m_gridLoading;

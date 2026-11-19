@@ -577,6 +577,7 @@ void YoutubeProvider::detail(const QString& id, DetailCb cb) {
             vi.durationMs = jint(vd, "lengthSeconds") * 1000;
             vi.extra.insert(qFromUtf8("viewCount"),
                             (long long)jint(vd, "viewCount"));
+            vi.stats.viewCount = jint(vd, "viewCount");
             vi.extra.insert(qFromUtf8("shortDescription"),
                             jstr(vd, "shortDescription"));
             // 注:ANDROID player 响应不含章节(chapter/macroMarkers 全空),

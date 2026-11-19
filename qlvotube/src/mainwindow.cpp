@@ -40,6 +40,7 @@
 #include "renderer_gl.h"     /* M5-A:ffmpeg 路 GL 渲染器 */
 #include "videorendererfactory.h"   /* M6:输出后端可配置(cxvideo-vo.md) */
 #include "videoinfodialog.h"        /* M7:视频详情弹窗 */
+#include "commentdialog.h"          /* 评论窗口 */
 #include <qclipboard.h>
 #include "appearance.h"
 #include <qlabel.h>
@@ -163,6 +164,8 @@ MainWindow::MainWindow(QWidget* parent)
     , m_videoRenderer(0)
     , m_eqDialog(0)
     , m_curProv(0)
+    , m_commentDlg(0)
+    , m_commentProv(0)
     , m_gridPage(1)
     , m_gridHasMore(false)
     , m_gridLoading(false)
@@ -342,6 +345,8 @@ void MainWindow::buildCentralWidget()
     qApp->installEventFilter(this);   /* 全局快捷键(搜索框聚焦时让行) */
     QObject::connect(contentView, SIGNAL(videoActivated(const QString&)),
                      this, SLOT(onVideoActivated(const QString&)));
+    QObject::connect(contentView, SIGNAL(commentBadgeClicked(const QString&)),
+                     this, SLOT(openComments(const QString&)));
     QObject::connect(contentView, SIGNAL(loadMoreRequested()),
                      this, SLOT(onGridLoadMore()));
     QObject::connect(sideNav, SIGNAL(searchSubmitted(const QString&)),
@@ -1269,6 +1274,8 @@ void MainWindow::loadVideoPage(int page)
             d.playCount =
                 qMapValue(items[i].extra, qFromUtf8("view"), QVariant())
                     .toLongLong();
+            if (d.playCount <= 0) d.playCount = items[i].stats.viewCount;
+            d.replyCount = items[i].stats.replyCount;
             ev->cards.push_back(d);
         }
         if (getenv("QLVOTUBE_DEBUG") != 0) {
@@ -1730,7 +1737,8 @@ void MainWindow::onVideoContextMenu(const QString& id, const QPoint& globalPos)
     items << qFromUtf8("复制网页地址")
           << qFromUtf8("复制直链地址(会过期)")
           << qFromUtf8("显示地址…")
-          << qFromUtf8("在浏览器打开");
+          << qFromUtf8("在浏览器打开")
+          << qFromUtf8("查看评论…");
     const int sel = cxShowMenu(this, globalPos, items);
     if (sel == 0) {
         QApplication::clipboard()->setText(webUrl.isEmpty() ? id : webUrl);
@@ -1755,7 +1763,53 @@ void MainWindow::onVideoContextMenu(const QString& id, const QPoint& globalPos)
         else
             SharedStatusBar::instance()->showMessage(
                 qFromUtf8("该源未提供网页地址"), 3000);
+    } else if (sel == 4) {
+        openComments(id);
     }
+}
+
+/* 打开评论窗口:目前 B站可拉,其余源显式提示不支持(不静默) */
+void MainWindow::openComments(const QString& id) {
+    if (m_curProv == 0) return;
+    if (m_curProv->id() != qFromUtf8("bilibili")) {
+        SharedStatusBar::instance()->showMessage(
+            qFromUtf8("该源暂不支持评论拉取"), 3000);
+        return;
+    }
+    if (m_commentDlg == 0) {
+        m_commentDlg = new CommentDialog(this);
+        QObject::connect(m_commentDlg, SIGNAL(loadMoreRequested()),
+                         this, SLOT(onCommentLoadMore()));
+    }
+    m_commentProv = m_curProv;
+    m_commentId = id;
+    m_commentCursor = QString();   /* Qt3 QString 无 clear() */
+    QString title;
+    for (size_t i = 0; i < m_videoCards.size(); ++i)
+        if (m_videoCards[i].id == id) { title = m_videoCards[i].title; break; }
+    m_commentDlg->setTitle(title);
+    m_commentDlg->clear();
+    m_commentDlg->show();
+    requestComments(QString());
+}
+
+void MainWindow::requestComments(const QString& cursor) {
+    if (m_commentProv == 0) return;
+    m_commentProv->comments(m_commentId, cursor,
+        [this](const qxv::Result& r,
+               const QList36<qxv::CommentItem>& items,
+               const QString& next) {
+            CommentUiEvent* ev = new CommentUiEvent;
+            ev->result = r;
+            ev->comments = items;
+            ev->cursor = next;
+            QApplication::postEvent(this, ev);
+        });
+}
+
+void MainWindow::onCommentLoadMore() {
+    if (m_commentCursor.isEmpty()) return;   // 无更多游标,不请求
+    requestComments(m_commentCursor);
 }
 
 /* 播放器右键:视频详情 / 复制直链 / 浏览器打开 */
@@ -2315,6 +2369,23 @@ void MainWindow::dropEvent(QDropEvent* e)
 
 void MainWindow::customEvent(CustomEventBase* event)
 {
+    if (event->type() == CommentUiEventType) {
+        CommentUiEvent* e = static_cast<CommentUiEvent*>(event);
+        if (m_commentDlg != 0) {
+            if (e->result.code != qxv::Err::Ok) {
+                const QString head =
+                    _(qToUtf8(qxv::i18nKeyFor(e->result.code)).data());
+                QString text = head;
+                if (!e->result.message.isEmpty())
+                    text += qFromUtf8(" · ") + e->result.message;
+                m_commentDlg->setError(text);
+            } else {
+                m_commentCursor = e->cursor;      /* 回填真实游标供翻页 */
+                m_commentDlg->appendComments(e->comments, !e->cursor.isEmpty());
+            }
+        }
+        return;
+    }
     if (event->type() == VideoUiEventType) {
         VideoUiEvent* e = static_cast<VideoUiEvent*>(event);
         if (e->gen != m_gridGen) {          /* 切源/切分类后旧响应 */
@@ -2395,6 +2466,7 @@ void MainWindow::customEvent(CustomEventBase* event)
                 c.cover = e->cards[i].cover;
                 c.durationMs = e->cards[i].durationMs;
                 c.playCount = e->cards[i].playCount;
+                c.replyCount = e->cards[i].replyCount;
                 c.publishMs = e->cards[i].publishMs;   /* M7 */
                 c.webUrl = e->cards[i].webUrl;         /* M7 */
                 cards.push_back(c);
