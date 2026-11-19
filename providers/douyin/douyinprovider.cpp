@@ -89,8 +89,7 @@ void DouyinProvider::homeFeed(int page, SearchCb cb) {
     req.timeoutSec = 20;
     req.maxAttempts = 3;
     req.retryDelayMs = 300;
-    if (m_proxy.enabled)
-        req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
+    req.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
     DBG_P(kMod, Debug, "hot search list");
 
     m_net.send(req, [cb](const NetResponse& r) {
@@ -166,8 +165,7 @@ void DouyinProvider::ensureTtwid(std::function<void()> done) {
     for (const auto& h : fp.headers) req.headers.append(h);
     req.autoCookie = true;
     req.timeoutSec = 15;
-    if (m_proxy.enabled)
-        req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
+    req.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
     DBG_P(kMod, Debug, "ttwid warmup 1/2 (nonce)");
     m_net.send(req, [this, fp, done](const NetResponse& r1) {
         const QString home = qFromUtf8(kDouyinHome);
@@ -186,8 +184,7 @@ void DouyinProvider::ensureTtwid(std::function<void()> done) {
         for (const auto& h : fp.headers) req2.headers.append(h);
         req2.autoCookie = true;
         req2.timeoutSec = 20;
-        if (m_proxy.enabled)
-            req2.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
+        req2.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
         DBG_P(kMod, Debug, "ttwid warmup 2/2 (signed home)");
         m_net.send(req2, [this, home, done](const NetResponse& r2) {
             const QString tw = cookieValue(m_jar, home, qFromUtf8("ttwid"));
@@ -216,8 +213,7 @@ void DouyinProvider::registerTtwid(std::function<void()> done) {
     req.headers.append(qMakePair(qFromUtf8("User-Agent"), fp.userAgent));
     req.autoCookie = true;
     req.timeoutSec = 15;
-    if (m_proxy.enabled)
-        req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
+    req.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
     DBG_P(kMod, Debug, "ttwid warmup (union register)");
     m_net.send(req, [done](const NetResponse& r) {
         DBG_P(kMod, Debug, "ttwid register -> %d", r.status);
@@ -266,8 +262,7 @@ static NetRequest signedGet(const QString& base, const QUrlQuery& q,
     req.timeoutSec = 20;
     req.maxAttempts = 2;
     req.retryDelayMs = 500;
-    if (proxy.enabled)
-        req.proxy = qFromUtf8("http://%1:%2").arg(proxy.host).arg(proxy.port);
+    req.proxy = effectiveProxy(proxy, false, kMod);   // 抖音 mustProxy=false，恒直连
     DBG_P(kMod, Debug, "%s signed url len=%d", dbgTag, (int)req.url.length());
     return req;
 }
@@ -295,8 +290,7 @@ static NetRequest signedGetArgus(const QString& base, QUrlQuery q,
     req.timeoutSec = 20;
     req.maxAttempts = 2;
     req.retryDelayMs = 500;
-    if (proxy.enabled)
-        req.proxy = qFromUtf8("http://%1:%2").arg(proxy.host).arg(proxy.port);
+    req.proxy = effectiveProxy(proxy, false, kMod);   // 抖音 mustProxy=false，恒直连
     DBG_P(kMod, Debug, "%s argus url len=%d", dbgTag, (int)req.url.length());
     return req;
 }

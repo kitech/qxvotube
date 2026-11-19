@@ -440,7 +440,6 @@ bool CXEngineFfmpeg::seek(long ms)
     emit positionChanged(ms);
     m_seekPend = 1;
     m_seekTarget = ms;
-    m_seekT.start();
     /* demux 可能正阻塞在"队列满 push":先腾位,再投 seek 请求 */
     if (m_vq != 0) m_vq->clear();
     if (m_aq != 0) m_aq->clear();

@@ -73,6 +73,8 @@ void BilibiliProvider::apiGet(const QString& path, const QString& query,
         warm.headers.append(qMakePair(qFromUtf8("Referer"),
             qFromUtf8("https://www.bilibili.com/")));
         warm.maxAttempts = 2;
+        const QString warmPx = effectiveProxy(m_proxy, mustProxy(), kMod);
+        if (!warmPx.isEmpty()) warm.proxy = warmPx;
         m_net.send(warm, [](const NetResponse&) {});
     }
 
@@ -86,6 +88,8 @@ void BilibiliProvider::apiGet(const QString& path, const QString& query,
     const QString token = qMapValue(m_cred, qFromUtf8("cookie"), QVariant()).toString();
     if (!token.isEmpty())
         req.headers.append({ "Cookie", token });
+    const QString px = effectiveProxy(m_proxy, mustProxy(), kMod);
+    if (!px.isEmpty()) req.proxy = px;
     DBG_P(kMod, Debug, "GET %s", qToUtf8(req.url).data());
     m_net.send(req, std::move(cb));
 }

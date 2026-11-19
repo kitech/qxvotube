@@ -99,9 +99,7 @@ void YoutubeProvider::innertube(const QString& endpoint, const QByteArray& body,
         // 必须带浏览器 UA:裸 UA(httplib 默认)会拿到风控页并种毒 cookie
         pre.headers = Fingerprint::chromeWeb(qFromUtf8("en-US,en")).headers;
         pre.autoCookie = true;
-        pre.proxy = m_proxy.enabled
-            ? qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port)
-            : qenv("QXVOTUBE_PROXY");
+        pre.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
         m_net.send(pre, [this, endpoint, body, ua, cb, visitorId, noCookie](
                              const NetResponse& wr) {
             // 预热响应里的 visitorData = 本会话访客身份(后续请求必须带上)
@@ -132,12 +130,8 @@ void YoutubeProvider::innertube(const QString& endpoint, const QByteArray& body,
     // 实测:带上首页种的 cookie 会与访客身份冲突 → search 直接空结果;
     // 播放走 ANDROID 客户端也不需要 cookie(纯游客口径)。
     req.autoCookie = !noCookie;
-    // 代理来源:setProxy() 显式设置,或 QXVOTUBE_PROXY=http://host:port(YouTube 被墙直连必超时)
-    if (m_proxy.enabled) {
-        req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
-    } else {
-        req.proxy = qenv("QXVOTUBE_PROXY");
-    }
+    // 代理来源:QXVOTUBE_PROXY 环境变量(最高) > setProxy();无代理则警告+直连(信任 VPN)
+    req.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
     req.maxAttempts = 3;      // 429/5xx/传输错误统一退避重试
     req.retryDelayMs = 400;   // YouTube 经代理,退避稍长
     DBG_P(kMod, Debug, "POST /%s (%d bytes)", qToUtf8(endpoint).data(), body.size());
@@ -405,8 +399,7 @@ void YoutubeProvider::webGetHtml(
                                  qFromUtf8("https://www.youtube.com/")));
     req.timeoutSec = 30;
     req.maxAttempts = 2;
-    if (m_proxy.enabled)
-        req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
+    req.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
     DBG_P(kMod, Info, "GET %s", qToUtf8(req.url).data());
     m_net.send(req, [cb](const NetResponse& r) {
         if (!r.ok()) {
@@ -678,9 +671,7 @@ static QByteArray trimHlsMaster(const QByteArray& master, int wantHeight) {
 void YoutubeProvider::resolveDash(const QString& id, const QString& quality,
                                   int wantHeight, ResolveCb cb) {
     const QString url = qFromUtf8("https://www.youtube.com/watch?v=%1").arg(id);
-    const QString proxy = m_proxy.enabled
-        ? qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port)
-        : qenv("QXVOTUBE_PROXY");
+    const QString proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
     DBG_P(kMod, Debug, "dash/hls: yt-dlp fetch %s (want<=%dp)", qToUtf8(id).data(),
           wantHeight);
     ytdlp::fetch(url, proxy, [this, id, quality, wantHeight, proxy, cb](

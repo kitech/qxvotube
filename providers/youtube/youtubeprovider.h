@@ -12,8 +12,9 @@ namespace qxv {
 // YouTube:InnerTube /youtubei/v1/player(游客,免 API key/PoToken)
 // 资料:yt-dlp INNERTUBE_CLIENTS、pytubefix;ANDRIOD/IOS client 校验最松
 // 认证:游客可播(非年龄限制);年龄限制 → NeedAuth;地区锁 → GeoBlocked
-// ★ 网络:YouTube 需代理——setProxy() 或环境变量 QXVOTUBE_PROXY=http://host:port
-//   (代码内置该环境变量口;测试口径:http://127.0.0.1:10809;代理慢,验证视频只拉开头)
+// ★ 网络:YouTube 墙外站点(mustProxy=true)。代理来源 QXVOTUBE_PROXY(最高) > setProxy();
+//   无显式代理时警告+直连——VPN 环境下系统级已代理也能连通,不硬失败。
+//   (测试口径:http://127.0.0.1:10809;代理慢,验证视频只拉开头)
 class YoutubeProvider : public VideoProvider {
 public:
     QString id() const override { return qFromUtf8("youtube"); }

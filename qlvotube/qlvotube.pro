@@ -29,7 +29,8 @@ SOURCES = src/main.cpp src/mainwindow.cpp src/appearance.cpp src/config.cpp \
           src/videothumbcache.cpp \
           src/videorendererfactory.cpp \
           src/videoinfodialog.cpp \
-          ../qlappcom/eventpoller.cpp
+          ../qlappcom/eventpoller.cpp \
+          ../vendor/stb/stb_image.c   # stb_image 实现体唯一来源
 
 HEADERS = src/mainwindow.h src/appearance.h src/config.h src/globaluiutil.h \
           src/api.h src/storage.h \
@@ -58,6 +59,8 @@ include(../providers/providers.pri)
 INCLUDEPATH += $$PWD/..   # 让 "providers/common/provider.h" 这类路径可解析
 INCLUDEPATH += ../qlcomp
 INCLUDEPATH += ../qlappcom
+INCLUDEPATH += ../vendor/uc_apng_loader   # old stb_image.h
+INCLUDEPATH += ../vendor/stb   # stb_image.h
 INCLUDEPATH += src
 INCLUDEPATH += $$PWD
 

@@ -9,6 +9,14 @@
 #endif
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#if QT_VERSION >= 0x040000
+#include <QImageReader>
+#endif
+
+/* stb_image：Qt 缺 imageformats 插件时的外部解码兜底。
+ * 实现体在 vendor/uc_apng_loader/stb_image.c，此处仅声明。 */
+#include "stb_image.h"
 
 namespace {
 
@@ -18,6 +26,57 @@ QStringList& lru() { static QStringList l; return l; }
 int g_requested = 0;
 int g_failed = 0;
 const int kMaxThumbs = 300;
+
+void thumbLog(const QString& s)
+{
+    if (!getenv("QLVOTUBE_DEBUG")) return;
+#if QT_VERSION >= 0x060000
+    qDebug().noquote() << s;
+#else
+    qDebug("%s", qToUtf8(s).data());
+#endif
+}
+
+/* 魔数识别格式（按内容，不看扩展名）——移植 qlmusic extensionForData 口径 */
+static const char* sniffFormat(const uchar* p, int n)
+{
+    if (n >= 3 && p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF) return "JPEG";
+    if (n >= 8 && p[0] == 0x89 && ::memcmp(p + 1, "PNG", 3) == 0) return "PNG";
+    if (n >= 12 && ::memcmp(p, "RIFF", 4) == 0 && ::memcmp(p + 8, "WEBP", 4) == 0) return "WEBP";
+    if (n >= 4 && ::memcmp(p, "GIF8", 4) == 0) return "GIF";
+    if (n >= 2 && p[0] == 'B' && p[1] == 'M') return "BMP";
+    return "";
+}
+
+static QString headHex(const uchar* p, int n)
+{
+    const int m = n < 8 ? n : 8;
+    QString h;
+    for (int i = 0; i < m; ++i) {
+        QString b = QString::number((int)p[i], 16);
+        if (b.length() < 2) b = QChar('0') + b;
+        h += b;
+    }
+    return h;
+}
+
+/* 启动期格式能力日志（Qt4+ QImageReader / Qt3 inputFormatList）*/
+static void logImageCaps()
+{
+    static bool done = false;
+    if (done || !getenv("QLVOTUBE_DEBUG")) return;
+    done = true;
+#if QT_VERSION >= 0x040000
+    const QList<QByteArray> fmts = QImageReader::supportedImageFormats();
+    QStringList names;
+    for (int i = 0; i < fmts.size(); ++i)
+        names.append(QString::fromLatin1(fmts.at(i).constData()));
+    thumbLog(qFromUtf8("[thumb] decodable formats: ") + names.join(qFromUtf8(",")));
+#else
+    thumbLog(qFromUtf8("[thumb] decodable formats: ")
+             + QImage::inputFormatList().join(qFromUtf8(",")));
+#endif
+}
 
 /* 协议相对封面(//i0.hdslb.com/...)补 https:curl 要求绝对 URL */
 QString normUrl(const QString& url)
@@ -70,11 +129,52 @@ void onThumbDone(const HttpResponse& resp, void* udata)
     if (resp.httpCode == 200 && !resp.body.empty()) {
         const uchar* p = reinterpret_cast<const uchar*>(resp.body.data());
         const int n = static_cast<int>(resp.body.size());
+        const char* fmt = sniffFormat(p, n);
+        bool ok = false;
+        const char* used = "-";
 #ifdef QT3_BUILD
-        img.loadFromData(p, (uint)n);
+        if (*fmt && img.loadFromData(p, (uint)n, fmt) && !img.isNull()) { ok = true; used = "qt-hint"; }
+        if (!ok) { img = QImage(); if (img.loadFromData(p, (uint)n) && !img.isNull()) { ok = true; used = "qt-auto"; } }
 #else
-        img = QImage::fromData(p, n);
+        if (*fmt) { img = QImage::fromData(p, n, QByteArray(fmt)); if (!img.isNull()) { ok = true; used = "qt-hint"; } }
+        if (!ok) { img = QImage::fromData(p, n); if (!img.isNull()) { ok = true; used = "qt-auto"; } }
 #endif
+        /* 路径 C：stb_image（绕开 Qt 插件；JPEG/PNG/GIF/BMP，WebP 由 Qt 负责）*/
+        if (!ok) {
+            int w = 0, h = 0, ch = 0;
+            stbi_uc* raw = stbi_load_from_memory(p, n, &w, &h, &ch, 4);
+            if (raw && w > 0 && h > 0) {
+#ifdef QT3_BUILD
+                QImage tmp(w, h, 32);
+#else
+                QImage tmp(w, h, QImage::Format_ARGB32);
+#endif
+                for (int y = 0; y < h; ++y) {
+                    uchar* dst = tmp.scanLine(y);
+                    const stbi_uc* src = raw + (size_t)y * w * 4;
+                    for (int x = 0; x < w; ++x) {   /* stb RGBA → Qt BGRA 字节序 */
+                        dst[x*4+0] = src[x*4+2];
+                        dst[x*4+1] = src[x*4+1];
+                        dst[x*4+2] = src[x*4+0];
+                        dst[x*4+3] = src[x*4+3];
+                    }
+                }
+                stbi_image_free(raw);
+                img = tmp;
+                ok = !img.isNull();
+                used = ok ? "stb" : "-";
+            }
+            if (!raw && getenv("QLVOTUBE_DEBUG"))
+                thumbLog(qFromUtf8("[thumb] stb fail ")
+                         + qFromUtf8(stbi_failure_reason() ? stbi_failure_reason() : "?"));
+        }
+        thumbLog(QString(qFromUtf8("thumb: decode http=%1 size=%2 head=%3 fmt=%4 path=%5 %6"))
+                 .arg(resp.httpCode).arg(n).arg(headHex(p, n))
+                 .arg(qFromUtf8(fmt)).arg(qFromUtf8(used)).arg(ctx ? ctx->url : QString()));
+    } else {
+        thumbLog(QString(qFromUtf8("thumb: no-body http=%1 curl=%2 %3"))
+                 .arg(resp.httpCode).arg(qFromUtf8(resp.curlErrStr.c_str()))
+                 .arg(ctx ? ctx->url : QString()));
     }
     if (ctx && ctx->target) {
         QApplication::postEvent(ctx->target, new ThumbReadyEvent(ctx->url, img));
@@ -90,6 +190,7 @@ void request(const QString& urlRaw, QWidget* target)
 {
     const QString url = normUrl(urlRaw);
     if (url.isEmpty() || !target) return;
+    logImageCaps();
     if (cache().contains(url) || state().contains(url)) return;
 
     HttpRequest req;
@@ -97,8 +198,8 @@ void request(const QString& urlRaw, QWidget* target)
     req.timeoutSec = 20;
     req.followRedirects = true;
     req.extraHeaders["User-Agent"] =
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0";
     const QString ref = refererFor(url);
     if (!ref.isEmpty()) req.extraHeaders["Referer"] = qToUtf8(ref).data();
     const QString px = proxyFromEnv();

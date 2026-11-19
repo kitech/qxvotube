@@ -100,6 +100,8 @@
     "general_tab": "通用",
     "lang_label": "語言",
     "dark_label": "深色模式",
+    "proxy_label": "啟用代理（境外網站）",
+    "proxyurl_label": "代理位址",
     "videoout_tab": "視訊輸出",
     "videoout_label": "輸出後端",
     "videoout_hint": "auto = 無 GL 優先(xv→x11→sdl→raster→gl),變更下次啟動生效。",

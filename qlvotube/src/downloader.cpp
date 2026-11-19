@@ -5,7 +5,6 @@
 #include <qdir.h>
 #include <qfile.h>
 #include <qprocess.h>
-#include <qregexp.h>
 #ifdef QT3_BUILD
 #include <qstringlist.h>
 #endif

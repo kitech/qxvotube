@@ -50,7 +50,6 @@
 #include <qevent.h>
 #include <qtimer.h>
 #include <qmessagebox.h>
-#include <qdesktopwidget.h>
 #if QT_VERSION >= 0x040000
 #include <QDebug>
 #endif
@@ -1108,15 +1107,34 @@ void MainWindow::setupVideoProviders()
         return;
     }
     qxv::ProxyConfig pc;
-    const char* px = getenv("QXVOTUBE_PROXY");
-    if (px && *px) {                             /* http://host:port */
-        const QString s = qFromUtf8(px);
-        const int c1 = qIndexOf(s, qFromUtf8("://"));
-        const int c2 = qLastIndexOf(s, qFromUtf8(":"));
-        if (c1 > 0 && c2 > c1) {
+    // 全局代理来源优先级：QXVOTUBE_PROXY 环境变量(最高、普遍适用) > 设置页 proxy.enabled/url
+    QString proxySpec = qFromUtf8(getenv("QXVOTUBE_PROXY") ? getenv("QXVOTUBE_PROXY") : "");
+    if (proxySpec.isEmpty()
+        && Config::value(qFromUtf8("proxy.enabled")) == qFromUtf8("1"))
+        proxySpec = Config::value(qFromUtf8("proxy.url"));
+    if (!proxySpec.isEmpty()) {                  /* [scheme://][user:pass@]host:port */
+        const QString s = proxySpec;
+        QString rest = s;
+        const int sep = qIndexOf(s, qFromUtf8("://"));
+        if (sep > 0) {
+            const QString scheme = s.left(sep);
+            if (scheme == qFromUtf8("socks5") || scheme == qFromUtf8("socks5h"))
+                pc.type = qxv::ProxyConfig::Socks5;
+            rest = s.mid(sep + 3);
+        }
+        const int at = qLastIndexOf(rest, qFromUtf8("@"));   // user:pass@
+        if (at > 0) {
+            const QString cred = rest.left(at);
+            rest = rest.mid(at + 1);
+            const int colon = qIndexOf(cred, qFromUtf8(":"));
+            if (colon > 0) { pc.user = cred.left(colon); pc.pass = cred.mid(colon + 1); }
+            else           { pc.user = cred; }
+        }
+        const int c2 = qLastIndexOf(rest, qFromUtf8(":"));   // host:port
+        if (c2 > 0) {
             pc.enabled = true;
-            pc.host = s.mid(c1 + 3, c2 - c1 - 3);
-            pc.port = s.mid(c2 + 1).toInt();
+            pc.host = rest.left(c2);
+            pc.port = rest.mid(c2 + 1).toInt();
         }
     }
     QStringList ids;
@@ -1486,9 +1504,19 @@ void MainWindow::openSettings()
         QStringList() << _("theme_dark") << _("theme_light"), page);
     page->addLabeledControl(_("settings.dark_label"), darkItem->comboBox());
 
+    // 全局代理（墙外站点用；QXVOTUBE_PROXY 环境变量优先于此处）
+    BoolConfigItem* proxyOnItem = new BoolConfigItem(
+        "proxy/enabled", false, _("settings.proxy_label"), page);
+    page->addLabeledControl(_("settings.proxy_label"), proxyOnItem->checkBox());
+    StringConfigItem* proxyUrlItem = new StringConfigItem(
+        "proxy/url", "", _("settings.proxyurl_label"), page);
+    page->addLabeledControl(_("settings.proxyurl_label"), proxyUrlItem->lineEdit());
+
     dlg->addCategory(_("settings.general_tab"), page);
     dlg->registerConfigItem(langItem);
     dlg->registerConfigItem(darkItem);
+    dlg->registerConfigItem(proxyOnItem);
+    dlg->registerConfigItem(proxyUrlItem);
 
     /* —— 视频输出页(M6):选择播放渲染后端 ——
      * 列表按当前构建实际可用的后端生成(cxAvailableVideoOuts),
@@ -1559,6 +1587,13 @@ void MainWindow::onSettingsSaved(const SettingsChangedMap& changed)
         bool on = (changed["ui/dark"].toString() == _("theme_dark"));
         if (on != ThemeManager::isDarkMode())
             ThemeManager::applyTheme(on);
+    }
+    if (changed.contains("proxy/enabled")) {
+        Config::setValue("proxy.enabled",
+            changed["proxy/enabled"].toBool() ? qFromUtf8("1") : qFromUtf8("0"));
+    }
+    if (changed.contains("proxy/url")) {
+        Config::setValue("proxy.url", changed["proxy/url"].toString());
     }
     if (changed.contains("video/quality")) {
         Config::setValue("video.quality", changed["video/quality"].toString());
@@ -2709,7 +2744,7 @@ void MainWindow::showEvent(QShowEvent* event)
     static bool clamped = false;
     if (clamped) return;
     clamped = true;
-    const QRect avail = QApplication::desktop()->availableGeometry(this);
+    const QRect avail = qAvailableGeometryFor(this);
     int w = avail.width() * 9 / 10;
     int h = avail.height() * 9 / 10;
     if (w > 980) w = 980;

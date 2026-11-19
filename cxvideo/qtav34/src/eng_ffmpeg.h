@@ -122,7 +122,6 @@ private:
     int m_aIdx;
     int m_sIdx;
     int m_seekPend;
-    QTime m_seekT;          /* seek 看门狗起点 */
     long m_seekTarget;      /* 本次 seek 目标(丢弃迟到旧帧事件) */
     int m_eosPend; // 活动线程 EOS 计数(视频+音频+字幕都完才 finished)
     int m_aCount;

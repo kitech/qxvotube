@@ -229,8 +229,7 @@ void XiaohongshuProvider::fetchPage(
         req.timeoutSec = 25;
         req.maxAttempts = 2;      // 风控环境下少重试,避免加重
         req.retryDelayMs = 2000;
-        if (m_proxy.enabled)
-            req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
+        req.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
         DBG_P(kMod, Debug, "GET %s", qToUtf8(req.url).data());
         m_net.send(req, [this, cb](const NetResponse& r) {
             if (r.status == 302) {   // 跳登录
@@ -371,9 +370,7 @@ void XiaohongshuProvider::apiRequest(
         req.autoCookie = true;
         req.timeoutSec = 25;
         req.maxAttempts = 1;      // 签名请求不盲目重试
-        if (m_proxy.enabled)
-            req.proxy = qFromUtf8("http://%1:%2")
-                            .arg(m_proxy.host).arg(m_proxy.port);
+        req.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
         DBG_P(kMod, Debug, "API %s %s", qToUtf8(req.method).data(),
               qToUtf8(req.url).data());
         m_net.send(req, [this, cb](const NetResponse& r) {

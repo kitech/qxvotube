@@ -38,9 +38,8 @@ void HongguoProvider::webGet(const QString& path, const QString& query,
     req.headers.append(qMakePair(qFromUtf8("Referer"), qFromUtf8(kSite)));
     req.autoCookie = true;
     req.timeoutSec = 25;
-    // 官网口直连;代理仅显式 setProxy 时走(无墙)
-    if (m_proxy.enabled)
-        req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
+    // 官网口国内直连可达(mustProxy=false → effectiveProxy 恒返回空)
+    req.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
     req.maxAttempts = 3;
     req.retryDelayMs = 300;
     DBG_P(kMod, Debug, "GET %s", qToUtf8(req.url).data());
@@ -65,8 +64,7 @@ void HongguoProvider::webPostJson(const QString& path, const QByteArray& body,
                            .headers[0]);
     req.autoCookie = true;
     req.timeoutSec = 25;
-    if (m_proxy.enabled)
-        req.proxy = qFromUtf8("http://%1:%2").arg(m_proxy.host).arg(m_proxy.port);
+    req.proxy = effectiveProxy(m_proxy, mustProxy(), kMod);
     req.maxAttempts = 3;
     req.retryDelayMs = 300;
     DBG_P(kMod, Debug, "POST %s (%d bytes)", qToUtf8(path).data(), body.size());

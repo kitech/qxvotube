@@ -100,6 +100,8 @@
     "general_tab": "General",
     "lang_label": "Language",
     "dark_label": "Dark mode",
+    "proxy_label": "Enable proxy (overseas sites)",
+    "proxyurl_label": "Proxy URL",
     "videoout_tab": "Video output",
     "videoout_label": "Output backend",
     "videoout_hint": "auto = no-GL first (xv→x11→sdl→raster→gl); takes effect on next start.",
