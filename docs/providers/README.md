@@ -22,6 +22,7 @@ providers/
 │   ├── cookiejar.{h,cpp} 进程内 Cookie(按域,Set-Cookie 回存)
 │   └── fingerprint.{h,cpp} 浏览器/客户端 UA 档位
 ├── bilibili/     web REST 游客口(parse.{h,cpp} 纯解析,可离线测)
+├── netflix/      uNoGS 目录元数据 + 本地数据集兜底(无播放源→Unsupported)
 ├── youtube/      InnerTube ANDROID_VR 口(search 通;player 受 IP 风控,见下)
 ├── tests/        smoke 联网自检(pvsmoke)+ 离线解析单测(parsetest)
 │   └── fixtures/ 录制的真实响应(裁剪后)+ capture.py 重录脚本

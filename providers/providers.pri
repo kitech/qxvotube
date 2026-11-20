@@ -63,6 +63,8 @@ SOURCES += \
     $$QXV_PROVIDERS_DIR/xiaohongshu/ssr.cpp \
     $$QXV_PROVIDERS_DIR/xiaohongshu/sign.cpp \
     $$QXV_PROVIDERS_DIR/xiaohongshu/xhs_api.cpp \
+    $$QXV_PROVIDERS_DIR/netflix/netflixprovider.cpp \
+    $$QXV_PROVIDERS_DIR/netflix/netflix_data.cpp \
     $$QXV_PROVIDERS_DIR/factory.cpp
 
 # 三档全编(2026-11-17 完成 Qt3/Qt4 兼容移植)

@@ -30,13 +30,14 @@ inline QString proxyUrl(const ProxyConfig& p)
 }
 
 // 墙外站点清单(必须代理)。集中定义，新增站点只需在此加 id：
-//   youtube / tiktok / snapchat / instagram —— 无代理直连通常不可达；
+//   youtube / tiktok / snapchat / instagram / netflix —— 无代理直连通常不可达；
 //   但 VPN 环境下系统级已代理、没有显式 proxy 也能连通，故缺显式代理时警告+直连。
 // bilibili/douyin/hongguo/xiaohongshu 等国内站点不在清单 → 恒直连(避免代理 IP 触发风控)。
 inline bool siteMustProxy(const QString& id)
 {
     return id == qFromUtf8("youtube") || id == qFromUtf8("tiktok")
-        || id == qFromUtf8("snapchat") || id == qFromUtf8("instagram");
+        || id == qFromUtf8("snapchat") || id == qFromUtf8("instagram")
+        || id == qFromUtf8("netflix");
 }
 
 // 站点代理策略：mustProxy 决定「是否走代理」，全局代理配置决定「代理地址」。

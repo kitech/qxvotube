@@ -46,6 +46,8 @@ add_library(qxvproviders STATIC
     xiaohongshu/xhs_parse.cpp
     xiaohongshu/sign.cpp
     xiaohongshu/xhs_api.cpp
+    netflix/netflixprovider.cpp
+    netflix/netflix_data.cpp
     youtube/yt_parse.cpp
     common/hgcenc/spade.cpp
     common/hgcenc/mp4box.cpp
