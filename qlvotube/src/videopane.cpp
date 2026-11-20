@@ -29,7 +29,7 @@ VideoPane::VideoPane(QWidget* parent)
     m_titleLabel->setText("");
     barLay->addWidget(m_backBtn, 0);
     barLay->addWidget(m_titleLabel, 1);   /* 视频标题:占中间,过长自动省略 */
-    barLay->addWidget(m_engineLabel, 1);
+    barLay->addWidget(m_engineLabel, 0);  /* 引擎名:靠右,紧挨分辨率/档位 */
     /* M7:右侧实时分辨率/档位 */
     m_infoLabel = new QLabel(bar);
     m_infoLabel->setText("");
