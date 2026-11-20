@@ -26,7 +26,7 @@ const EventType34 VideoUiEventType = toEventType34(QEvent::User + 120);
 
 class VideoUiEvent : public CustomEventBase {
 public:
-    enum Kind { Categories, Page, Error, Status };
+    enum Kind { Categories, CategoriesRefresh, Page, Error, Status };
     VideoUiEvent(Kind k)
         : CustomEventBase(VideoUiEventType), kind(k), hasMore(false),
           loading(false), degraded(false), page(0), gen(0) {}

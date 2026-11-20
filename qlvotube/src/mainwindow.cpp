@@ -1436,6 +1436,21 @@ void MainWindow::onSiteChanged(const QString& providerId)
         }
         QApplication::postEvent(this, ev);
     });
+    // 分类秒显后,后台拉在线分类做增量合并(在线优先去重),回来就地刷新 chips。
+    // 该事件不携带分页数据:loadVideoPage 会递增 m_gridGen,若沿用同一 gen 校验
+    // 会被误判为陈旧而丢弃,故跳过 gen 校验、在 customEvent 改用站点 id 校验。
+    p->categoriesRefresh([this, providerId, gen](const qxv::Result& r,
+                                     const QList36<qxv::CategoryItem>& cats) {
+        if (r.code != qxv::Err::Ok || cats.isEmpty()) return;
+        VideoUiEvent* ev = new VideoUiEvent(VideoUiEvent::CategoriesRefresh);
+        ev->gen = gen;
+        ev->text = providerId;
+        for (int i = 0; i < cats.size(); ++i) {
+            ev->catKeys.append(cats[i].key);
+            ev->catNames.append(cats[i].name);
+        }
+        QApplication::postEvent(this, ev);
+    });
 }
 
 void MainWindow::loadVideoPage(int page)
@@ -2874,7 +2889,10 @@ void MainWindow::customEvent(CustomEventBase* event)
     }
     if (event->type() == VideoUiEventType) {
         VideoUiEvent* e = static_cast<VideoUiEvent*>(event);
-        if (e->gen != m_gridGen) {          /* 切源/切分类后旧响应 */
+        // CategoriesRefresh 只就地刷新分类显示、不携带分页数据:首次 Categories
+        // 分支里的 loadVideoPage 会递增 m_gridGen,若用同一 gen 校验会被误丢。
+        // 故跳过 gen 校验,分支内改用站点 id 校验(切源后丢弃旧事件)。
+        if (e->kind != VideoUiEvent::CategoriesRefresh && e->gen != m_gridGen) {
             if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
                 qDebug() << "stale event dropped: kind" << int(e->kind)
@@ -2884,6 +2902,28 @@ void MainWindow::customEvent(CustomEventBase* event)
                        int(e->kind), e->gen, m_gridGen);
 #endif
             }
+            return;
+        }
+        if (e->kind == VideoUiEvent::CategoriesRefresh) {
+            if (!m_curProv || e->text != m_curProv->id() || e->catKeys.isEmpty())
+                return;
+            std::vector<CategoryChip> chips;
+            for (int i = 0; i < e->catKeys.size(); ++i)
+                chips.push_back(CategoryChip(e->catKeys[i], e->catNames[i]));
+            // 按 key 保留当前选中:m_gridChip 不变,sideNav 依 key 重定位高亮;
+            // 不重置分页、不调 loadVideoPage,用户当前浏览内容不打断。
+            m_chipList = chips;
+            QStringList names, keys;
+            for (int i = 0; i < (int)chips.size(); ++i) {
+                names.append(chips[i].name.isEmpty()
+                                 ? _("content.cat_recommend")
+                                 : chips[i].name);
+                keys.append(chips[i].key);
+            }
+            sideNav->setVideoCategories(names, keys, m_gridChip);
+            if (getenv("QLVOTUBE_DEBUG") != 0)
+                qDebug("categories refreshed in place: %d chips, active '%s'",
+                       int(chips.size()), qToUtf8(m_gridChip).data());
             return;
         }
         if (e->kind == VideoUiEvent::Categories) {

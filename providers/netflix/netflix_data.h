@@ -3,7 +3,7 @@
 
 namespace qxv {
 
-// 本地兜底数据集的一条标题(静态编译进二进制,无外部文件/key 依赖)
+// 本地补充数据集的一条标题(静态编译进二进制;在线成功时合并补充,不单独作兜底)
 struct NfTitle {
     QString id, title, type, year, genres, rating, duration, country, desc;
     NfTitle() {}
@@ -14,10 +14,10 @@ struct NfTitle {
           rating(rating_), duration(duration_), country(country_), desc(desc_) {}
 };
 
-// 精选标题集(覆盖主要 genre);无 key/在线失败时的兜底
+// 精选标题集(~400 条,来自公开 netflix_titles.csv);在线成功后按 id 去重补充
 const QList36<NfTitle>& netflixLocalTitles();
 
-// 从本地数据集派生 genre 列表(用于 categories 兜底)
+// 从本地数据集派生 genre 列表(与在线 genres 合并用)
 QStringList netflixLocalGenres();
 
 // 按本地 id 查找(找不到返回 false)

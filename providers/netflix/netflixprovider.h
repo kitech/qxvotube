@@ -18,6 +18,8 @@ public:
     void homeFeed(int page, SearchCb cb) override;
     void categories(std::function<void(const Result&,
                                        const QList36<CategoryItem>&)>) override;
+    void categoriesRefresh(std::function<void(const Result&,
+                                              const QList36<CategoryItem>&)>) override;
     void categoryFeed(const QString& key, int page, SearchCb cb) override;
     void detail(const QString& id, DetailCb cb) override;
     void resolve(const QString& id, ResolveCb cb) override;
