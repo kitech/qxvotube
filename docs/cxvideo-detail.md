@@ -541,3 +541,23 @@ M0 落 `cxvideo_global.h/cxthread/cxengine.h/cxvideoplayer.h` stub(接口可链�
 - **取消**:`cancelOpen()` 置 `ioAbort=true` 中断阻塞 open(此时必无 live
   demux),代际作废 + 有界 `wait()`;停不下来按既有策略泄漏,
   绝不 delete 运行中 QThread。
+
+## EOS 结束判定(连播稳定性,2026-11-20)
+
+**症状**:带音频的视频播完后偶发/频繁"永久停住",不进下一项;纯视频正常。
+
+**根因**:原实现用 `m_eosPend = 1 + 音频 + 字幕` 要求**所有消费线程**都投递
+`CxFFmpegEvFinished` 才 `emit finished()`;而音频线程的 EOS 投递在
+`out->drain()` 之后,`drain()`(pulse/alsa)可能长时间阻塞 → 计数停在 1 →
+永不 `finished` → 不推进。视频线程的 EOS `drain()` 也会按冻结的音频时钟
+pacing,存在同类风险。
+
+**修复**:
+- EOS 事件携带角色(`code`:1=video/2=audio/3=sub),且视频/音频线程**先投递
+  EOS,再做可能阻塞的 drain**。
+- 引擎以**主流**判定结束:有视频以 video EOS 为准,否则以 audio EOS 为准;
+  音频/字幕 EOS 不再 gate `finished`。
+- EOS 尾帧 drain 期间跳过主时钟 pacing(`m_draining`)。
+- 致命读错误(`CxFFmpegEvError` 非 `CxErrSeek`)标记 `m_fatalErr`,随后抑制
+  `finished`,避免与 `skipOnError` 一起"跳两集";`onPlayerError` 对
+  `CxErrAudio/CxErrSeek` 非致命错误不再自动跳集。

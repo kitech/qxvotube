@@ -169,6 +169,9 @@ private:
     void* m_bufTimer = nullptr;  // QTimer*:250ms 独立刷新缓冲进度
     bool m_playFinished = false; // 当前项自然播完且未被自动切歌覆盖
     int m_pendingSeekMs = -1;    // 播完后拖进度:待跳转位置(ms),-1=无
+    long m_lastPosMs = -1;           /* 上次播放位置(ms,-1=未定) */
+    long long m_lastPosWallMs = 0;   /* 上次位置变化的墙钟(ms) */
+    int m_stallSec = -1;             /* 已展示的停滞秒数(-1=未展示) */
 
     struct MenuItemRef {
         const char* key;

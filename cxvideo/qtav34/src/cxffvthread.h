@@ -51,7 +51,7 @@ public:
     CXFFmpegVideoThread(CxPacketQueue* vq, CxDecoder* dec, QObject* sink)
         : vQueue(vq), decoder(dec), sink(sink), stopFlag(false), paused(false),
           renderPts0(-1), rate(1.0), m_clock(0), m_ao(0),
-          m_frameSlot(0), m_lastEmitUs(0)
+          m_frameSlot(0), m_lastEmitUs(0), m_draining(false)
     { }
 
     void requestStop() { stopFlag = true; if (m_clock) m_clock->interrupt(true); wake(); }
@@ -90,8 +90,12 @@ protected:
             }
 
             if (p.eos) {
+                /* 先投递 EOS(role=video),再做 drain:
+                 * drain 会按主时钟 pacing,音频卡死时可能永远出不来。 */
+                post(CxFFmpegEvFinished, 0, 1);
+                m_draining = true;
                 drain();
-                post(CxFFmpegEvFinished, 0, 0);
+                m_draining = false;
                 break;
             }
 
@@ -143,7 +147,7 @@ private:
             post(CxFFmpegEvSeekDone, pts, 0);
         }
 
-        if (m_clock != 0 && m_ao != 0) {
+        if (!m_draining && m_clock != 0 && m_ao != 0) {
             // M2.1 主时钟:帧应显示于 pts − ao 延迟(留 AO 缓冲);
             // 每轮重算,≤100ms 打盹(clock 提前唤醒即败絮新值)
             while (true) {
@@ -159,7 +163,7 @@ private:
                 if (!m_clock->waitAndCheck(nap))
                     return false;
             }
-        } else {
+        } else if (!m_draining) {
             if (!waitPace((long)(dur / rate)))
                 return false; // 音频缺席回退 M2.0
         }
@@ -167,7 +171,7 @@ private:
         // 原路径零等待全速出帧 → QImage 事件队列暴涨(2-3G)+UI 冻结无法暂停。
         // 用单调墙钟限制相邻出帧间隔,与时钟值解耦;dur 自适应片源帧率并钳
         // 到 10..100ms(ffplay 同款),倍速时按比例缩短,不牺牲正常/倍速播放。
-        if (m_clock != 0 && m_ao != 0 && m_lastEmitUs > 0) {
+        if (!m_draining && m_clock != 0 && m_ao != 0 && m_lastEmitUs > 0) {
             int gap = (int)dur;
             if (gap < 10) gap = 10;
             if (gap > 100) gap = 100;
@@ -230,6 +234,7 @@ private:
     CXAudioOut* m_ao;
     CxLatestFrameSlot* m_frameSlot; // 引擎持有,生命周期长于本线程
     long long m_lastEmitUs;         // 上次出帧单调墙钟(us),出帧限速兜底
+    volatile bool m_draining;       // EOS 尾帧排空:跳过 pacing,避免等冻结音频时钟
 };
 
 #endif // CXFFVTHREAD_H

@@ -133,6 +133,7 @@ private:
     int m_seekPend;
     long m_seekTarget;      /* 本次 seek 目标(丢弃迟到旧帧事件) */
     int m_eosPend; // 活动线程 EOS 计数(视频+音频+字幕都完才 finished)
+    bool m_fatalErr;        // 本次会话出现过致命读错误(避免 finished 与 skip 双推进)
     int m_aCount;
     int m_sCount;
     int m_audioPrompt; // 换轨重启时按枚举序挑第 N 个音轨(-1=默认首个;-2=关)

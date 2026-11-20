@@ -29,6 +29,10 @@ void CXFFmpegAudioThread::run()
             continue; // flush 标记已处理
         }
         if (p.eos) {
+            /* 先投递 EOS(role=audio):后续尾帧投递/硬件排空可能阻塞,
+             * 不能让它 gate finished(否则连播永久停住)。 */
+            QApplication::postEvent(sink,
+                new CxFFmpegUiEvent(CxFFmpegEvFinished, 0, 2));
             while (!stopFlag) {
                 AVFrame* fr = dec->decode(0);
                 if (fr == 0)
@@ -38,7 +42,6 @@ void CXFFmpegAudioThread::run()
             tailFlush();
             if (!stopFlag && out != 0)
                 out->drain(); // QtAV 五要点之四:EOF 先排空再退
-            post(CxFFmpegEvFinished, 0); // 引擎 m_running 防重
             break;
         }
         AVFrame* fr = dec->decode(p.pkt);

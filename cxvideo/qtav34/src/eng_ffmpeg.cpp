@@ -104,7 +104,7 @@ CXEngineFfmpeg::CXEngineFfmpeg()
       m_ao(0), m_clock(0),
       m_paused(false), m_running(false),
       m_durMs(0), m_curMs(0), m_vIdx(-1), m_aIdx(-1), m_sIdx(-1),
-      m_seekPend(0), m_seekTarget(0), m_eosPend(0),
+      m_seekPend(0), m_seekTarget(0), m_eosPend(0), m_fatalErr(false),
       m_aCount(0), m_sCount(0), m_audioPrompt(-1), m_subPrompt(-1),
       m_rateCur(1.0), m_volCur(100), m_muteCur(false)
 {
@@ -132,6 +132,7 @@ void CXEngineFfmpeg::resetOpenState(const QString& url)
     m_sCount = 0;
     m_rateCur = 1.0;
     m_openState.ioAbort = false;   /* 每次新 open 前复位网络读中断标志 */
+    m_fatalErr = false;            /* 新会话复位致命错误标记 */
 }
 
 bool CXEngineFfmpeg::open(const QString& url)
@@ -920,21 +921,26 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
         delete f; // FrameReady 事件 frame 字段为空,此处释放取出的帧
         break;
     }
-    case CxFFmpegEvFinished:
-        if (m_running) {
-            if (m_eosPend > 1) {
-                m_eosPend--; // 另一线程(s)未完
-            } else {
-                m_eosPend = 0;
-                m_running = false;
-                if (!m_subCur.isEmpty()) { // 收尾清屏
-                    m_subCur = QString();
-                    emit subtitleChanged(QString());
-                }
-                emit finished();
-            }
+    case CxFFmpegEvFinished: {
+        if (!m_running)
+            break;
+        /* code: 1=video 2=audio 3=sub。以主流 EOS 判定结束:
+         * 音频排空/字幕线程可能阻塞,不能用来 gate finished。 */
+        const int role = ev->code;
+        const bool primary = (m_vIdx >= 0) ? (role == 1) : (role == 2);
+        if (!primary)
+            break;
+        m_running = false;
+        m_eosPend = 0;
+        if (m_fatalErr)     /* 致命读错误已走 skipOnError,避免双重推进 */
+            break;
+        if (!m_subCur.isEmpty()) { // 收尾清屏
+            m_subCur = QString();
+            emit subtitleChanged(QString());
         }
+        emit finished();
         break;
+    }
     case CxFFmpegEvSeekDone:
         if (m_seekPend) {
             m_seekPend = 0;
@@ -951,6 +957,8 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
         }
         break;
     case CxFFmpegEvError:
+        if (ev->code != (int)CxErrSeek)   /* seek 超界非致命;其它视为致命读错误 */
+            m_fatalErr = true;
         emit noticedError(ev->code, QString("ffmpeg"));
         break;
     case CxFFmpegEvDuration:

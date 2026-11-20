@@ -49,7 +49,7 @@ protected:
             if (p.eos) {
                 if (!stopFlag)
                     QApplication::postEvent(sink,
-                        new CxFFmpegUiEvent(CxFFmpegEvFinished, 0, 0));
+                        new CxFFmpegUiEvent(CxFFmpegEvFinished, 0, 3));
                 break;
             }
             long ptsMs = cffPtsMsSub(p.pkt->pts, dec->timeBase());

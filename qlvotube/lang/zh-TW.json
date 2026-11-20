@@ -59,7 +59,8 @@
     "playback": "播放錯誤",
     "mid_click_ni": "中鍵點擊：暫未實作",
     "wheel_up_ni": "滾輪向上：暫未實作",
-    "wheel_down_ni": "滾輪向下：暫未實作"
+    "wheel_down_ni": "滾輪向下：暫未實作",
+    "stalled_secs": "緩衝中… %1 秒"
   },
   "error": {
     "network": "網路錯誤",

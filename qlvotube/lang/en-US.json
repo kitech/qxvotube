@@ -59,7 +59,8 @@
     "playback": "Playback error",
     "mid_click_ni": "Middle-click: not implemented yet",
     "wheel_up_ni": "Wheel up: not implemented yet",
-    "wheel_down_ni": "Wheel down: not implemented yet"
+    "wheel_down_ni": "Wheel down: not implemented yet",
+    "stalled_secs": "Buffering… %1s"
   },
   "error": {
     "network": "Network error",

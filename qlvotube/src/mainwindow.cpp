@@ -2036,6 +2036,9 @@ void MainWindow::onPlayPause()
 void MainWindow::onPlayerStarted()
 {
     m_playFinished = false;   /* 新一段播放开始,清掉播完标记 */
+    m_lastPosMs = -1;
+    m_lastPosWallMs = wallMs();
+    m_stallSec = -1;
     if (playerBar) playerBar->setPlaying(true);
     if (m_bufTimer != 0 && !((QTimer*)m_bufTimer)->isActive())
         ((QTimer*)m_bufTimer)->start(250);   // Qt3/Qt4 同签名
@@ -2056,6 +2059,8 @@ void MainWindow::onPlayerPaused()
 
 void MainWindow::onPlayerStopped()
 {
+    m_stallSec = -1;
+    m_lastPosMs = -1;
     if (playerBar) playerBar->setPlaying(false);
     if (m_bufTimer != 0) ((QTimer*)m_bufTimer)->stop();
     if (playerBar) playerBar->setBufferedMs(0);
@@ -2474,6 +2479,8 @@ void MainWindow::onDownloadCurrent()
 void MainWindow::onPlayerFinished()
 {
     m_playFinished = true;    /* 记录自然播完,供 onPlayPause 从头重播 */
+    m_stallSec = -1;
+    m_lastPosMs = -1;
     if (playerBar) playerBar->setPlaying(false);
     if (m_bufTimer != 0) ((QTimer*)m_bufTimer)->stop();
     if (playerBar) playerBar->setBufferedMs(0);
@@ -2482,6 +2489,19 @@ void MainWindow::onPlayerFinished()
 
 void MainWindow::onRefreshBuffered()
 {
+    /* 播放停滞看门狗:仍在播放但位置长时间不动 → 状态栏显示已停滞秒数 */
+    if (m_player != 0 && m_player->state() == CxPlaying && !m_playFinished
+        && m_lastPosWallMs > 0) {
+        const long long idle = wallMs() - m_lastPosWallMs;
+        if (idle >= 1500) {                     /* 1.5s 起提示,避免误报 */
+            const int sec = (int)(idle / 1000);
+            if (sec != m_stallSec) {
+                m_stallSec = sec;
+                SharedStatusBar::instance()->showMessage(
+                    _("player.stalled_secs").arg(sec), 1200);
+            }
+        }
+    }
     if (playerBar == 0)
         return;
     CxBufferInfo info;
@@ -2525,6 +2545,11 @@ void MainWindow::replayCurrent()
 
 void MainWindow::onPlayerPosition(long ms)
 {
+    if (ms != m_lastPosMs) {       /* 有推进:刷新时间戳并清停滞态 */
+        m_lastPosMs = ms;
+        m_lastPosWallMs = wallMs();
+        m_stallSec = -1;
+    }
     if (getenv("QLVOTUBE_DEBUG") != 0) {
         static long lastSec = -1;          /* 1 秒一条,避免 33ms 刷屏 */
         const long sec = ms / 1000;
@@ -2744,9 +2769,10 @@ void MainWindow::onSubtitleText(const QString& text)
 
 void MainWindow::onPlayerError(int code, const QString& msg)
 {
-    (void)code;
     if (playerBar) playerBar->setPlaying(false);
     SharedStatusBar::instance()->showMessageTyped(msg, StatusError, 4000);
+    if (code == (int)CxErrAudio || code == (int)CxErrSeek)
+        return;   /* 非致命:音频回退 silent / seek 超界,不自动跳集 */
     skipOnError(msg);   /* autoskip 开:换下一项;关闭则停在错误上 */
 }
 
