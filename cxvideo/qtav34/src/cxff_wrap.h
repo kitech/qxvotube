@@ -6,6 +6,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/error.h>
+#include <libavutil/time.h> // av_gettime_relative:缓冲速度 1 秒窗口
 #include <libavutil/frame.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/hwcontext.h> // M4-A 硬解

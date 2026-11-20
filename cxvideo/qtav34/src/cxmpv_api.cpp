@@ -96,6 +96,7 @@ bool CxMpvApi::ensure()
     mpv_free              = (CxMpvFreeFn)cxMpvSym(lib, "mpv_free", false, &ok);
     mpv_wakeup            = (CxMpvWakeupFn)cxMpvSym(lib, "mpv_wakeup", false, &ok);
     mpv_get_property      = (CxMpvGetPropertyFn)cxMpvSym(lib, "mpv_get_property", false, &ok); // M3-A 可选
+    mpv_free_node_contents = (CxMpvFreeNodeContentsFn)cxMpvSym(lib, "mpv_free_node_contents", false, &ok);
     // M4-B:全可选;render 四件套齐备引擎才开 gl 路,缺则回退 wid
     mpv_set_property                   = (CxMpvSetPropertyFn)cxMpvSym(lib, "mpv_set_property", false, &ok);
     mpv_render_context_create          = (CxMpvRenderCreateFn)cxMpvSym(lib, "mpv_render_context_create", false, &ok);

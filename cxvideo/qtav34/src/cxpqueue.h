@@ -20,7 +20,7 @@ struct CxPkt {
 class CxPacketQueue {
 public:
     explicit CxPacketQueue(int capacity)
-        : cap(capacity), stopped(false), flushed(false)
+        : cap(capacity), stopped(false), flushed(false), bytes(0)
     { }
 
     void setCapacity(int c)
@@ -38,6 +38,8 @@ public:
             notFull.wait(&mx);
         if (stopped)
             return;
+        if (p.pkt != 0)
+            bytes += p.pkt->size;
         items.push_back(p);
         notEmpty.wakeAll();
     }
@@ -54,6 +56,10 @@ public:
         }
         CxPkt p = items.front();
         items.pop_front();
+        if (p.pkt != 0)
+            bytes -= p.pkt->size;
+        if (bytes < 0)
+            bytes = 0;
         notFull.wakeAll();
         return p;
     }
@@ -76,6 +82,7 @@ public:
                 av_packet_free(&items[i].pkt);
         }
         items.clear();
+        bytes = 0;
         notFull.wakeAll();
     }
 
@@ -95,12 +102,20 @@ public:
         return items.empty();
     }
 
+    // 当前队列中包字节数(UI 线程读)
+    long bufferedBytes() const
+    {
+        QMutexLocker lk(&mx);
+        return bytes;
+    }
+
 private:
     mutable QMutex mx;
     QWaitCondition notEmpty;
     QWaitCondition notFull;
     std::deque<CxPkt> items;
     int cap;
+    long bytes;                 // 队列中 AVPacket 字节合计(入队加/出队减)
     volatile bool stopped;
     volatile bool flushed;
 };

@@ -19,6 +19,7 @@ public:
         : fmtCtx(fmt), vQueue(vq), aQueue(aq), sQueue(sq),
           vStream(vIdx), aStream(aIdx), sStream(sIdx),
           sink(sink), stopFlag(false), m_bufferedMs(0),
+          m_rateBytes(0), m_rateStartUs(0), m_bytesPerSec(0),
           seekMs(0), seekStream(-1), seekReq(false)
     { }
 
@@ -29,6 +30,26 @@ public:
     {
         QMutexLocker lk(&m_bufMx);
         return m_bufferedMs;
+    }
+
+    /* 当前已缓冲字节:三队列在途包字节合计 */
+    long bufferedBytes() const
+    {
+        long n = 0;
+        if (vQueue != 0)
+            n += vQueue->bufferedBytes();
+        if (aQueue != 0)
+            n += aQueue->bufferedBytes();
+        if (sQueue != 0)
+            n += sQueue->bufferedBytes();
+        return n;
+    }
+
+    /* 读入速度(bytes/s):demux 线程 1 秒窗口统计,UI 线程读 */
+    long bytesPerSec() const
+    {
+        QMutexLocker lk(&m_bufMx);
+        return m_bytesPerSec;
     }
 
     /* seek 由本线程执行:AVFormatContext 非线程安全,绝不能与
@@ -113,9 +134,12 @@ private:
     /* 清队列积压并由消费线程自 flush(解码器归消费线程所有,避免竞态) */
     void flushAndMark(long ms)
     {
-        {   // seek 后旧缓冲前沿失效,归零重新累计
+        {   // seek 后旧缓冲前沿/速度窗口失效,归零重新累计
             QMutexLocker lk(&m_bufMx);
             m_bufferedMs = 0;
+            m_rateBytes = 0;
+            m_rateStartUs = 0;
+            m_bytesPerSec = 0;
         }
         flushOne(vQueue, ms);
         flushOne(aQueue, ms);
@@ -125,8 +149,21 @@ private:
     /* 把已读包的 PTS 折算成 ms 取最大值当缓冲前沿;无时间戳跳过 */
     void notePkt(const AVPacket* pkt)
     {
-        if (pkt == 0 || fmtCtx == 0)
+        if (pkt == 0)
             return;
+        {   // 速度窗口:所有读入包都计(含无时间戳/非目标流),1 秒滚动
+            const long long nowUs = av_gettime_relative();
+            QMutexLocker lk(&m_bufMx);
+            if (m_rateStartUs <= 0)
+                m_rateStartUs = nowUs;
+            m_rateBytes += pkt->size;
+            const long long dtUs = nowUs - m_rateStartUs;
+            if (dtUs >= 1000000) {
+                m_bytesPerSec = (long)(m_rateBytes * 1000000 / dtUs);
+                m_rateBytes = 0;
+                m_rateStartUs = nowUs;
+            }
+        }
         const int si = pkt->stream_index;
         if (si < 0 || si >= fmtCtx->nb_streams)
             return;
@@ -185,8 +222,11 @@ private:
     int sStream;
     QObject* sink;
     volatile bool stopFlag;
-    mutable QMutex m_bufMx;      // 保护 m_bufferedMs(demux 写/UI 读)
+    mutable QMutex m_bufMx;      // 保护缓冲前沿/速度窗口(demux 写/UI 读)
     long m_bufferedMs;
+    long long m_rateBytes;       // 当前 1 秒窗口累计字节
+    long long m_rateStartUs;     // 窗口起点(av_gettime_relative)
+    long m_bytesPerSec;          // 最近一次窗口速度
     QMutex seekMx;
     long seekMs;
     int seekStream;

@@ -26,8 +26,10 @@ public:
     void setAutoSkip(bool on);           /* 播放失败自动跳过 */
     /* 下载进度 pie:0-100 / -1 未定 / -2 失败 / 100 完成(短暂留痕后隐) */
     void setDownloadState(int pct);
-    /* 缓冲进度(ms):播放后端网络缓冲前沿;独立定时器刷新,常驻显示 */
-    void setBufferedMs(long ms);
+    /* 缓冲信息:比例=已缓冲字节/后端上限;秒数/字节/速度同刷新;常驻显示 */
+    void setBufferInfo(long bufferedMs, long bufferedBytes,
+                       long maxBytes, long bytesPerSec);
+    void setBufferedMs(long ms) { setBufferInfo(ms, 0, 0, 0); } /* 复位/兼容 */
     /* 底部单行字幕(YouTube via yt-dlp);空串=不显示 */
     void setSubtitleLine(const QString& text);
     void retranslateUi();
@@ -105,7 +107,10 @@ private:
     bool m_autoSkip;
     int m_dlPct;                         /* -1 未定 / 0-100 / -2 失败 */
     bool m_dlVisible;
-    long m_bufferedMs;                   /* 播放后端缓冲前沿(ms),0=未知 */
+    long m_bufferedMs;                   /* 已缓冲总时长(ms),0=未知 */
+    long m_bufferedBytes;                /* 已缓冲字节,0=未知 */
+    long m_maxBytes;                     /* 后端最大缓冲字节,0=未知 */
+    long m_bytesPerSec;                  /* 缓冲速度(bytes/s),0=未知 */
     QString m_subtitleLine;              /* 底部当前字幕行(空=不显示) */
     void* m_dlHideTimer;                 /* QTimer* */
     void* m_volumePopup;                 /* VolumePopupFrame* */

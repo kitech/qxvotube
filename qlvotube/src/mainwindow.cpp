@@ -2439,7 +2439,11 @@ void MainWindow::onRefreshBuffered()
 {
     if (playerBar == 0)
         return;
-    playerBar->setBufferedMs(m_player != 0 ? m_player->bufferedMs() : 0);
+    CxBufferInfo info;
+    if (m_player != 0)
+        info = m_player->bufferInfo();
+    playerBar->setBufferInfo(info.bufferedMs, info.bufferedBytes,
+                             info.maxBytes, info.bytesPerSec);
 }
 
 void MainWindow::onListRefresh()

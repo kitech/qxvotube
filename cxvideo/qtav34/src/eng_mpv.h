@@ -33,6 +33,7 @@ public:
     long position() const;
     long duration() const;
     long bufferedMs() const;     // demuxer-cache-time,回退 -duration
+    CxBufferInfo bufferInfo() const; // 缓冲四项(cache-speed/NODE/options)
     // M7:mpv 侧能取多少填多少(码率无属性=0;codec 用 video-codec)
     CxVideoInfo videoInfo() const;
 

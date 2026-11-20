@@ -501,6 +501,54 @@ long CXEngineMpv::bufferedMs() const
     return 0;
 }
 
+CxBufferInfo CXEngineMpv::bufferInfo() const
+{
+    CxBufferInfo info;
+    info.bufferedMs = bufferedMs();
+    CxMpvApi& api = CxMpvApi::instance();
+    if (h_mpv == 0 || api.mpv_get_property == 0) {
+        info.maxBytes = CX_BUFFER_MAX_BYTES_DEFAULT;
+        return info;
+    }
+    double speed = 0;
+    if (api.mpv_get_property(h_mpv, "cache-speed",
+                             (int)CxMpvFmtDouble, &speed) == 0 && speed > 0)
+        info.bytesPerSec = (long)speed;
+    long long maxB = 0;
+    if (api.mpv_get_property(h_mpv, "options/demuxer-max-bytes",
+                             (int)CxMpvFmtInt64, &maxB) == 0 && maxB > 0)
+        info.maxBytes = (long)maxB;
+    if (info.maxBytes <= 0)
+        info.maxBytes = CX_BUFFER_MAX_BYTES_DEFAULT;
+
+    CxMpvNode node;
+    memset(&node, 0, sizeof(node));
+    if (api.mpv_get_property(h_mpv, "demuxer-cache-state",
+                             (int)CxMpvFmtNode, &node) == 0
+        && node.format == CxMpvFmtNodeMap && node.u.list != 0) {
+        const CxMpvNodeList* l = node.u.list;
+        for (int i = 0; i < l->num; i++) {
+            if (l->keys == 0 || l->values == 0)
+                break;
+            const char* k = l->keys[i];
+            const CxMpvNode& v = l->values[i];
+            if (k != 0 && strcmp(k, "fw-bytes") == 0
+                && v.format == CxMpvFmtInt64)
+                info.bufferedBytes = (long)v.u.int64;
+            else if (k != 0 && strcmp(k, "raw-input-rate") == 0
+                     && v.format == CxMpvFmtInt64 && info.bytesPerSec <= 0)
+                info.bytesPerSec = (long)v.u.int64;
+        }
+        if (api.mpv_free_node_contents != 0)
+            api.mpv_free_node_contents(&node);
+    }
+    if (info.bufferedBytes < 0)
+        info.bufferedBytes = 0;
+    if (info.bytesPerSec < 0)
+        info.bytesPerSec = 0;
+    return info;
+}
+
 void CXEngineMpv::customEvent(CustomEventBase* e)
 {
     if (e->type() != toEventType34(kCxMpvEventRaw))

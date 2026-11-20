@@ -94,6 +94,27 @@ typedef void (*CxMpvFreeFn)(void*);
 typedef void (*CxMpvWakeupFn)(void*);
 typedef int (*CxMpvGetPropertyFn)(void*, const char*, int, void*); // M3-A 轨道枚举
 typedef int (*CxMpvSetPropertyFn)(void*, const char*, int, void*); // M4-B EQ 属性直写
+typedef void (*CxMpvFreeNodeContentsFn)(void* node); // 释放 MPV_FORMAT_NODE 返回值
+
+// mpv_node / mpv_node_list 布局镜像(client.h 冻结值);
+// demuxer-cache-state 子键直读实测报错,只能以 NODE 取回后遍历 map。
+struct CxMpvNode;
+struct CxMpvNodeList {
+    int num;
+    CxMpvNode* values;
+    char** keys;
+};
+struct CxMpvNode {
+    union {
+        char* string;
+        int flag;
+        long long int64;
+        double double_;
+        CxMpvNodeList* list;
+        unsigned char* byte_array;
+    } u;
+    int format;
+};
 
 // M4-B:render.h/render_gl.h 官方冻结值(dlopen 不带头文件)
 typedef void CxMpvRenderCtx; // mpv_render_context*(opaque)
@@ -162,6 +183,7 @@ public:
     CxMpvFreeFn mpv_free;
     CxMpvWakeupFn mpv_wakeup;
     CxMpvGetPropertyFn mpv_get_property; // M3-A(可选;缺则轨道 API 返 0/false)
+    CxMpvFreeNodeContentsFn mpv_free_node_contents; // 缓冲字节数(NODE 遍历后释放)
     // M4-B(全可选;render 四件套齐才开 gl 路,缺则回退 wid)
     CxMpvSetPropertyFn mpv_set_property;
     CxMpvRenderCreateFn      mpv_render_context_create;
@@ -177,7 +199,7 @@ private:
                  mpv_command(0), mpv_observe_property(0), mpv_wait_event(0),
                  mpv_set_wakeup_callback(0), mpv_client_api_version(0),
                  mpv_event_name(0), mpv_free(0), mpv_wakeup(0),
-                 mpv_get_property(0),
+                 mpv_get_property(0), mpv_free_node_contents(0),
                  mpv_set_property(0),
                  mpv_render_context_create(0), mpv_render_context_free(0),
                  mpv_render_context_render(0),

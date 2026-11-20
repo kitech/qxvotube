@@ -53,6 +53,7 @@ public:
     long position() const;
     long duration() const;
     long bufferedMs() const;     // 转发当前引擎缓冲前沿
+    CxBufferInfo bufferInfo() const; // 转发当前引擎缓冲四项快照
     // M7:播放信息(转发当前引擎;无引擎=全空)
     CxVideoInfo videoInfo() const;
     double rate() const { return m_rate; }

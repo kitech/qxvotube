@@ -610,6 +610,22 @@ long CXEngineFfmpeg::bufferedMs() const
     return m_demux != 0 ? m_demux->bufferedMs() : 0;
 }
 
+CxBufferInfo CXEngineFfmpeg::bufferInfo() const
+{
+    CxBufferInfo info;
+    info.bufferedMs = bufferedMs();
+    info.maxBytes = CX_BUFFER_MAX_BYTES_DEFAULT;
+    if (m_demux != 0) {
+        info.bufferedBytes = m_demux->bufferedBytes();
+        info.bytesPerSec = m_demux->bytesPerSec();
+    }
+    if (info.bufferedBytes < 0)
+        info.bufferedBytes = 0;
+    if (info.bytesPerSec < 0)
+        info.bytesPerSec = 0;
+    return info;
+}
+
 void CXEngineFfmpeg::customEvent(CustomEventBase* e)
 {
     if (e->type() != toEventType34(kcxFFmpegEventRaw))

@@ -38,6 +38,18 @@ struct CxVideoInfo {
         : width(0), height(0), bitrateKbps(0), fps(0), degraded(false), dpr(1.0) {}
 };
 
+// 缓冲信息:四项均由后端实测;取不到的字段为 0(不猜、不造假)。
+// maxBytes = 后端允许的最大缓冲字节上限;mpv 取 options/demuxer-max-bytes,
+// FFmpeg 无对应选项,统一用 CX_BUFFER_MAX_BYTES_DEFAULT(与 mpv 默认 150MiB 对齐)。
+struct CxBufferInfo {
+    long bufferedMs;      // 已缓冲总时长(ms)
+    long bufferedBytes;   // 当前已缓冲字节
+    long maxBytes;        // 最大缓冲字节上限
+    long bytesPerSec;     // 缓冲速度(bytes/s,1 秒窗口)
+    CxBufferInfo() : bufferedMs(0), bufferedBytes(0), maxBytes(0), bytesPerSec(0) {}
+};
+#define CX_BUFFER_MAX_BYTES_DEFAULT (150L * 1024L * 1024L)
+
 // 引擎抽象(detail.md 第 3 节;UI 线程 API,线程→UI 经事件回投)
 class CXEngine : public QObject {
     Q_OBJECT
@@ -69,6 +81,12 @@ public:
     //   libmpv = demuxer-cache-time,回退 demuxer-cache-duration;
     //   cmdmpv = 进程型无 IPC/属性通道,恒 0。
     virtual long bufferedMs() const { return 0; }
+    // 缓冲四项快照(默认仅回带 bufferedMs;其余能力由各后端自行实现)
+    virtual CxBufferInfo bufferInfo() const {
+        CxBufferInfo b;
+        b.bufferedMs = bufferedMs();
+        return b;
+    }
 
     // M3-A:轨道选择 + 外挂字幕(不支持的能力各自返回 false/0;cmdmpv 即此形)
     virtual int audioTrackCount() const { return 0; }

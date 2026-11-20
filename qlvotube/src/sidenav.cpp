@@ -179,6 +179,10 @@ void SideNav::retranslateUi()
                 else if (key == qFromUtf8("international")) label = qFromUtf8("国际");
                 else label = key;
             }
+            /* 地区子项后缀显示频道个数,如「中国大陆 (111)」 */
+            label += qFromUtf8(" (")
+                  + QString::number((int)tvlist::byRegion(key).size())
+                  + qFromUtf8(")");
             m_netTvRegionNames.push_back(label);
         }
     }

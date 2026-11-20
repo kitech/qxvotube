@@ -149,6 +149,7 @@ PlayerBar::PlayerBar(QWidget* parent)
       m_volume(100), m_lastVolume(100), m_rate(1.0), m_muted(false),
       m_repeatMode(0), m_shuffle(false), m_autoSkip(true),
       m_dlPct(0), m_dlVisible(false), m_bufferedMs(0),
+      m_bufferedBytes(0), m_maxBytes(0), m_bytesPerSec(0),
       m_dlHideTimer(0), m_volumePopup(0), m_volumeSlider(0), m_muteCheck(0),
       m_subtitleLine(qFromUtf8("无字幕资源"))
 {
@@ -270,15 +271,42 @@ static QString pbDownloadTip(bool visible, int pct)
     return qFromUtf8("下载中 ") + QString::number(pct) + qFromUtf8("%");
 }
 
-/* 缓冲圈 tooltip:显示后端网络缓冲到的时间点与百分比 */
-static QString pbBufferedTip(long bufferedMs, int durationMs)
+/* 缓冲 tooltip:比例=缓冲字节/后端上限;四项均无数据才回退旧文案 */
+static QString pbBufBytes(long bytes)
 {
-    if (bufferedMs <= 0 || durationMs <= 0)
+    if (bytes <= 0)
+        return qFromUtf8("—");
+    const double mb = (double)bytes / (1024.0 * 1024.0);
+    if (mb < 0.1)
+        return QString::number((double)bytes / 1024.0, 'f', 0) + qFromUtf8(" KB");
+    return QString::number(mb, 'f', 1) + qFromUtf8(" MiB");
+}
+
+static QString pbBufSpeed(long bps)
+{
+    if (bps <= 0)
+        return qFromUtf8("0 kB/s");
+    if (bps >= 1000000)
+        return QString::number((double)bps / 1000000.0, 'f', 1) + qFromUtf8(" MB/s");
+    return QString::number((double)bps / 1000.0, 'f', 0) + qFromUtf8(" kB/s");
+}
+
+static QString pbBufferedTip(long bufferedMs, long bufferedBytes,
+                             long maxBytes, long bytesPerSec)
+{
+    if (bufferedMs <= 0 && bufferedBytes <= 0 && maxBytes <= 0 && bytesPerSec <= 0)
         return qFromUtf8("缓冲进度:未知");
-    const long v = qMin(bufferedMs, (long)durationMs);
-    const int pct = qBound(0, (int)(v * 100 / durationMs), 100);
-    return qFromUtf8("缓冲 ") + QString::number(pct) + qFromUtf8("% · 已缓存到 ")
-           + fmtMs((int)v);
+    int pct = 0;
+    if (maxBytes > 0 && bufferedBytes > 0)
+        pct = qBound(0, (int)((double)bufferedBytes / maxBytes * 100), 100);
+    const QString secs = bufferedMs > 0
+                         ? QString::number((double)bufferedMs / 1000.0, 'f', 1)
+                           + qFromUtf8("s")
+                         : qFromUtf8("—");
+    return qFromUtf8("缓冲 ") + QString::number(pct) + qFromUtf8("% · 已缓冲 ")
+           + secs + qFromUtf8(" · ") + pbBufBytes(bufferedBytes)
+           + qFromUtf8(" / ") + pbBufBytes(maxBytes)
+           + qFromUtf8(" · ") + pbBufSpeed(bytesPerSec);
 }
 
 /* 单行截断(Qt3 无 QFontMetrics::elidedText,按宽度逐字裁) */
@@ -388,8 +416,13 @@ void PlayerBar::paintEvent(QPaintEvent*)
     p.setBrush(pal.border);
     muiDrawRoundRect(p, pr, 3, 3);
     /* 缓冲段(accent 与背景对半混色):下载常快于播放,浅色段领先亮色播放头 */
-    if (m_hasTrack && m_durationMs > 0 && m_bufferedMs > 0) {
-        int br = (int)((double)qMin(m_bufferedMs, (long)m_durationMs)
+    if (m_hasTrack && ((m_maxBytes > 0 && m_bufferedBytes > 0)
+                       || (m_durationMs > 0 && m_bufferedMs > 0))) {
+        int br = 0;
+        if (m_maxBytes > 0 && m_bufferedBytes > 0)
+            br = (int)((double)m_bufferedBytes / m_maxBytes * pr.width());
+        else
+            br = (int)((double)qMin(m_bufferedMs, (long)m_durationMs)
                        / m_durationMs * pr.width());
         br = qBound(0, br, pr.width());
         if (br > 0) {
@@ -479,8 +512,11 @@ void PlayerBar::paintEvent(QPaintEvent*)
     {
         QRect br = bufferedRect();
         const QColor rc = (m_hover == HitBuffered) ? pal.accent : pal.textMuted;
-        int bp = (m_durationMs > 0 && m_bufferedMs > 0)
-                 ? qBound(0, (int)(m_bufferedMs * 100 / m_durationMs), 100) : 0;
+        int bp = 0;
+        if (m_maxBytes > 0 && m_bufferedBytes > 0)
+            bp = qBound(0, (int)((double)m_bufferedBytes / m_maxBytes * 100), 100);
+        else if (m_durationMs > 0 && m_bufferedMs > 0)
+            bp = qBound(0, (int)(m_bufferedMs * 100 / m_durationMs), 100);
         p.save();
         p.setPen(QPen(rc, 1));
         p.setBrush(Qt::NoBrush);
@@ -674,7 +710,8 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
         showTempTooltip(this, downloadRect(), pbDownloadTip(m_dlVisible, m_dlPct));
     else if (m_hover == HitBuffered)
         showTempTooltip(this, bufferedRect(),
-                        pbBufferedTip(m_bufferedMs, m_durationMs));
+                        pbBufferedTip(m_bufferedMs, m_bufferedBytes,
+                                      m_maxBytes, m_bytesPerSec));
     else
         showTempTooltip(this, downloadRect(), QString());
 }
@@ -743,15 +780,24 @@ void PlayerBar::setDownloadState(int pct)
         showTempTooltip(this, downloadRect(), pbDownloadTip(m_dlVisible, m_dlPct));
 }
 
-void PlayerBar::setBufferedMs(long ms)
+void PlayerBar::setBufferInfo(long bufferedMs, long bufferedBytes,
+                              long maxBytes, long bytesPerSec)
 {
-    const long v = ms > 0 ? ms : 0;
-    if (v == m_bufferedMs)
+    const long a = bufferedMs > 0 ? bufferedMs : 0;
+    const long b = bufferedBytes > 0 ? bufferedBytes : 0;
+    const long c = maxBytes > 0 ? maxBytes : 0;
+    const long d = bytesPerSec > 0 ? bytesPerSec : 0;
+    if (a == m_bufferedMs && b == m_bufferedBytes
+        && c == m_maxBytes && d == m_bytesPerSec)
         return;                       // 250ms 轮询,值不变则不重绘
-    m_bufferedMs = v;
+    m_bufferedMs = a;
+    m_bufferedBytes = b;
+    m_maxBytes = c;
+    m_bytesPerSec = d;
     if (m_hover == HitBuffered)
         showTempTooltip(this, bufferedRect(),
-                        pbBufferedTip(m_bufferedMs, m_durationMs));
+                        pbBufferedTip(m_bufferedMs, m_bufferedBytes,
+                                      m_maxBytes, m_bytesPerSec));
     update();
 }
 
