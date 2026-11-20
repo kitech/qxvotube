@@ -56,7 +56,10 @@
     "pause": "Pause",
     "next": "Next",
     "no_media": "No local audio file for this track",
-    "playback": "Playback error"
+    "playback": "Playback error",
+    "mid_click_ni": "Middle-click: not implemented yet",
+    "wheel_up_ni": "Wheel up: not implemented yet",
+    "wheel_down_ni": "Wheel down: not implemented yet"
   },
   "error": {
     "network": "Network error",

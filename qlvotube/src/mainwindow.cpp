@@ -644,6 +644,13 @@ void MainWindow::buildCentralWidget()
     /* M7:播放器右键 → 视频详情/复制/浏览器打开 */
     QObject::connect(videoPane, SIGNAL(contextMenuRequested(const QPoint&)),
                      this, SLOT(onPlayerContextMenu(const QPoint&)));
+    /* 画面区交互:单击暂停/恢复,双击=F,中键/滚轮提示未实现 */
+    QObject::connect(videoPane, SIGNAL(togglePlayPauseRequested()),
+                     this, SLOT(onPlayPause()));
+    QObject::connect(videoPane, SIGNAL(toggleFullscreenRequested()),
+                     this, SLOT(onVideoSurfaceToggleFullscreen()));
+    QObject::connect(videoPane, SIGNAL(surfaceHint(int)),
+                     this, SLOT(onVideoSurfaceHint(int)));
     /* M7:列表卡片右键 → 复制/显示/浏览器打开 */
     QObject::connect(contentView,
                      SIGNAL(videoContextMenu(const QString&, const QPoint&)),
@@ -2781,6 +2788,19 @@ void MainWindow::onPrev()
 void MainWindow::onNext()
 {
     advanceNext(false);   /* 手动 next:尾部恒环绕 */
+}
+
+void MainWindow::onVideoSurfaceToggleFullscreen()
+{
+    toggleVideoFullscreen();   /* 与 F 键同一实现 */
+}
+
+void MainWindow::onVideoSurfaceHint(int hint)
+{
+    const char* key = "player.mid_click_ni";
+    if (hint == VideoPane::HintWheelUp)        key = "player.wheel_up_ni";
+    else if (hint == VideoPane::HintWheelDown) key = "player.wheel_down_ni";
+    SharedStatusBar::instance()->showMessage(_(key), 2000);
 }
 
 void MainWindow::onMenu1Stub() {}

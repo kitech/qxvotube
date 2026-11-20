@@ -3,10 +3,13 @@
 #include <qpushbutton.h>
 #include <qcolor.h>
 #include <qevent.h>
+#include <qtimer.h>
+#include <qapplication.h>
 
 VideoPane::VideoPane(QWidget* parent)
     : QWidget(parent), m_surface(0), m_renderer(0), m_lay(0),
-      m_backBtn(0), m_engineLabel(0), m_titleLabel(0), m_subLabel(0)
+      m_backBtn(0), m_engineLabel(0), m_titleLabel(0), m_subLabel(0),
+      m_clickTimer(0)
 {
 #ifdef QT3_BUILD
     setBackgroundColor(QColor(0, 0, 0)); // Qt3 无 palette/autoFill
@@ -77,6 +80,14 @@ VideoPane::VideoPane(QWidget* parent)
     m_subLabel->setAlignment(Qt::AlignCenter);
     m_subLabel->hide();
 
+    /* 画面单击/双击判定:按下启动,期间收到双击则取消 */
+    m_clickTimer = new QTimer(this);
+#ifndef QT3_BUILD
+    m_clickTimer->setSingleShot(true);   /* Qt3 无此接口,start(msec,true) 传单次 */
+#endif
+    QObject::connect(m_clickTimer, SIGNAL(timeout()),
+                     this, SLOT(onSurfaceClickTimeout()));
+
     QObject::connect(m_backBtn, SIGNAL(clicked()), this, SIGNAL(backRequested()));
 }
 
@@ -90,6 +101,7 @@ void VideoPane::setRendererWidget(QWidget* w)
     w->setParent(m_surface);
 #endif
     m_renderer = w;
+    w->installEventFilter(this);   /* 鼠标/滚轮事件落在渲染子件上,必须挂这里 */
     // 交给 m_surface 的布局管理：minimumSize(320,180) 与 surface 尺寸变化自动生效；
     // 不再用一次性 setGeometry（会绕过 min 且滞后于 surface 变化）
     QBoxLayout* rendererLay = qNewBoxLayout(m_surface, QBoxLayout::LeftToRight, 0, 0);
@@ -149,13 +161,59 @@ void VideoPane::resizeEvent(QResizeEvent* e)
     // 二者尺寸自动联动，不再手动 setGeometry（原实现高度沿用旧值会卡住）。
 }
 
+void VideoPane::onSurfaceClickTimeout()
+{
+    emit togglePlayPauseRequested();
+}
+
 bool VideoPane::eventFilter(QObject* o, QEvent* e)
 {
-    if (o == m_surface && e->type() == QEvent::Resize && m_renderer != 0) {
-        // 用事件自带的新尺寸,避开旧实现"沿用 m_surface->height()"的 stale 值
-        QResizeEvent* re = static_cast<QResizeEvent*>(e);
-        QSize s = re->size();
-        m_renderer->setGeometry(0, 0, s.width(), s.height());
+    if (o == m_surface || o == m_renderer) {
+        const QEvent::Type t = e->type();
+        if (t == QEvent::MouseButtonPress) {
+            QMouseEvent* me = static_cast<QMouseEvent*>(e);
+            if (me->button() == Qt::LeftButton) {
+                /* 按下先挂起:若随后是双击会被取消,否则超时=单击 */
+                if (m_clickTimer != 0) {
+#ifdef QT3_BUILD
+                    m_clickTimer->start(QApplication::doubleClickInterval(), true);
+#else
+                    m_clickTimer->start(QApplication::doubleClickInterval());
+#endif
+                }
+                return false;   /* 不改变原有按下行为 */
+            }
+#if QT_VERSION >= 0x050000
+            if (me->button() == Qt::MiddleButton) {
+#else
+            if (me->button() == Qt::MidButton) {
+#endif
+                emit surfaceHint(HintMidClick);
+                return true;
+            }
+        } else if (t == QEvent::MouseButtonDblClick) {
+            QMouseEvent* me = static_cast<QMouseEvent*>(e);
+            if (me->button() == Qt::LeftButton) {
+                if (m_clickTimer != 0)
+                    m_clickTimer->stop();
+                emit toggleFullscreenRequested();
+                return true;
+            }
+        } else if (t == QEvent::Wheel) {
+            QWheelEvent* we = static_cast<QWheelEvent*>(e);
+#if QT_VERSION >= 0x060000
+            const int d = we->angleDelta().y();
+#else
+            const int d = we->delta();
+#endif
+            emit surfaceHint(d < 0 ? HintWheelDown : HintWheelUp);
+            return true;
+        } else if (o == m_surface && t == QEvent::Resize && m_renderer != 0) {
+            // 用事件自带的新尺寸,避开旧实现"沿用 m_surface->height()"的 stale 值
+            QResizeEvent* re = static_cast<QResizeEvent*>(e);
+            QSize s = re->size();
+            m_renderer->setGeometry(0, 0, s.width(), s.height());
+        }
     }
     return QWidget::eventFilter(o, e);
 }

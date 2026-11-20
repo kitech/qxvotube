@@ -56,7 +56,10 @@
     "pause": "暂停",
     "next": "下一首",
     "no_media": "该曲目暂无本地音频文件",
-    "playback": "播放错误"
+    "playback": "播放错误",
+    "mid_click_ni": "中键点击：暂未实现",
+    "wheel_up_ni": "滚轮向上：暂未实现",
+    "wheel_down_ni": "滚轮向下：暂未实现"
   },
   "error": {
     "network": "网络错误",

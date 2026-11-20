@@ -8,12 +8,15 @@ class QBoxLayout;
 class QEvent;
 class QPushButton;
 class QLabel;
+class QTimer;
 
 // M5-A:播放页容器(宿主窗:ffmpeg 的 CXRendererGl 作子件;mpv 的
 // CXRendererMpvGl 由引擎自建并挂到这里)
 class VideoPane : public QWidget {
     Q_OBJECT
 public:
+    enum SurfaceHint { HintMidClick = 0, HintWheelUp = 1, HintWheelDown = 2 };
+
     explicit VideoPane(QWidget* parent = 0);
 
     QWidget* surface() const { return m_surface; } // 交给 setHostWidget
@@ -27,6 +30,12 @@ public:
 signals:
     void backRequested();
     void contextMenuRequested(const QPoint& globalPos);   /* M7:播放器右键 */
+    void togglePlayPauseRequested();   /* 画面单击 = 暂停/恢复 */
+    void toggleFullscreenRequested();  /* 画面双击 = F */
+    void surfaceHint(int hint);        /* 中键/滚轮:未实现提示(文案由 MainWindow i18n) */
+
+private slots:
+    void onSurfaceClickTimeout();
 
 protected:
     void resizeEvent(QResizeEvent* e);
@@ -42,6 +51,7 @@ private:
     QLabel* m_titleLabel;     /* 顶栏视频标题 */
     QLabel* m_infoLabel;      /* M7:分辨率/档位 */
     QLabel* m_subLabel;
+    QTimer* m_clickTimer;     /* 单击/双击判定 */
 };
 
 #endif // VIDEOPANE_H

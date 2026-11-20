@@ -98,6 +98,8 @@ private slots:
     void onPlayPause();
     void onPrev();
     void onNext();
+    void onVideoSurfaceToggleFullscreen();   /* 画面双击 = F */
+    void onVideoSurfaceHint(int hint);       /* 中键/滚轮未实现提示 */
 
     /* 播放引擎接线(cxvideo/qtav34;backend-abstraction.md Phase 1) */
     void onPlayerStarted();
