@@ -1400,6 +1400,9 @@ void MainWindow::onSiteChanged(const QString& providerId)
 
     m_curProv->cancel();
     sideNav->clearVideoCategories();
+    m_catLoadSite = providerId;            /* 旧站点在途回调不再关当前 loading */
+    m_catLoadPending = 2;                  /* categories() + categoriesRefresh() 各一次 */
+    sideNav->setVideoCategoriesLoading(true);
     m_videoTitles.clear();
     m_videoCards.clear();
     m_videoIds.clear();
@@ -1441,13 +1444,16 @@ void MainWindow::onSiteChanged(const QString& providerId)
     // 会被误判为陈旧而丢弃,故跳过 gen 校验、在 customEvent 改用站点 id 校验。
     p->categoriesRefresh([this, providerId, gen](const qxv::Result& r,
                                      const QList36<qxv::CategoryItem>& cats) {
-        if (r.code != qxv::Err::Ok || cats.isEmpty()) return;
+        // 失败/空也投递:UI 用它递减 m_catLoadPending 并关闭分类加载标识;
+        // 空列表在 customEvent 里被忽略,chips 保持本地分类不变。
         VideoUiEvent* ev = new VideoUiEvent(VideoUiEvent::CategoriesRefresh);
         ev->gen = gen;
         ev->text = providerId;
-        for (int i = 0; i < cats.size(); ++i) {
-            ev->catKeys.append(cats[i].key);
-            ev->catNames.append(cats[i].name);
+        if (r.code == qxv::Err::Ok) {
+            for (int i = 0; i < cats.size(); ++i) {
+                ev->catKeys.append(cats[i].key);
+                ev->catNames.append(cats[i].name);
+            }
         }
         QApplication::postEvent(this, ev);
     });
@@ -2905,8 +2911,10 @@ void MainWindow::customEvent(CustomEventBase* event)
             return;
         }
         if (e->kind == VideoUiEvent::CategoriesRefresh) {
-            if (!m_curProv || e->text != m_curProv->id() || e->catKeys.isEmpty())
-                return;
+            if (!m_curProv || e->text != m_catLoadSite) return;
+            if (--m_catLoadPending <= 0)
+                sideNav->setVideoCategoriesLoading(false);
+            if (e->catKeys.isEmpty()) return;  /* 失败/无能力:仅结束 loading,不动 chips */
             std::vector<CategoryChip> chips;
             for (int i = 0; i < e->catKeys.size(); ++i)
                 chips.push_back(CategoryChip(e->catKeys[i], e->catNames[i]));
@@ -2939,6 +2947,10 @@ void MainWindow::customEvent(CustomEventBase* event)
                 qWarning("categories failed: %s %s", qToUtf8(site).data(),
                          qToUtf8(why).data());
 #endif
+            }
+            if (site == m_catLoadSite) {
+                if (--m_catLoadPending <= 0)
+                    sideNav->setVideoCategoriesLoading(false);
             }
             std::vector<CategoryChip> chips;
             for (int i = 0; i < e->catKeys.size(); ++i)

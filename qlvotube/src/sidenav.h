@@ -38,6 +38,8 @@ public:
                             const QString& currentKey);
     void clearVideoCategories();
     void setCurrentVideoCategory(const QString& key);
+    /* 「视频分类」分组标题右侧的联网加载标识(静态省略号 …) */
+    void setVideoCategoriesLoading(bool on);
 
     /* 网络电视地区子项(地区 key 来自 tvlist::regions)：切换当前高亮 */
     void setCurrentNetTvRegion(const QString& region);
@@ -125,6 +127,7 @@ private:
     QStringList m_videoCatKeys;
     QString m_groupVideoCats;
     QString m_curVideoCat;
+    bool m_videoCatsLoading;      /* 分类网络请求进行中 → 标题右侧画 … */
 };
 
 #endif // SIDENAV_H

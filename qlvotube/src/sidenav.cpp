@@ -69,7 +69,8 @@ void comboAdd(QComboBox* c, const QString& text)
 SideNav::SideNav(QWidget* parent)
     : QWidget(parent), m_search(0), m_user(0), m_siteLabel(0), m_site(0),
       m_hasSite(false),
-      m_scrollBar(0), m_scroll(0), m_contentH(0), m_current(-1), m_hover(-1)
+      m_scrollBar(0), m_scroll(0), m_contentH(0), m_current(-1), m_hover(-1),
+      m_videoCatsLoading(false)   /* 按声明顺序置末尾 */
 {
     setMouseTracking(true);
     setMinimumWidth(170);
@@ -91,6 +92,13 @@ SideNav::SideNav(QWidget* parent)
     m_scrollBar->hide();
     connect(m_scrollBar, SIGNAL(valueChanged(int)), this, SLOT(onNavScroll(int)));
     retranslateUi();
+}
+
+void SideNav::setVideoCategoriesLoading(bool on)
+{
+    if (m_videoCatsLoading == on) return;
+    m_videoCatsLoading = on;
+    update();                 /* 只重绘侧栏,不影响网络/网格 */
 }
 
 void SideNav::onSearchSubmitted(const QString& text)
@@ -496,7 +504,12 @@ void SideNav::paintEvent(QPaintEvent*)
         if (it.kind == NavHeader) {
             p.setFont(small);
             p.setPen(pal.textMuted);
-            p.drawText(QRect(18, r.y(), width() - 24, r.height()), Qt::AlignVCenter | Qt::AlignLeft, it.text);
+            const bool vcat = (it.text == m_groupVideoCats) && m_videoCatsLoading;
+            p.drawText(QRect(18, r.y(), width() - 24 - (vcat ? 22 : 0), r.height()),
+                       Qt::AlignVCenter | Qt::AlignLeft, it.text);
+            if (vcat)
+                p.drawText(QRect(width() - 24, r.y(), 18, r.height()),
+                           Qt::AlignVCenter | Qt::AlignRight, qFromUtf8("…"));
             continue;
         }
         bool selected = false;

@@ -212,18 +212,25 @@ void NetflixProvider::categories(
 
 // categoriesRefresh() —— 后台拉 /genres,成功后在线优先去重合并不再重复本地全量
 // (本地那半边 categories() 已显示)。在线优先:首项恒为「推荐」,在线 genre 在前,
-// 本地仅补在线没有的。失败 → softFail 记日志、不回调(保持已显示的本地分类)。
+// 本地仅补在线没有的。失败 → softFail 记日志 + 空结果回调(保持已显示的本地分类,
+// 同时让 UI 的「双回调计数」归零、关闭分类加载标识)。
 void NetflixProvider::categoriesRefresh(
     std::function<void(const Result&, const QList36<CategoryItem>&)> cb)
 {
     if (!hasKey()) warnNoKey();
     unogGet("/genres", QString(), [cb](const NetResponse& r) {
-        if (!r.ok()) { softFail(r, qFromUtf8("unogs /genres")); return; }
+        if (!r.ok()) {
+            softFail(r, qFromUtf8("unogs /genres"));
+            cb(Result::fail(Err::Network, r.error), QList36<CategoryItem>());
+            return;
+        }
         JRoot root(r.body);
         cJSON* arr = jarr(root.p, "results");
         if (!root.ok() || !arr) {
             DBG_P(kMod, Warn, "unogs /genres 解析失败,保持本地分类");
             softFail(r, qFromUtf8("unogs /genres 解析失败"));
+            cb(Result::fail(Err::Parse, qFromUtf8("unogs /genres 解析失败")),
+               QList36<CategoryItem>());
             return;
         }
         QList36<CategoryItem> cats;

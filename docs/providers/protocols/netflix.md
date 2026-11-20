@@ -57,14 +57,16 @@ x-rapidapi-host: unogsng.p.rapidapi.com
    正常加载推荐页,完全不碰网络。
 2. `categoriesRefresh()` 后台拉 `/genres`:成功 → **在线优先去重**合并(首项恒为
    「推荐」、在线 genre 在前、本地仅补在线没有的),通过独立的 `CategoriesRefresh`
-   UI 事件就地刷新 chips;失败(含 401)→ `softFail` 记日志、不回调,保持已显示的
-   本地分类不变。
+   UI 事件就地刷新 chips;失败(含 401)→ `softFail` 记日志 + **空结果回调**,保持已显示
+   的本地分类不变,同时让 UI 的分类加载计数归零、关掉标题右侧的加载标识。
 3. 就地刷新只更新 chips 内容 + 侧栏高亮(用当前 `m_gridChip` 的 key 重定位,
    找不到则保持原选中),**不重置分页、不重载页面、不打断用户当前选中的分类**。
    该事件跳过 `gen` 代际校验(首次 `Categories` 分支的 `loadVideoPage` 会递增
    `m_gridGen`),改用站点 id 校验防止切源后旧事件污染。
 
-`VideoProvider::categoriesRefresh()` 默认空实现,其它 provider 不受影响。
+`VideoProvider::categoriesRefresh()` 默认回一次 `Unsupported`(空列表),不改写 chips;
+这样 UI 的「双回调计数」(categories + categoriesRefresh 各一次)对所有站点一致,
+分类加载标识在**每个 provider** 站点切换时出现,两次回调都到齐才关闭。
 
 ## 映射规则
 
@@ -116,7 +118,7 @@ x-rapidapi-host: unogsng.p.rapidapi.com
 - **分类时序(方案 A)**:临时 Qt3 测试验证——本地 40 genre → `categories()` 秒显
   41 项;在线优先去重后仍 41 项(首项空 key「推荐」、`Dramas`/`Comedies` 在线在前、
   与本地重名的项去重、本地 genre 补缺完整、无重复 key)。`categoriesRefresh()`
-  失败时 401 只记日志、不回调,本地分类保持不动;UI 侧 `CategoriesRefresh` 事件
+  失败时 401 记日志 + 空结果回调(只关 loading),本地分类保持不动;UI 侧 `CategoriesRefresh` 事件
   就地刷新、不改 `m_gridChip`/分页、不调 `loadVideoPage`。探针验后已删除。
 - **ABI 修复(同日补)**:初版把 `categoriesRefresh()` 插在 `VideoProvider` 虚表中间,
   qmake 增量构建未重编 `bilibiliprovider.o` 等,导致虚表槽位错位——启动时
@@ -124,3 +126,10 @@ x-rapidapi-host: unogsng.p.rapidapi.com
   已把该虚方法移到虚表末尾(`cancel()` 之后)并删除 build-qt3/build-qt4 全量重编;
   Qt3/Qt4 冒烟启动均不再崩溃(exit=124 为正常超时)。**教训**:公共基类加虚方法必须
   追加在末尾,且改公共头文件后必须全量 clean rebuild。
+
+## 分类加载标识(全 provider 通用)
+
+左侧栏「视频分类」分组标题右侧在分类网络请求进行中显示静态 `…`:
+切站点即开启;`categories()` 与 `categoriesRefresh()` 两次回调都到齐(按站点 id
+过滤旧事件)才关闭。无分类能力 / 请求失败也各回调一次,故不会卡住;空列表分支
+只结束 loading、不动已显示的 chips。

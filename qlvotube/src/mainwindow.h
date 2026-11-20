@@ -261,6 +261,8 @@ private:
     QString m_curWebUrl;          /* M7:当前视频网页地址 */
     QMap<QString, QString> m_videoTitles;  /* 点播时补标题(不额外请求 detail) */
     int m_gridGen;                         /* 代际:切源/切分类/新请求自增 */
+    QString m_catLoadSite;                 /* 分类加载标识所属站点(切源即换) */
+    int m_catLoadPending;                  /* 待完成的分类回调数:categories + refresh = 2 */
     bool m_gridIsSearch;                   /* 当前网格是搜索结果 */
     QString m_gridSearchKw;
     std::vector<VideoCard> m_videoCards;   /* 当前网格全量(播放队列来源) */

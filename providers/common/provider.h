@@ -131,9 +131,13 @@ public:
 
     // 增量分类刷新(可选,刻意放在虚表末尾以保持 ABI 兼容):categories() 已立即
     // 回过本地分类后,provider 可在后台拉在线分类,再通过本回调推一次「在线优先
-    // 去重」的合并列表。默认空实现 → 其它 provider 不受影响;UI 只就地刷新 chips。
+    // 去重」的合并列表。默认回一次 Unsupported(空列表),使 UI 的「双回调计数」
+    // 对所有站点一致:无此能力的 provider 立即回调;UI 空列表时忽略、不动 chips。
     virtual void categoriesRefresh(
-        std::function<void(const Result&, const QList36<CategoryItem>&)>) {}
+        std::function<void(const Result&, const QList36<CategoryItem>&)> cb) {
+        cb(Result::fail(Err::Unsupported, "categoriesRefresh not implemented"),
+           QList36<CategoryItem>());
+    }
 };
 
 // 注册表:平台 id → provider 实例(main/UI 层据此枚举源)
