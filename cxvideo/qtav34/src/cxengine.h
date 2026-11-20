@@ -42,7 +42,7 @@ struct CxVideoInfo {
 // maxBytes = 后端允许的最大缓冲字节上限;mpv 取 options/demuxer-max-bytes,
 // FFmpeg 无对应选项,统一用 CX_BUFFER_MAX_BYTES_DEFAULT(与 mpv 默认 150MiB 对齐)。
 struct CxBufferInfo {
-    long bufferedMs;      // 已缓冲总时长(ms)
+    long bufferedMs;      // 缓冲前沿绝对时间点(ms),语义见 bufferedMs();0=未知/本地完整
     long bufferedBytes;   // 当前已缓冲字节
     long maxBytes;        // 最大缓冲字节上限
     long bytesPerSec;     // 缓冲速度(bytes/s,1 秒窗口)

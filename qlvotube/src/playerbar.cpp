@@ -291,19 +291,23 @@ static QString pbBufSpeed(long bps)
     return QString::number((double)bps / 1000.0, 'f', 0) + qFromUtf8(" kB/s");
 }
 
-static QString pbBufferedTip(long bufferedMs, long bufferedBytes,
-                             long maxBytes, long bytesPerSec)
+static QString pbBufferedTip(long bufferedMs, long positionMs,
+                             long bufferedBytes, long maxBytes, long bytesPerSec)
 {
     if (bufferedMs <= 0 && bufferedBytes <= 0 && maxBytes <= 0 && bytesPerSec <= 0)
         return qFromUtf8("缓冲进度:未知");
     int pct = 0;
     if (maxBytes > 0 && bufferedBytes > 0)
         pct = qBound(0, (int)((double)bufferedBytes / maxBytes * 100), 100);
-    const QString secs = bufferedMs > 0
-                         ? QString::number((double)bufferedMs / 1000.0, 'f', 1)
+    // bufferedMs 与 positionMs 同为后端绝对时间点,相减才是"还可播多久";
+    // 直播流 PTS 为墙钟绝对值时,直接 /1000 会显示异常大的秒数。
+    // 钳到 0 防止缓冲刷新与位置更新异步造成的短暂倒挂。
+    const long aheadMs = bufferedMs > 0 ? qMax(0L, bufferedMs - positionMs) : 0;
+    const QString secs = aheadMs > 0
+                         ? QString::number((double)aheadMs / 1000.0, 'f', 1)
                            + qFromUtf8("s")
                          : qFromUtf8("—");
-    return qFromUtf8("缓冲 ") + QString::number(pct) + qFromUtf8("% · 已缓冲 ")
+    return qFromUtf8("缓冲 ") + QString::number(pct) + qFromUtf8("% · 可播 ")
            + secs + qFromUtf8(" · ") + pbBufBytes(bufferedBytes)
            + qFromUtf8(" / ") + pbBufBytes(maxBytes)
            + qFromUtf8(" · ") + pbBufSpeed(bytesPerSec);
@@ -710,7 +714,7 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
         showTempTooltip(this, downloadRect(), pbDownloadTip(m_dlVisible, m_dlPct));
     else if (m_hover == HitBuffered)
         showTempTooltip(this, bufferedRect(),
-                        pbBufferedTip(m_bufferedMs, m_bufferedBytes,
+                        pbBufferedTip(m_bufferedMs, m_progressMs, m_bufferedBytes,
                                       m_maxBytes, m_bytesPerSec));
     else
         showTempTooltip(this, downloadRect(), QString());
@@ -796,7 +800,7 @@ void PlayerBar::setBufferInfo(long bufferedMs, long bufferedBytes,
     m_bytesPerSec = d;
     if (m_hover == HitBuffered)
         showTempTooltip(this, bufferedRect(),
-                        pbBufferedTip(m_bufferedMs, m_bufferedBytes,
+                        pbBufferedTip(m_bufferedMs, m_progressMs, m_bufferedBytes,
                                       m_maxBytes, m_bytesPerSec));
     update();
 }
