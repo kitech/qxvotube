@@ -148,6 +148,7 @@ private:
     void showShortcutHelp();
     /* 播放模式/连播(qlmusic 语义) */
     void advanceNext(bool fromAuto);
+    QString videoGridTitle() const;   /* 视频列表页标题:站点 · 分类名 */
     /* 失败自动跳过(qlmusic skipOnError):连续失败止损 */
     bool skipOnError(const QString& why);
     enum { kErrSkipStopAt = 99 };
@@ -254,6 +255,7 @@ private:
     bool m_gridHasMore;
     bool m_gridLoading;
     QString m_gridChip;                    /* 当前分类 key(空=推荐) */
+    QString m_gridSiteName;                /* 当前站点显示名(视频列表页标题用) */
     CxVideoInfo m_videoInfo;      /* M7:最近一次播放信息(详情弹窗) */
     QString m_curQuality;         /* M7:实际档位 */
     QString m_curRequested;       /* M7:请求档位 */

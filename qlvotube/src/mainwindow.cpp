@@ -1420,6 +1420,7 @@ void MainWindow::onSiteChanged(const QString& providerId)
     const QString siteKey = QString::fromUtf8("site.") + providerId;
     QString siteName = _(qToUtf8(siteKey).data());
     if (siteName.isEmpty() || siteName == siteKey) siteName = providerId;
+    m_gridSiteName = siteName;         /* 视频列表页标题:站点部分 */
     contentView->showVideoGrid(siteName);
 
     qxv::VideoProvider* p = m_curProv;
@@ -1573,6 +1574,20 @@ void MainWindow::onSearchSubmitted(const QString& kw)
     loadVideoPage(1);
 }
 
+QString MainWindow::videoGridTitle() const
+{
+    if (m_chipList.empty())
+        return m_gridSiteName;                 /* 分类未到:先只显示站点 */
+    QString cat;
+    for (int i = 0; i < (int)m_chipList.size(); ++i)
+        if (m_chipList[i].key == m_gridChip) { cat = m_chipList[i].name; break; }
+    if (cat.isEmpty())
+        cat = _("content.cat_recommend");      /* 空分类回退“推荐” */
+    if (m_gridSiteName.isEmpty())
+        return cat;
+    return m_gridSiteName + qFromUtf8(" · ") + cat;   /* 中点 U+00B7 */
+}
+
 void MainWindow::onVideoCategorySelected(const QString& key)
 {
     if (!m_curProv || key == m_gridChip) return;
@@ -1583,6 +1598,7 @@ void MainWindow::onVideoCategorySelected(const QString& key)
     ++m_gridGen;                       /* 作废旧分类在途响应 */
     m_curProv->cancel();
     sideNav->setCurrentVideoCategory(key);   /* 左栏高亮 */
+    if (contentView) contentView->setVideoGridTitle(videoGridTitle());
     contentView->setVideoGridLoading(true);
     m_gridLoading = false;
     loadVideoPage(1);
@@ -1619,6 +1635,7 @@ void MainWindow::onNetTvRegion(const QString& region)
     QString regionName = _(qToUtf8(tvlist::regionTitleKey(region)).data());
     if (regionName.isEmpty() || regionName == tvlist::regionTitleKey(region))
         regionName = region;
+    m_gridSiteName = regionName;
     if (contentView) contentView->showVideoGrid(regionName);
 
     const std::vector<TvChannel>& all = tvlist::stations();
@@ -2929,6 +2946,7 @@ void MainWindow::customEvent(CustomEventBase* event)
                 keys.append(chips[i].key);
             }
             sideNav->setVideoCategories(names, keys, m_gridChip);
+            if (contentView) contentView->setVideoGridTitle(videoGridTitle());
             if (getenv("QLVOTUBE_DEBUG") != 0)
                 qDebug("categories refreshed in place: %d chips, active '%s'",
                        int(chips.size()), qToUtf8(m_gridChip).data());
@@ -2977,6 +2995,7 @@ void MainWindow::customEvent(CustomEventBase* event)
                 keys.append(chips[i].key);
             }
             sideNav->setVideoCategories(names, keys, m_gridChip);
+            if (contentView) contentView->setVideoGridTitle(videoGridTitle());
             m_gridPage = 1;
             m_gridLoading = false;
             loadVideoPage(1);

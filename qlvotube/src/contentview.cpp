@@ -247,6 +247,13 @@ void ContentView::clearVideoCards()
     update();
 }
 
+void ContentView::setVideoGridTitle(const QString& title)
+{
+    if (m_listTitle == title) return;
+    m_listTitle = title;
+    if (m_mode == VideoGridMode) update();   /* 页头在 paintEvent 用 m_listTitle 绘制 */
+}
+
 void ContentView::appendVideoCards(const std::vector<VideoCard>& cards, bool hasMore)
 {
     for (size_t vi = 0; vi < cards.size(); ++vi) m_videos.push_back(cards[vi]);

@@ -64,6 +64,7 @@ public:
     void clearVideoCards();
     void setVideoGridLoading(bool loading);
     void setVideoGridError(const QString& text);   // 空=清错
+    void setVideoGridTitle(const QString& title);   /* 只更新视频列表页页头标题 */
 
 public slots:
     /* TracksMode：本地库歌单（SideNav::playlistSelected 连接目标） */
