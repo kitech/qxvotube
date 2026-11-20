@@ -184,6 +184,8 @@ bool CXEngineFfmpeg::open(const QString& url)
                                 this);
     m_vthread = new CXFFmpegVideoThread(m_vq, m_dec, this);
     m_vthread->setRate(1.0);
+    m_frameSlot.clear();                   // 新一轮:丢弃可能残留的旧帧
+    m_vthread->setFrameSlot(&m_frameSlot); // 帧入槽,取代逐帧 QImage 事件
     if (m_clock != 0)
         m_vthread->setClock(m_clock);
     if (m_ao != 0)
@@ -375,6 +377,7 @@ void CXEngineFfmpeg::stopThreads()
     m_curMs = 0;
     m_seekPend = 0;
     m_eosPend = 0;
+    m_frameSlot.clear(); // 丢弃在途帧,避免换源后显示旧画面
 }
 
 void CXEngineFfmpeg::close()
@@ -446,6 +449,7 @@ bool CXEngineFfmpeg::seek(long ms)
     if (m_aq != 0) m_aq->clear();
     if (m_sq != 0) m_sq->clear();
     m_demux->requestSeek(ms, sIdx);
+    m_frameSlot.clear(); // seek:丢弃旧帧,等目标帧到位
     return true;
 }
 
@@ -636,6 +640,8 @@ void CXEngineFfmpeg::customEvent(CustomEventBase* e)
 void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
 {
     switch (ev->ev) {
+    // [可清理] 旧逐帧事件处理:正式路径已切到 CxFFmpegEvFrameReady;
+    // 引擎恒装配帧槽,此 case 实际不可达,稳定后可整段移除。
     case CxFFmpegEvFrame: {
         if (ev->frame != 0) {
             /* seek 期间:只接受目标 ±2s 内的帧事件。队列里可能残留 seek 前
@@ -650,6 +656,25 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
             emit positionChanged(ev->ms);
             cxScanSub(ev->ms);
         }
+        break;
+    }
+    case CxFFmpegEvFrameReady: {
+        /* 视频线程只投轻量"有新帧"通知,帧本体在 m_frameSlot(恒定一帧)。
+         * 取帧后按自身 pts 做 seek 过滤,UI 负责释放(事件不持有帧)。 */
+        CXVideoFrame* f = m_frameSlot.take();
+        if (f == 0)
+            break;
+        if (m_seekPend && (f->ptsMs > m_seekTarget + 2000
+                           || f->ptsMs + 2000 < m_seekTarget)) {
+            delete f;
+            break;
+        }
+        m_curMs = f->ptsMs;
+        if (p_renderer != 0)
+            p_renderer->showFrame(f);
+        emit positionChanged(f->ptsMs);
+        cxScanSub(f->ptsMs);
+        delete f; // FrameReady 事件 frame 字段为空,此处释放取出的帧
         break;
     }
     case CxFFmpegEvFinished:

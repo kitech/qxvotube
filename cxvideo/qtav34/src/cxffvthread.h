@@ -20,12 +20,15 @@
 const int kcxFFmpegEventRaw = 4004;
 
 enum CxFFmpegEv {
+    // [可清理] 旧逐帧事件(携带 QImage):正式路径已切到 CxFFmpegEvFrameReady
+    // + CxLatestFrameSlot。此枚举仅服务 emitFrame 未装配回退分支,可一并移除。
     CxFFmpegEvFrame = 1,      // 一帧到 UI(CXVideoFrame 所有权移交 customEvent)
     CxFFmpegEvFinished = 2,   // EOS
     CxFFmpegEvSeekDone = 3,   // ms = 到位锚点
     CxFFmpegEvError = 4,      // code
     CxFFmpegEvDuration = 5,   // ms
-    CxFFmpegEvAudioPos = 6    // 音频主时钟推进(athread 块级)
+    CxFFmpegEvAudioPos = 6,   // 音频主时钟推进(athread 块级)
+    CxFFmpegEvFrameReady = 7  // 有新帧可取(帧在 CxLatestFrameSlot,事件不携带)
 };
 
 class CxFFmpegUiEvent : public CustomEventBase {
@@ -47,7 +50,8 @@ class CXFFmpegVideoThread : public QThread {
 public:
     CXFFmpegVideoThread(CxPacketQueue* vq, CxDecoder* dec, QObject* sink)
         : vQueue(vq), decoder(dec), sink(sink), stopFlag(false), paused(false),
-          renderPts0(-1), rate(1.0), m_clock(0), m_ao(0)
+          renderPts0(-1), rate(1.0), m_clock(0), m_ao(0),
+          m_frameSlot(0), m_lastEmitUs(0)
     { }
 
     void requestStop() { stopFlag = true; if (m_clock) m_clock->interrupt(true); wake(); }
@@ -56,6 +60,7 @@ public:
     void setRate(double r) { rate = r > 0.0 ? r : 1.0; }
     void setClock(CxClock* c) { m_clock = c; }
     void setAo(CXAudioOut* a) { m_ao = a; }
+    void setFrameSlot(CxLatestFrameSlot* s) { m_frameSlot = s; }
 
     void wake()
     {
@@ -158,21 +163,52 @@ private:
             if (!waitPace((long)(dur / rate)))
                 return false; // 音频缺席回退 M2.0
         }
-        if (stopFlag)
+        // 第一层防护:自适应出帧下限。HLS 分段回退/主时钟卡高时 remain 恒<=0,
+        // 原路径零等待全速出帧 → QImage 事件队列暴涨(2-3G)+UI 冻结无法暂停。
+        // 用单调墙钟限制相邻出帧间隔,与时钟值解耦;dur 自适应片源帧率并钳
+        // 到 10..100ms(ffplay 同款),倍速时按比例缩短,不牺牲正常/倍速播放。
+        if (m_clock != 0 && m_ao != 0 && m_lastEmitUs > 0) {
+            int gap = (int)dur;
+            if (gap < 10) gap = 10;
+            if (gap > 100) gap = 100;
+            // gap 单位 ms,av_gettime_relative() 单位 us,故乘 1000(非 1e6)
+            long long gapUs = (long long)(gap * 1000.0 /
+                                          (rate > 0.0 ? rate : 1.0));
+            QMutexLocker lk(&paceMx);
+            while (!stopFlag && !paused) {
+                long long leftUs = gapUs - (av_gettime_relative() - m_lastEmitUs);
+                if (leftUs <= 0)
+                    break;
+                long napMs = (long)((leftUs + 999) / 1000);
+                if (napMs < 1) napMs = 1;
+                paceCond.wait(&paceMx, napMs);
+            }
+        }
+        if (stopFlag || paused)
             return false;
+        m_lastEmitUs = av_gettime_relative();
 
         QImage img = decoder->convert(frame);
         if (img.isNull())
             return false;
 
-        // 帧 → QImage → 事件投 UI(渲在 UI 线程)
+        // 第二层防护:帧入最新帧槽,只投一条轻量通知事件(不携带 QImage)。
+        // 槽里新帧覆盖旧帧,事件队列恒定 O(1);UI 卡顿/暂停时不再被帧淹没。
+        // m_frameSlot 为空(未装配)时回退旧路径,保证兼容。
         CXVideoFrame* f = new CXVideoFrame();
         f->ptsMs = pts;
         f->width = img.width();
         f->height = img.height();
         f->isKey = false;
         f->img = img; // Qt 隐式共享,浅拷贝
-        qApp->postEvent(sink, new CxFFmpegUiEvent(CxFFmpegEvFrame, pts, 0, f));
+        if (m_frameSlot != 0) {
+            if (m_frameSlot->put(f))
+                post(CxFFmpegEvFrameReady, pts, 0);
+        } else {
+            // [可清理] m_frameSlot 未装配时的兼容回退;引擎恒会装配,
+            // 稳定后可删此分支与 CxFFmpegEvFrame 枚举/事件处理。
+            qApp->postEvent(sink, new CxFFmpegUiEvent(CxFFmpegEvFrame, pts, 0, f));
+        }
         return true;
     }
 
@@ -192,6 +228,8 @@ private:
     QWaitCondition paceCond;
     CxClock* m_clock;
     CXAudioOut* m_ao;
+    CxLatestFrameSlot* m_frameSlot; // 引擎持有,生命周期长于本线程
+    long long m_lastEmitUs;         // 上次出帧单调墙钟(us),出帧限速兜底
 };
 
 #endif // CXFFVTHREAD_H

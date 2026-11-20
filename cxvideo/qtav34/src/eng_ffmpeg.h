@@ -5,6 +5,7 @@
 #include "cffsub.h"
 #include "cxrenderer.h" // M3-B inline setEq/screenshot 需完整型
 #include "cxffdec.h"    // M4-A inline hwName() 需完整型
+#include "cxframe.h"    // CxLatestFrameSlot 完整型(帧槽成员)
 #include <qstringlist.h>
 #include <qdatetime.h>
 
@@ -138,6 +139,7 @@ private:
     QString m_subCur;          // 当前已 emit 的字幕文本(变化才发)
     CxFFSubTimeline m_subTl;   // 内嵌 cue(open 清零重建)
     CxFFSubTimeline m_subTlExt; // 外挂 cue(独立保留,重启不清)
+    CxLatestFrameSlot m_frameSlot;  // 视频帧槽:取代逐帧 QImage 事件,内存恒定 O(1)
 };
 
 #endif // CXENGFFMPEG_H

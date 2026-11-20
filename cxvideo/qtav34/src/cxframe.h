@@ -3,6 +3,7 @@
 
 #include "cxvideo_global.h"
 #include <qimage.h>
+#include <qmutex.h>
 
 // 帧定义(第 5 节;指针传递避免深拷贝)
 class CXVideoFrame {
@@ -30,5 +31,51 @@ static inline QImage cxNewImage(int w, int h)
     return QImage(w, h, QImage::Format_RGB32);
 #endif
 }
+
+// 最新帧槽(视频线程写 / UI 线程取):取代"每帧 postEvent 携带 QImage"。
+// 只保留最新一帧,内存恒定 O(1);notifyPending 保证同时至多一条 FrameReady
+// 通知在途,UI 被卡顿/暂停拖慢时新帧覆盖旧帧,不在事件队列里无限堆积。
+class CxLatestFrameSlot {
+public:
+    CxLatestFrameSlot() : m_frame(0), m_notifyPending(false) { }
+    ~CxLatestFrameSlot() { clear(); }
+
+    // 视频线程:存入新帧(覆盖即释放旧帧);返回 true 表示需投一条轻量通知
+    bool put(CXVideoFrame* f)
+    {
+        QMutexLocker lk(&m_mx);
+        delete m_frame;
+        m_frame = f;
+        if (!m_notifyPending) {
+            m_notifyPending = true;
+            return true;
+        }
+        return false;
+    }
+
+    // UI 线程:取走最新帧(所有权移交调用方)并清通知挂起位
+    CXVideoFrame* take()
+    {
+        QMutexLocker lk(&m_mx);
+        CXVideoFrame* f = m_frame;
+        m_frame = 0;
+        m_notifyPending = false;
+        return f;
+    }
+
+    // 清空(换源/seek/stop):释放残留帧,避免显示旧画面
+    void clear()
+    {
+        QMutexLocker lk(&m_mx);
+        delete m_frame;
+        m_frame = 0;
+        m_notifyPending = false;
+    }
+
+private:
+    QMutex m_mx;
+    CXVideoFrame* m_frame;
+    bool m_notifyPending;
+};
 
 #endif // CXFRAME_H
