@@ -39,6 +39,9 @@ public:
     void clearVideoCategories();
     void setCurrentVideoCategory(const QString& key);
 
+    /* 网络电视地区子项(地区 key 来自 tvlist::regions)：切换当前高亮 */
+    void setCurrentNetTvRegion(const QString& region);
+
 public slots:
     void onNavScroll(int v);
     void onSiteChanged(int index);
@@ -51,6 +54,7 @@ signals:
     void loginRequested();
     void siteChanged(const QString& providerId);
     void videoCategorySelected(const QString& key);
+    void netTvRegionSelected(const QString& region);
     void searchSubmitted(const QString& kw);
 
 protected:
@@ -68,7 +72,10 @@ private:
         NavCategory,    /* 远端歌单分类（cat = 分类名） */
         NavHotPlaylists,/* 推荐 → 热门歌单 */
         NavRank,        /* 排行榜 → 暂缓提示 */
-        NavMyMusic,     /* 我的音乐 → 需登录提示 */
+        NavMyMusic,     /* 我的视频 → 需登录提示(沿用 key) */
+        NavLocalVideo,  /* 本地视频 → 占位提示 */
+        NavSiteLive,    /* 站点直播 → 占位提示 */
+        NavNetTvRegion, /* 网络电视地区子项(cat = 地区 key) */
         NavVideoCategory, /* 视频源动态分类(key 存在 cat 字段) */
     };
     struct NavItem {
@@ -102,6 +109,11 @@ private:
     QString m_navRecommend;
     QString m_navRank;
     QString m_navMine;
+    QString m_navLocalVideo;
+    QString m_navSiteLive;
+    QString m_navNetTv;      /* 网络电视分组标题 */
+    QStringList m_netTvRegionNames;  /* 与 tvlist::regions() 顺序对应 */
+    QString m_curNetTvRegion;
     QString m_groupCreated;
     QString m_groupCollected;
     QString m_groupCategories;

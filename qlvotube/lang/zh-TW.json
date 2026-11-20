@@ -7,12 +7,26 @@
     "search": "搜尋",
     "recommend": "推薦",
     "rank": "排行榜",
-    "mymusic": "我的音樂",
+    "mymusic": "我的視頻",
+    "local_video": "本地影片",
+    "site_live": "站點直播",
+    "net_tv": "網路電視",
     "created": "建立的歌單",
     "collected": "收藏的歌單",
     "categories": "分類",
     "rank_coming": "排行榜即將支援",
+    "local_video_coming": "本地影片即將支援",
+    "site_live_coming": "站點直播即將支援",
     "site": "視頻站點"
+  },
+  "tv": {
+    "loaded": "網路電視：%1（%2 個頻道）",
+    "region": {
+      "china": "中國大陸",
+      "hongkong": "港澳台",
+      "asia": "亞洲",
+      "international": "國際"
+    }
   },
   "content": {
     "playall": "播放全部",

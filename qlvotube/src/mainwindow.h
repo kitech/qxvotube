@@ -77,6 +77,7 @@ private slots:
     /* 视频源(providers):切站点 / 切分类 / 点卡片 / 翻页 */
     void onSiteChanged(const QString& providerId);
     void onVideoCategorySelected(const QString& key);
+    void onNetTvRegion(const QString& region);   /* 网络电视地区切换 */
     void onRepeatClicked();
     void onShuffleClicked();
     void onAutoSkipClicked();
@@ -237,6 +238,8 @@ private:
     /* 视频源网格状态 */
     QList36<qxv::VideoProvider*> m_providers;
     qxv::VideoProvider* m_curProv;
+    qxv::ProxyConfig m_proxyCfg;           /* 供 tvlist 频道 mustProxy 解析 */
+    QString m_netTvRegion;                 /* 当前网络电视地区 key(空=非电视分类) */
     /* 评论窗口状态 */
     CommentDialog* m_commentDlg;          /* 懒创建 */
     qxv::VideoProvider* m_commentProv;    /* 评论请求所用源 */

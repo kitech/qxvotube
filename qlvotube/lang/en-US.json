@@ -7,12 +7,26 @@
     "search": "Search",
     "recommend": "Recommended",
     "rank": "Ranking",
-    "mymusic": "My Music",
+    "mymusic": "My Videos",
+    "local_video": "Local Videos",
+    "site_live": "Site Live",
+    "net_tv": "Internet TV",
     "created": "Created Playlists",
     "collected": "Collected Playlists",
     "categories": "Categories",
     "rank_coming": "Rankings coming soon",
+    "local_video_coming": "Local videos coming soon",
+    "site_live_coming": "Site live coming soon",
     "site": "Video site"
+  },
+  "tv": {
+    "loaded": "Internet TV: %1 (%2 channels)",
+    "region": {
+      "china": "Mainland China",
+      "hongkong": "Hong Kong & Taiwan",
+      "asia": "Asia",
+      "international": "International"
+    }
   },
   "content": {
     "playall": "Play All",

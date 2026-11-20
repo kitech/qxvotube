@@ -27,6 +27,7 @@ SOURCES = src/main.cpp src/mainwindow.cpp src/appearance.cpp src/config.cpp \
           src/eqdialog.cpp \
           src/userinfopanel.cpp \
           src/videothumbcache.cpp \
+          src/tvlist.cpp \
           src/videorendererfactory.cpp \
           src/videoinfodialog.cpp \
           src/commentdialog.cpp src/subtitledialog.cpp \
@@ -45,6 +46,7 @@ HEADERS = src/mainwindow.h src/appearance.h src/config.h src/globaluiutil.h \
           src/userinfopanel.h \
           src/videoui.h \
           src/videothumbcache.h \
+          src/tvlist.h \
           src/videorendererfactory.h \
           src/videoinfodialog.h \
           src/commentdialog.h src/subtitledialog.h \

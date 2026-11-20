@@ -3,6 +3,7 @@
 #include "searchline.h"
 #include "userinfopanel.h"
 #include "translator.h"
+#include "tvlist.h"
 
 #include <qglobal.h>
 #include <qpainter.h>
@@ -158,7 +159,29 @@ void SideNav::retranslateUi()
 {
     m_navRecommend = _("nav.recommend");
     m_navRank = _("nav.rank");
-    m_navMine = _("nav.mymusic");
+    m_navMine = _("nav.mymusic");          /* 文案已改为「我的视频」 */
+    m_navLocalVideo = siteText("nav.local_video", "本地视频");
+    m_navSiteLive = siteText("nav.site_live", "站点直播");
+    m_navNetTv = siteText("nav.net_tv", "网络电视");
+    /* 地区子项显示名走 i18n "tv.region.<key>"；缺译回退中文 */
+    m_netTvRegionNames.clear();
+    {
+        int n = 0;
+        const char* const* regs = tvlist::regions(n);
+        for (int i = 0; i < n; ++i) {
+            const QString key = qFromUtf8(regs[i]);
+            const QString ikey = tvlist::regionTitleKey(key);
+            QString label = _(qToUtf8(ikey).data());
+            if (label.isEmpty() || label == ikey) {
+                if (key == qFromUtf8("china")) label = qFromUtf8("中国大陆");
+                else if (key == qFromUtf8("hongkong")) label = qFromUtf8("港澳台");
+                else if (key == qFromUtf8("asia")) label = qFromUtf8("亚洲");
+                else if (key == qFromUtf8("international")) label = qFromUtf8("国际");
+                else label = key;
+            }
+            m_netTvRegionNames.push_back(label);
+        }
+    }
     m_groupCreated = _("nav.created");
     m_groupCollected = _("nav.collected");
     m_groupCategories = _("nav.categories");
@@ -239,6 +262,12 @@ void SideNav::setCurrentVideoCategory(const QString& key)
     update();
 }
 
+void SideNav::setCurrentNetTvRegion(const QString& region)
+{
+    m_curNetTvRegion = region;
+    update();
+}
+
 void SideNav::relayout()
 {
     m_items.clear();
@@ -255,6 +284,28 @@ void SideNav::relayout()
     it.kind = NavMyMusic; it.id = -3; it.text = m_navMine; it.cat = QString();
     it.y = y; it.h = kItemH; y += kItemH;
     m_items.push_back(it);
+    it.kind = NavLocalVideo; it.id = -4; it.text = m_navLocalVideo; it.cat = QString();
+    it.y = y; it.h = kItemH; y += kItemH;
+    m_items.push_back(it);
+    it.kind = NavSiteLive; it.id = -5; it.text = m_navSiteLive; it.cat = QString();
+    it.y = y; it.h = kItemH; y += kItemH;
+    m_items.push_back(it);
+
+    /* 网络电视地区子项(分组标题 + 四类地区) */
+    {
+        int n = 0;
+        const char* const* regs = tvlist::regions(n);
+        y += 8;
+        it.kind = NavHeader; it.id = 0; it.text = m_navNetTv; it.cat = QString();
+        it.y = y; it.h = kGroupH; y += kGroupH;
+        m_items.push_back(it);
+        for (int i = 0; i < n && i < (int)m_netTvRegionNames.size(); ++i) {
+            it.kind = NavNetTvRegion; it.id = 0;
+            it.text = m_netTvRegionNames[i]; it.cat = qFromUtf8(regs[i]);
+            it.y = y; it.h = kItemH; y += kItemH;
+            m_items.push_back(it);
+        }
+    }
 
     /* 视频源动态分类(站点下拉之后、音乐分类之前) */
     if (!m_videoCatKeys.isEmpty()) {
@@ -453,6 +504,8 @@ void SideNav::paintEvent(QPaintEvent*)
             selected = (!m_currentCat.isEmpty() && m_currentCat == QString::fromUtf8(kHotViewKey));
         else if (it.kind == NavVideoCategory)
             selected = (m_curVideoCat == it.cat);
+        else if (it.kind == NavNetTvRegion)
+            selected = (!m_curNetTvRegion.isEmpty() && m_curNetTvRegion == it.cat);
         bool hovered = ((int)i == m_hover);
         if (hovered)
             p.fillRect(r, pal.hoverBg);
@@ -508,6 +561,23 @@ void SideNav::mousePressEvent(QMouseEvent* e)
     }
     if (it.kind == NavMyMusic) {
         emit actionTriggered(1);   /* 暂缓：需要登录提示 */
+        return;
+    }
+    if (it.kind == NavLocalVideo) {
+        emit actionTriggered(2);   /* 占位：本地视频 */
+        return;
+    }
+    if (it.kind == NavSiteLive) {
+        emit actionTriggered(3);   /* 占位：站点直播 */
+        return;
+    }
+    if (it.kind == NavNetTvRegion) {
+        m_curNetTvRegion = it.cat;
+        m_current = -1;
+        m_currentCat = QString();
+        m_curVideoCat = QString();
+        emit netTvRegionSelected(it.cat);
+        update();
         return;
     }
 }

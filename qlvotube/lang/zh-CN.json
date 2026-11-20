@@ -7,12 +7,26 @@
     "search": "搜索",
     "recommend": "推荐",
     "rank": "排行榜",
-    "mymusic": "我的音乐",
+    "mymusic": "我的视频",
+    "local_video": "本地视频",
+    "site_live": "站点直播",
+    "net_tv": "网络电视",
     "created": "创建的歌单",
     "collected": "收藏的歌单",
     "categories": "分类",
     "rank_coming": "排行榜即将支持",
+    "local_video_coming": "本地视频即将支持",
+    "site_live_coming": "站点直播即将支持",
     "site": "视频站点"
+  },
+  "tv": {
+    "loaded": "网络电视：%1（%2 个频道）",
+    "region": {
+      "china": "中国大陆",
+      "hongkong": "港澳台",
+      "asia": "亚洲",
+      "international": "国际"
+    }
   },
   "content": {
     "playall": "播放全部",

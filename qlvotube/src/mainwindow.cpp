@@ -32,6 +32,7 @@
 #include "providers/common/debuglog.h"   /* QXVOTUBE_DEBUG → providers 分级日志 */
 #include "videoui.h"
 #include "videothumbcache.h"
+#include "tvlist.h"
 #include "translator.h"
 
 #include "qlcompat34.h"
@@ -553,6 +554,8 @@ void MainWindow::buildCentralWidget()
                      this, SLOT(onUserLoginPlaceholder()));
     QObject::connect(sideNav, SIGNAL(actionTriggered(int)),
                      this, SLOT(onNavAction(int)));
+    QObject::connect(sideNav, SIGNAL(netTvRegionSelected(const QString&)),
+                     this, SLOT(onNetTvRegion(const QString&)));
 
     setupVideoProviders();
 
@@ -1346,6 +1349,7 @@ void MainWindow::setupVideoProviders()
             pc.port = rest.mid(c2 + 1).toInt();
         }
     }
+    m_proxyCfg = pc;   /* 供网络电视频道 mustProxy 解析(env > 设置页,同 provider) */
     QStringList ids;
     for (int i = 0; i < m_providers.size(); ++i) {
         m_providers[i]->setProxy(pc);
@@ -1378,6 +1382,8 @@ static QString cxResolveQuality(const QString& cfg)
 void MainWindow::onSiteChanged(const QString& providerId)
 {
     m_curProv = 0;
+    m_netTvRegion = QString();          /* 离开网络电视,回到站点浏览 */
+    sideNav->setCurrentNetTvRegion(QString());
     if (contentView) contentView->setPlayingVideoId(QString());
     for (int i = 0; i < m_providers.size(); ++i)
         if (m_providers[i]->id() == providerId) {
@@ -1561,6 +1567,60 @@ void MainWindow::onVideoCategorySelected(const QString& key)
     loadVideoPage(1);
 }
 
+/* 网络电视:按地区把内置频道装入网格。
+ * id = "livetv:< stations()索引 >" 为旁路标记,playVideoAt 跳过 provider resolve。
+ * 副标题(国家·分辨率·码流)拼进 VideoCard.author,封面进 VideoCard.cover,复用现有网格渲染。 */
+void MainWindow::onNetTvRegion(const QString& region)
+{
+    m_netTvRegion = region;
+    sideNav->setCurrentNetTvRegion(region);
+
+    /* 只清动态分类与网格状态,保留站点下拉 */
+    sideNav->clearVideoCategories();
+    if (m_curProv) { m_curProv->cancel(); m_curProv = 0; }
+    if (contentView) contentView->setPlayingVideoId(QString());
+    m_videoTitles.clear();
+    m_videoCards.clear();
+    m_videoIds.clear();
+    m_videoQueue.clear();
+    m_videoIdx = -1;
+    m_videoMode = false;
+    m_gridChip = QString();
+    m_chipList.clear();
+    m_gridPage = 1;
+    m_gridHasMore = false;
+    m_gridLoading = false;
+    m_gridIsSearch = false;
+    m_gridSearchKw = QString();
+    ++m_gridGen;                       /* 作废在途站点响应 */
+
+    /* replaceVideoCards 不切 m_mode,必须先切到视频网格模式(同站点流程) */
+    QString regionName = _(qToUtf8(tvlist::regionTitleKey(region)).data());
+    if (regionName.isEmpty() || regionName == tvlist::regionTitleKey(region))
+        regionName = region;
+    if (contentView) contentView->showVideoGrid(regionName);
+
+    const std::vector<TvChannel>& all = tvlist::stations();
+    for (size_t i = 0; i < all.size(); ++i) {
+        const TvChannel& ch = all[i];
+        if (!region.isEmpty() && qFromUtf8(ch.region) != region) continue;
+        VideoCard c;
+        c.id = QString::fromUtf8("livetv:%1").arg((int)i);
+        c.title = qFromUtf8(ch.name);
+        c.author = qFromUtf8(ch.country) + qFromUtf8(" · ")
+                 + qFromUtf8(ch.resolution) + qFromUtf8(" · ")
+                 + qFromUtf8(ch.bitrate);
+        c.cover = qFromUtf8(ch.cover ? ch.cover : "");
+        m_videoCards.push_back(c);
+        m_videoIds.push_back(c.id);
+        m_videoTitles[c.id] = c.title;
+    }
+    if (contentView) contentView->replaceVideoCards(m_videoCards, false);
+
+    SharedStatusBar::instance()->showMessage(
+        _("tv.loaded").arg(regionName).arg((int)m_videoCards.size()), 3000);
+}
+
 void MainWindow::onGridLoadMore()
 {
     if (!m_curProv || m_gridLoading || !m_gridHasMore) return;
@@ -1569,7 +1629,7 @@ void MainWindow::onGridLoadMore()
 
 void MainWindow::onVideoActivated(const QString& id)
 {
-    if (!m_curProv) return;
+    if (!m_curProv && m_netTvRegion.isEmpty()) return;   /* 网络电视为内置旁路,无需 provider */
     int idx = -1;
     for (int i = 0; i < (int)m_videoCards.size(); ++i)
         if (m_videoCards[i].id == id) { idx = i; break; }
@@ -1594,7 +1654,15 @@ void MainWindow::enterVideoMode(int index)
         t.durationMs = (int)c.durationMs;
         t.coverSeed = QString();
         t.coverUrl = c.cover;
-        t.url = QString();              /* 待 resolve */
+        if (c.id.startsWith(qFromUtf8("livetv:"))) {
+            /* 网络电视:直接带 m3u8 直链,playVideoAt 跳过 provider resolve */
+            bool ok = false;
+            int ci = c.id.mid(7).toInt(&ok);
+            if (ok && ci >= 0 && ci < (int)tvlist::stations().size())
+                t.url = qFromUtf8(tvlist::stations()[ci].url);
+        } else {
+            t.url = QString();          /* 待 resolve */
+        }
         t.ncmId = 0;
         t.albumId = 0;
         t.playable = true;
@@ -1621,10 +1689,38 @@ void MainWindow::enterVideoMode(int index)
 
 void MainWindow::playVideoAt(int index)
 {
-    if (!m_curProv || index < 0 || index >= (int)m_videoIds.size()) return;
+    if (index < 0 || index >= (int)m_videoIds.size()) return;
+    const QString id = m_videoIds[index];
+
+    /* 网络电视旁路:跳过 provider resolve,直接把 m3u8 直链交播放器。
+     * proxy 用 qxv::effectiveProxy(m_proxyCfg, mustProxy, "tvlist"),
+     * mustProxy=false 恒直连(Status 回调跳过 env 兜底注入)。 */
+    if (id.startsWith(qFromUtf8("livetv:"))) {
+        m_videoIdx = index;
+        saveQueueSnapshot();
+        if (queuePanel) queuePanel->setCurrentTrack(m_videoQueue[index]);
+        if (queuePanel) queuePanel->setCurrentIndex(index);
+        if (playerBar) playerBar->setTrack(m_videoQueue[index]);
+        if (contentView) contentView->setPlayingVideoId(id);
+        if (videoPane) videoPane->setVideoTitle(m_videoQueue[index].title);
+        SharedStatusBar::instance()->showMessage(_("content.resolving"), 3000);
+        VideoUiEvent* ev = new VideoUiEvent(VideoUiEvent::Status);
+        ev->gen = m_gridGen;             /* 与 customEvent 代际校验一致,否则被当陈旧丢弃 */
+        ev->text = m_videoQueue[index].url;
+        ev->chipKey = id;
+        bool mustProxy = false;
+        bool ok = false;
+        int ci = id.mid(7).toInt(&ok);
+        if (ok && ci >= 0 && ci < (int)tvlist::stations().size())
+            mustProxy = tvlist::stations()[ci].mustProxy;
+        ev->proxy = qxv::effectiveProxy(m_proxyCfg, mustProxy, "tvlist");
+        QApplication::postEvent(this, ev);
+        return;
+    }
+
+    if (!m_curProv) return;
     m_videoIdx = index;
     saveQueueSnapshot();
-    const QString id = m_videoIds[index];
     if (queuePanel) queuePanel->setCurrentTrack(m_videoQueue[index]);
     if (queuePanel) queuePanel->setCurrentIndex(index);   /* 高亮/三角跟随当前行 */
     if (playerBar) playerBar->setTrack(m_videoQueue[index]);
@@ -1856,6 +1952,14 @@ void MainWindow::onNavAction(int action)
     }
     if (action == 1) {
         SharedStatusBar::instance()->showMessage(_("user.not_login"), 3000);
+        return;
+    }
+    if (action == 2) {
+        SharedStatusBar::instance()->showMessage(_("nav.local_video_coming"), 3000);
+        return;
+    }
+    if (action == 3) {
+        SharedStatusBar::instance()->showMessage(_("nav.site_live_coming"), 3000);
         return;
     }
 }
@@ -2898,7 +3002,10 @@ void MainWindow::customEvent(CustomEventBase* event)
                 no.referer = e->referer;
                 no.userAgent = e->userAgent;
                 no.proxy = e->proxy;
-                if (no.proxy.isEmpty()) no.proxy = qenv("QXVOTUBE_PROXY");
+                /* 网络电视频道:proxy 已由 effectiveProxy 决定(mustProxy=false 恒直连),
+                 * 不再用 env 兜底,否则国内频道会被误注入代理 IP。 */
+                if (no.proxy.isEmpty() && !e->chipKey.startsWith(qFromUtf8("livetv:")))
+                    no.proxy = qenv("QXVOTUBE_PROXY");
                 m_player->setNetOptions(no);
                 if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
