@@ -31,6 +31,7 @@ public:
     void setHostWidget(QWidget* w);
 
     bool open(const QString& url);
+    bool openAsync(const QString& url);   // 异步加载:慢网不阻塞 GUI(非虚,零 ABI 变更)
     void close();
     void play();
     void pause();

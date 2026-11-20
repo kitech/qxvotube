@@ -25,6 +25,8 @@ class CxClock;
 class CxPacketQueue;
 class AVFormatContext;
 class CxFFmpegUiEvent;
+struct CxFFmpegOpenCtx;      // 异步打开上下文(eng_ffmpeg.cpp 内定义)
+class CxFFmpegOpenThread;    // 异步打开线程(eng_ffmpeg.cpp 内定义)
 
 class CXEngineFfmpeg : public CXEngine {
     Q_OBJECT
@@ -34,6 +36,7 @@ public:
 
     void setNetOptions(const CxNetOptions& o) { m_net = o; }
     bool open(const QString& url);
+    bool openAsync(const QString& url);   // 非虚:仅本类提供,GUI 不阻塞
     void close();
     bool play();
     bool pause();
@@ -99,6 +102,9 @@ private:
 
     CXEngineFfmpeg();
     void stopThreads();
+    bool finishOpen(AVFormatContext* fmt);   // 原 open() 后半段 setup
+    void cancelOpen();                       // 作废/回收在途异步 open
+    void resetOpenState(const QString& url); // 重置本次打开状态
     void dispatchEvent(const CxFFmpegUiEvent* ev);
     void cxScanSub(long ms); // 字幕轴查询/变化即 emit(仅 UI 线程)
     bool reopenAt(long posMs, bool wasPlaying); // 换轨重启
@@ -134,6 +140,21 @@ private:
     double m_rateCur;  // 重启式换轨后重放(setRate/setVolume/setMute 落底)
     int m_volCur;
     bool m_muteCur;
+    /* —— 异步 open 状态(集中一处;仅 GUI 线程读写) —— */
+    struct OpenState {
+        OpenState()
+            : ctx(0), thread(0), ioAbort(false), gen(0), ready(false),
+              playPending(false), startedOnce(false), pendingSeekMs(-1) {}
+        CxFFmpegOpenCtx* ctx;        // 在途上下文;0=无
+        CxFFmpegOpenThread* thread;  // 在途线程
+        volatile bool ioAbort;       // 中断回调 opaque 恒指向它(生命周期=引擎)
+        int gen;                     // 代际:open/cancel/close/换轨 +1
+        bool ready;                  // open 完成、可 play/seek/写属性
+        bool playPending;            // Opening 期已请求 play
+        bool startedOnce;            // 本次 open 是否已发 started
+        long pendingSeekMs;          // <0 无;Opening 期 seek 暂存
+    };
+    OpenState m_openState;
     CxVideoInfo m_info;        // M7:播放信息
     QString m_subFile;         // 外挂 SRT(open 重建后重挂)
     QString m_subCur;          // 当前已 emit 的字幕文本(变化才发)

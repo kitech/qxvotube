@@ -1,5 +1,8 @@
 #include "cxvideoplayer.h"
 #include "cxengine.h"
+#ifdef WITH_CX_ENGINE_FFMPEG
+#include "eng_ffmpeg.h"
+#endif
 
 CXVideoPlayer::CXVideoPlayer(QObject* parent)
     : QObject(parent)
@@ -63,6 +66,25 @@ bool CXVideoPlayer::open(const QString& url)
         return false;
     }
     return true;
+}
+
+bool CXVideoPlayer::openAsync(const QString& url)
+{
+    setState(CxStopped);
+    m_rate = 1.0;
+    m_volume = 100;
+    m_muted = false;
+    if (m_engine == 0) {
+        emit noticedError(CxErrEngine, "no engine available");
+        return false;
+    }
+#ifdef WITH_CX_ENGINE_FFMPEG
+    /* 仅 ffmpeg 引擎有真异步;用 dynamic_cast 分派,不给 CXEngine 加虚方法 */
+    CXEngineFfmpeg* fe = dynamic_cast<CXEngineFfmpeg*>(m_engine);
+    if (fe != 0)
+        return fe->openAsync(url);
+#endif
+    return m_engine->open(url);   /* mpv/cmdmpv:回退同步 */
 }
 
 void CXVideoPlayer::close()

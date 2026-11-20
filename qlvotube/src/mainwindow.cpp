@@ -1296,7 +1296,7 @@ void MainWindow::tryPlayTrack(const Track& t)
         return;
     }
     m_subIdx = -1; // M5-A3:换源字幕序号归位
-    m_player->open(t.url);
+    m_player->openAsync(t.url);   /* 异步加载:慢网不阻塞 GUI;完成经 started/noticedError 回报 */
     m_curUrl = t.url;
     m_player->play(); // 外观层 play() 为 void;失败路径经 noticedError 走状态栏
     if (getenv("QLVOTUBE_AUTOSUB") != 0)

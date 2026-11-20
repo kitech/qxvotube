@@ -515,3 +515,29 @@ M0 落 `cxvideo_global.h/cxthread/cxengine.h/cxvideoplayer.h` stub(接口可链�
 
 **实测**(Qt3,GUI):本地 30s 文件与 B站在线长视频;`9/j/l/0-9/End`、
 暂停后 seek、连续 4~5 次快速 seek 均正确落点并持续播放。
+
+## 异步 open(ffmpeg 引擎,2026-11-20)
+
+**症状**:网速慢时点击播放,到缓冲足够起播前整个 UI 卡死;起播后恢复。
+
+**根因**:`CXEngineFfmpeg::open()` 在 GUI 线程同步执行
+`avformat_open_input` + `avformat_find_stream_info`(慢网/坏流可阻塞数秒乃至长挂)。
+
+**修复**:`openAsync()` 用工作线程只做上述两步,完成经 `CustomEventBase`
+(事件号 `4005`)回投 GUI,再由 `finishOpen()` 建管线/线程并起播。
+
+- **ABI**:`openAsync` 为 `CXEngineFfmpeg` / `CXVideoPlayer` 的**非虚**方法,
+  `CXVideoPlayer` 用 `dynamic_cast` 分派;不改 `CXEngine` 虚表。
+- **关键坑**:`interrupt_callback` 会下沉到协议层 AVIOContext,
+  `av_read_frame` 每读都会回调。`opaque` **必须**指向生命周期
+  ≥ `AVFormatContext` 的对象(此处=引擎成员 `m_openState.ioAbort`),
+  绝不能指向 per-open ctx,否则播放期 UAF → `AVERROR_EXIT` → 误 EOS →
+  自动切下一个/闪屏。
+- **状态集中**:异步状态收敛在 `CXEngineFfmpeg::OpenState m_openState`
+  (ctx/thread/ioAbort/gen/ready/playPending/startedOnce/pendingSeekMs)。
+- **一致性**:代际 `m_openState.gen` 丢弃旧结果;fmt 单一所有权;Opening 期
+  `play/pause/seek/rate/vol/mute/切轨` 先存意图,`finishOpen()` 按固定顺序落地;
+  每次 open 只发一次 `started`。
+- **取消**:`cancelOpen()` 置 `ioAbort=true` 中断阻塞 open(此时必无 live
+  demux),代际作废 + 有界 `wait()`;停不下来按既有策略泄漏,
+  绝不 delete 运行中 QThread。

@@ -16,9 +16,85 @@
 #include "limelog.h"
 #include <stdlib.h>
 #include <string>
+#include <atomic>
 #include <qapplication.h>
 #include <qstring.h>
+#include <qthread.h>
+#include <qmutex.h>
 #include <stdio.h>
+
+// ─────────────────────────────────────────────────────────────
+// 异步 open:把阻塞的 avformat_open_input / avformat_find_stream_info
+// 移出 GUI 线程。interrupt_callback.opaque 恒指向引擎 m_openState.ioAbort
+// (生命周期=引擎),绝不用 per-open ctx,避免 av_read_frame 期 UAF。
+// ─────────────────────────────────────────────────────────────
+const int kcxFFmpegOpenEventRaw = 4005;
+
+struct CxFFmpegOpenCtx {
+    CxFFmpegOpenCtx() : gen(0), cancel(false), pAbort(0), sinkAlive(true), sink(0) {}
+    QString url;
+    CxNetOptions net;
+    int gen;
+    std::atomic<bool> cancel;   // worker 自身取消判断
+    volatile bool* pAbort;      // 指向引擎 m_openState.ioAbort(回调 opaque)
+    QMutex mu;                  // 保护 sinkAlive + postEvent
+    bool sinkAlive;
+    QObject* sink;
+};
+
+class CxFFmpegOpenEvent : public CustomEventBase {
+public:
+    CxFFmpegOpenEvent(void* fmt, int rc, int gen)
+        : CustomEventBase(toEventType34(kcxFFmpegOpenEventRaw)),
+          fmt(fmt), rc(rc), gen(gen) {}
+    void* fmt;                  // AVFormatContext*;customEvent 接手所有权
+    int rc;
+    int gen;
+};
+
+class CxFFmpegOpenThread : public QThread {
+public:
+    explicit CxFFmpegOpenThread(CxFFmpegOpenCtx* ctx) : m_ctx(ctx) {}
+    static int interruptCb(void* opaque) {
+        volatile bool* p = static_cast<volatile bool*>(opaque);
+        return (p != 0 && *p) ? 1 : 0;
+    }
+    void run() {
+        CxFFmpegOpenCtx* ctx = m_ctx;
+        if (ctx == 0 || ctx->cancel.load()) return;
+        QByteArray ba = qToUtf8(ctx->url);
+        AVDictionary* opts = 0;
+        std::string hdr;
+        if (!ctx->net.referer.isEmpty())
+            hdr += "Referer: " + std::string(qToUtf8(ctx->net.referer).data()) + "\r\n";
+        if (!ctx->net.userAgent.isEmpty())
+            hdr += "User-Agent: " + std::string(qToUtf8(ctx->net.userAgent).data()) + "\r\n";
+        if (!hdr.empty()) av_dict_set(&opts, "headers", hdr.c_str(), 0);
+        if (!ctx->net.proxy.isEmpty())
+            av_dict_set(&opts, "http_proxy", qToUtf8(ctx->net.proxy).data(), 0);
+        AVFormatContext* fmt = avformat_alloc_context();
+        int rc = -1;
+        if (fmt != 0) {
+            fmt->interrupt_callback.callback = &CxFFmpegOpenThread::interruptCb;
+            fmt->interrupt_callback.opaque = (void*)ctx->pAbort;
+            rc = avformat_open_input(&fmt, ba.data(), 0, &opts);
+            if (rc >= 0 && !ctx->cancel.load())
+                rc = avformat_find_stream_info(fmt, 0);
+        }
+        if (opts) av_dict_free(&opts);
+        if (ctx->cancel.load()) { if (fmt) avformat_close_input(&fmt); return; }
+        {
+            QMutexLocker locker(&ctx->mu);
+            if (!ctx->sinkAlive || ctx->sink == 0) {
+                if (fmt) avformat_close_input(&fmt);
+                return;
+            }
+            QApplication::postEvent(ctx->sink, new CxFFmpegOpenEvent(fmt, rc, ctx->gen));
+        }
+    }
+private:
+    CxFFmpegOpenCtx* m_ctx;
+};
 
 // ── 引擎 ──
 
@@ -36,16 +112,15 @@ CXEngineFfmpeg::CXEngineFfmpeg()
 
 CXEngineFfmpeg::~CXEngineFfmpeg()
 {
+    cancelOpen();
     close();
+    QApplication::removePostedEvents(this);
 }
 
 #define FMT_CTX() ((AVFormatContext*)m_fmtCtx)
 
-bool CXEngineFfmpeg::open(const QString& url)
+void CXEngineFfmpeg::resetOpenState(const QString& url)
 {
-    if (m_fmtCtx != 0)
-        close(); // 换源即重建
-
     m_url = url;
     m_paused = false;
     m_running = false;
@@ -55,6 +130,19 @@ bool CXEngineFfmpeg::open(const QString& url)
     m_sIdx = -1;
     m_aCount = 0;
     m_sCount = 0;
+    m_rateCur = 1.0;
+    m_openState.ioAbort = false;   /* 每次新 open 前复位网络读中断标志 */
+}
+
+bool CXEngineFfmpeg::open(const QString& url)
+{
+    cancelOpen();
+    stopThreads();         // 换源即重建
+    resetOpenState(url);
+    m_openState.ready = false;
+    m_openState.playPending = true;   // 同步 open 保持旧语义:open 即起播
+    m_openState.startedOnce = false;
+    m_openState.pendingSeekMs = -1;
 
     QByteArray ba = qToUtf8(url);
     AVFormatContext* fmt = 0;
@@ -81,6 +169,13 @@ bool CXEngineFfmpeg::open(const QString& url)
         close();
         return false;
     }
+    return finishOpen(fmt);
+}
+
+// 只做后段 setup(不碰网络);同步 open() 与异步 openAsync() 共用。
+bool CXEngineFfmpeg::finishOpen(AVFormatContext* fmt)
+{
+    m_openState.ready = true;   /* 从这里起 play/seek/属性走 Ready 分支 */
 
     // M3-A 轨道枚举 + prompt 选流(m_audioPrompt/m_subPrompt:
     //  -1=默认首个;-2=关闭;n=按枚举序第 n 个)
@@ -183,7 +278,7 @@ bool CXEngineFfmpeg::open(const QString& url)
     m_demux = new CxDemuxThread(fmt, m_vq, m_vIdx, m_aq, m_aIdx, m_sq, m_sIdx,
                                 this);
     m_vthread = new CXFFmpegVideoThread(m_vq, m_dec, this);
-    m_vthread->setRate(1.0);
+    m_vthread->setRate(m_rateCur);
     m_frameSlot.clear();                   // 新一轮:丢弃可能残留的旧帧
     m_vthread->setFrameSlot(&m_frameSlot); // 帧入槽,取代逐帧 QImage 事件
     if (m_clock != 0)
@@ -216,6 +311,12 @@ bool CXEngineFfmpeg::open(const QString& url)
     m_running = true;
     m_eosPend = 1 + (m_athread != 0 ? 1 : 0) + (m_sthread != 0 ? 1 : 0); // 三路都完才 finished
 
+    /* 落地 Opening 期暂存的音量/静音(线程已起,走 Ready 分支) */
+    if (m_athread != 0) {
+        m_athread->setVolume(m_volCur);
+        m_athread->setMute(m_muteCur);
+    }
+
     if (aoFallback)
         emit noticedError((int)CxErrAudio, m_url); // 非致命:silent 续播
 
@@ -240,10 +341,84 @@ bool CXEngineFfmpeg::open(const QString& url)
     }
     emit videoInfoChanged();
 
-    emit started();
+    /* Opening 期暂存 seek:线程起来后应用一次 */
+    if (m_openState.pendingSeekMs >= 0) {
+        const long ps = m_openState.pendingSeekMs;
+        m_openState.pendingSeekMs = -1;
+        seek(ps);
+    }
+    /* 意图感知:一次 open 只发一次 started;暂停/仅加载发 paused */
+    if (!m_openState.startedOnce) {
+        if (m_paused) {
+            if (m_vthread != 0) m_vthread->setPaused(true);
+            if (m_athread != 0) m_athread->setPaused(true);
+            if (m_ao != 0) m_ao->pause();
+            emit paused();
+        } else if (m_openState.playPending) {
+            emit started();
+        } else {
+            if (m_vthread != 0) m_vthread->setPaused(true);
+            if (m_athread != 0) m_athread->setPaused(true);
+            if (m_ao != 0) m_ao->pause();
+            m_paused = true;
+            emit paused();
+        }
+        m_openState.startedOnce = true;
+    }
     if (m_durMs > 0)
         emit durationChanged(m_durMs);
     return true;
+}
+
+bool CXEngineFfmpeg::openAsync(const QString& url)
+{
+    cancelOpen();
+    stopThreads();
+    resetOpenState(url);
+    m_openState.ready = false;
+    m_openState.playPending = false;   /* play() 会置位;load-only 保持暂停 */
+    m_openState.startedOnce = false;
+    m_openState.pendingSeekMs = -1;
+    ++m_openState.gen;
+
+    CxFFmpegOpenCtx* ctx = new CxFFmpegOpenCtx;
+    ctx->url = url;
+    ctx->net = m_net;                     /* 快照:工作线程不读引擎成员 */
+    ctx->gen = m_openState.gen;
+    ctx->sink = this;
+    ctx->pAbort = &m_openState.ioAbort;   /* 回调 opaque 绑定引擎级稳定标志 */
+    m_openState.ctx = ctx;
+    m_openState.thread = new CxFFmpegOpenThread(ctx);
+    m_openState.thread->start();
+    return true;
+}
+
+void CXEngineFfmpeg::cancelOpen()
+{
+    ++m_openState.gen;               /* 让在途结果失效 */
+    if (m_openState.ctx != 0) {
+        m_openState.ctx->cancel = true;
+        m_openState.ioAbort = true;  /* 中断阻塞中的 open;此时必无 live demux */
+        {
+            QMutexLocker locker(&m_openState.ctx->mu);
+            m_openState.ctx->sinkAlive = false;
+        }
+    }
+    if (m_openState.thread != 0) {
+        if (m_openState.thread->wait(2000)) {
+            delete m_openState.thread;
+            m_openState.thread = 0;
+            delete m_openState.ctx;
+            m_openState.ctx = 0;
+        } else {
+            /* 停不下来:沿用项目「泄漏运行中线程」策略 */
+            m_openState.thread = 0;
+            m_openState.ctx = 0;
+        }
+    } else if (m_openState.ctx != 0) {
+        delete m_openState.ctx;
+        m_openState.ctx = 0;
+    }
 }
 
 void CXEngineFfmpeg::stopThreads()
@@ -382,13 +557,24 @@ void CXEngineFfmpeg::stopThreads()
 
 void CXEngineFfmpeg::close()
 {
+    cancelOpen();
     stopThreads();
+    m_openState.ready = false;
+    m_openState.pendingSeekMs = -1;
     m_url = QString();
     m_durMs = 0;
 }
 
 bool CXEngineFfmpeg::play()
 {
+    if (!m_openState.ready) {
+        if (m_openState.ctx != 0) {   /* Opening:记住意图,finishOpen 时起播 */
+            m_openState.playPending = true;
+            m_paused = false;
+            return true;
+        }
+        return false;
+    }
     if (m_fmtCtx == 0)
         return false;
     if (m_paused) {
@@ -406,6 +592,14 @@ bool CXEngineFfmpeg::play()
 
 bool CXEngineFfmpeg::pause()
 {
+    if (!m_openState.ready) {
+        if (m_openState.ctx != 0) {   /* Opening:记住意图,finishOpen 时保持暂停 */
+            m_paused = true;
+            m_openState.playPending = false;
+            return true;
+        }
+        return false;
+    }
     if (m_fmtCtx == 0)
         return false;
     if (!m_paused) {
@@ -423,15 +617,25 @@ bool CXEngineFfmpeg::pause()
 
 bool CXEngineFfmpeg::stop()
 {
-    if (m_fmtCtx == 0)
-        return false;
+    const bool active = (m_fmtCtx != 0) || (m_openState.ctx != 0);
+    cancelOpen();
     stopThreads();
+    m_openState.ready = false;
+    if (!active)
+        return false;
     emit stopped();
     return true;
 }
 
 bool CXEngineFfmpeg::seek(long ms)
 {
+    if (!m_openState.ready) {
+        if (m_openState.ctx != 0) {   /* Opening:暂存,finishOpen 后应用一次 */
+            m_openState.pendingSeekMs = (ms < 0 ? 0 : ms);
+            return true;
+        }
+        return false;
+    }
     if (m_fmtCtx == 0 || m_demux == 0)
         return false;
     const int sIdx = (m_vIdx >= 0) ? m_vIdx : m_aIdx; // 纯音频亦能 seek
@@ -455,11 +659,11 @@ bool CXEngineFfmpeg::seek(long ms)
 
 bool CXEngineFfmpeg::setRate(double r)
 {
-    if (m_fmtCtx == 0)
-        return false;
     if (r <= 0.0)
         r = 1.0;
     m_rateCur = r;
+    if (!m_openState.ready) return m_openState.ctx != 0;   /* 先存,Ready 后应用 */
+    if (m_fmtCtx == 0) return false;
     if (m_vthread != 0)
         m_vthread->setRate(r);
     if (m_athread != 0)
@@ -471,23 +675,23 @@ bool CXEngineFfmpeg::setRate(double r)
 
 bool CXEngineFfmpeg::setVolume(int pct)
 {
-    if (m_athread == 0)
-        return false;
     if (pct < 0)
         pct = 0;
     if (pct > 100)
         pct = 100;
     m_volCur = pct;
     m_muteCur = false;
+    if (!m_openState.ready) return m_openState.ctx != 0;
+    if (m_athread == 0) return false;
     m_athread->setVolume(pct);
     return true;
 }
 
 bool CXEngineFfmpeg::setMute(bool on)
 {
-    if (m_athread == 0)
-        return false;
     m_muteCur = on;
+    if (!m_openState.ready) return m_openState.ctx != 0;
+    if (m_athread == 0) return false;
     m_athread->setMute(on);
     return true;
 }
@@ -502,32 +706,33 @@ const char* CXEngineFfmpeg::aoBackend() const
 // 换轨重启:态保留(rate/vol/mute/外挂字幕/当前位置);wasPlaying=false 则暂停续位
 bool CXEngineFfmpeg::reopenAt(long posMs, bool wasPlaying)
 {
-    QString url = m_url;
-    stopThreads(); // 不清 m_url/m_subFile/m_subTlExt/m_rateCur 等
-    m_url = url;   // stopThreads 不动 m_url,防御性保留
-    m_subCur = QString();
+    const QString url = m_url;
     if (url.isEmpty())
         return false;
-    if (!open(url)) {
-        m_url = url;
+    const double rate = m_rateCur;   // openAsync 会复位默认值,先存用户意图
+    const int vol = m_volCur;
+    const bool mute = m_muteCur;
+    m_subCur = QString();
+    if (!openAsync(url))
         return false;
-    }
-    setRate(m_rateCur);
-    if (m_athread != 0) {
-        setVolume(m_volCur);
-        setMute(m_muteCur);
-    }
-    if (posMs > 0)
-        seek(posMs);
-    if (!wasPlaying)
-        pause();
+    m_rateCur = rate;
+    m_volCur = vol;
+    m_muteCur = mute;
+    m_openState.pendingSeekMs = (posMs > 0) ? posMs : -1;
+    m_paused = !wasPlaying;
+    m_openState.playPending = wasPlaying;
     return true;
 }
 
 bool CXEngineFfmpeg::setAudioTrack(int idx)
 {
-    if (m_fmtCtx == 0)
+    if (m_fmtCtx == 0) {
+        if (!m_openState.ready && m_openState.ctx != 0) {   /* Opening:先记意图 */
+            m_audioPrompt = (idx == -1) ? -2 : idx;
+            return true;
+        }
         return false;
+    }
     int curOrd = (m_audioPrompt == -2) ? -1 :
                  (m_audioPrompt == -1 ? 0 : m_audioPrompt);
     if (idx == -1) {
@@ -546,8 +751,13 @@ bool CXEngineFfmpeg::setAudioTrack(int idx)
 
 bool CXEngineFfmpeg::setSubtitleTrack(int idx)
 {
-    if (m_fmtCtx == 0)
+    if (m_fmtCtx == 0) {
+        if (!m_openState.ready && m_openState.ctx != 0) {   /* Opening:先记意图 */
+            m_subPrompt = (idx == -1) ? -2 : idx;
+            return true;
+        }
         return false;
+    }
     int curOrd = (m_subPrompt == -2) ? -1 : m_subPrompt;
     if (idx == -1) {
         if (curOrd == -1)
@@ -632,6 +842,39 @@ CxBufferInfo CXEngineFfmpeg::bufferInfo() const
 
 void CXEngineFfmpeg::customEvent(CustomEventBase* e)
 {
+    if (e->type() == toEventType34(kcxFFmpegOpenEventRaw)) {
+        CxFFmpegOpenEvent* oe = (CxFFmpegOpenEvent*)e;
+        AVFormatContext* fmt = (AVFormatContext*)oe->fmt;
+        oe->fmt = 0;
+        const int gen = oe->gen;
+        const int rc = oe->rc;
+
+        /* 仅当代际匹配时,m_openState.thread/ctx 才属于本次;否则不动新任务 */
+        if (gen == m_openState.gen) {
+            if (m_openState.thread != 0) {
+                m_openState.thread->wait(1000);
+                delete m_openState.thread;
+                m_openState.thread = 0;
+            }
+            if (m_openState.ctx != 0) {
+                delete m_openState.ctx;
+                m_openState.ctx = 0;
+            }
+        }
+        if (gen != m_openState.gen) {   /* 旧代:静默释放,不报错、不起播 */
+            if (fmt) avformat_close_input(&fmt);
+            return;
+        }
+        if (rc < 0 || fmt == 0) {
+            if (fmt) avformat_close_input(&fmt);
+            m_openState.ready = false;
+            emit noticedError((int)CxErrOpenFail, m_url);
+            return;
+        }
+        m_fmtCtx = fmt;
+        finishOpen(fmt);
+        return;
+    }
     if (e->type() != toEventType34(kcxFFmpegEventRaw))
         return;
     dispatchEvent((CxFFmpegUiEvent*)e);
