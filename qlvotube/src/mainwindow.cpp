@@ -2800,10 +2800,20 @@ void MainWindow::onTakeScreenshot()
 #else
         qDebug("shot: %s ok=%d", pathC, (int)ok);
 #endif
-    if (ok)
+    /* 全屏时 videoPane 是顶层窗口,toast 挂它上面才可见 */
+    QWidget* toastParent = (m_videoFullscreen && videoPane != 0)
+                               ? (QWidget*)videoPane : (QWidget*)this;
+    if (ok) {
         SharedStatusBar::instance()->showMessage(qFromUtf8("截图: ") + path, 4000);
-    else
+        ToastWidget::showCenter(
+            toastParent,
+            qFromUtf8("截图已保存：%1").arg(QFileInfo(path).fileName()),
+            ToastWidget::Info, 2000);
+    } else {
         SharedStatusBar::instance()->showMessage(qFromUtf8("截图失败(内核不支持)"), 3000);
+        ToastWidget::showCenter(toastParent, qFromUtf8("截图失败：当前输出后端不支持"),
+                                ToastWidget::Warning, 2500);
+    }
 }
 
 /* M5-A2:ffmpeg ↔ mpv 切换(重建引擎 + 重挂宿主/渲染器;在播则重开) */
