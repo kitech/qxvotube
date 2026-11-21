@@ -37,6 +37,7 @@ public:
     void setNetOptions(const CxNetOptions& o) { m_net = o; }
     bool open(const QString& url);
     bool openAsync(const QString& url);   // 非虚:仅本类提供,GUI 不阻塞
+    void setRotation(int deg);            // 画面顺时针旋转(0/90/180/270)
     void close();
     bool play();
     bool pause();
@@ -141,6 +142,8 @@ private:
     double m_rateCur;  // 重启式换轨后重放(setRate/setVolume/setMute 落底)
     int m_volCur;
     bool m_muteCur;
+    int m_rotation;            /* 0/90/180/270 */
+    QImage m_lastFrameImg;     /* 最近一帧未旋转源(暂停时改角度立即重绘) */
     /* —— 异步 open 状态(集中一处;仅 GUI 线程读写) —— */
     struct OpenState {
         OpenState()

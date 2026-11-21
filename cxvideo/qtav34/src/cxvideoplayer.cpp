@@ -87,6 +87,18 @@ bool CXVideoPlayer::openAsync(const QString& url)
     return m_engine->open(url);   /* mpv/cmdmpv:回退同步 */
 }
 
+void CXVideoPlayer::setRotation(int deg)
+{
+#ifdef WITH_CX_ENGINE_FFMPEG
+    CXEngineFfmpeg* fe = dynamic_cast<CXEngineFfmpeg*>(m_engine);
+    if (fe != 0) {
+        fe->setRotation(deg);
+    }
+#else
+    (void)deg;
+#endif
+}
+
 void CXVideoPlayer::close()
 {
     if (m_engine != 0)

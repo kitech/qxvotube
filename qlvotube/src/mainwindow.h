@@ -120,6 +120,7 @@ private slots:
     void onVolumeChanged(int pct);
     void onRateChanged(double r);
     void onRateMenuRequested(const QPoint& globalPos);   /* 倍速弹出菜单 */
+    void onRotateMenuRequested(const QPoint& globalPos); /* 旋转按钮 → 菜单 */
     void onMuteChanged(bool on);   /* 二期同步:静音切换 */
     void onOpenEqDialog();
     void onEqChanged();
@@ -146,6 +147,7 @@ private:
     void adjustVolume(int deltaPct);
     void toggleMuteShortcut();
     void adjustRate(double delta);
+    void applyRotation(int deg);   /* 0/90/180/270:更新引擎+状态栏 */
     void toggleFullscreen();
     void toggleVideoFullscreen();   /* F:视频全屏(仅 videoPane 提升为顶层) */
     void showShortcutHelp();
@@ -170,6 +172,7 @@ private:
     void* m_bufTimer = nullptr;  // QTimer*:250ms 独立刷新缓冲进度
     bool m_playFinished = false; // 当前项自然播完且未被自动切歌覆盖
     int m_pendingSeekMs = -1;    // 播完后拖进度:待跳转位置(ms),-1=无
+    int m_rotation = 0;          /* 画面顺时针旋转角(0/90/180/270) */
     long m_lastPosMs = -1;           /* 上次播放位置(ms,-1=未定) */
     long long m_lastPosWallMs = 0;   /* 上次位置变化的墙钟(ms) */
     int m_stallSec = -1;             /* 已展示的停滞秒数(-1=未展示) */

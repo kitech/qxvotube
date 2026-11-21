@@ -5,7 +5,6 @@
 #include "videothumbcache.h"
 
 #include <qglobal.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <qpainter.h>
 #include <qevent.h>
@@ -235,7 +234,8 @@ QRect PlayerBar::progressRect() const
 
 /* 喇叭(弹层):next 右侧第三位(qlmusic 口径) */
 QRect PlayerBar::volRect() const   { int cx = width() / 2; return QRect(cx + 71, 19, 20, 20); }
-QRect PlayerBar::rateRect() const  { return QRect(width() - 172, 22, 40, 20); }
+QRect PlayerBar::rateRect() const  { return QRect(width() - 206, 22, 34, 20); }
+QRect PlayerBar::rotateRect() const { return QRect(width() - 172, 22, 34, 20); }
 QRect PlayerBar::ccRect() const    { return QRect(width() - 126, 22, 30, 20); }
 QRect PlayerBar::eqRect() const    { return QRect(width() - 90, 22, 34, 20); }
 QRect PlayerBar::shotRect() const  { return QRect(width() - 52, 22, 34, 20); }
@@ -618,6 +618,21 @@ void PlayerBar::paintEvent(QPaintEvent*)
     p.setPen(m_hover == HitRate ? pal.accent : pal.textMuted);
     p.drawText(rateRect(), Qt::AlignCenter,
                QString::number(m_rate, 'g', 3) + "x");
+    /* 旋转按钮(倍速右侧):圆弧 + 箭头;窄窗与中间控制簇重叠时不画 */
+    if (rotateRect().left() > volRect().right() + 4) {
+        QRect rr = rotateRect();
+        QRect g(rr.center().x() - 7, rr.center().y() - 7, 14, 14);
+        const QColor rc = (m_hover == HitRotate) ? pal.accent : pal.textMuted;
+        p.setPen(QPen(rc, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawArc(g, 40 * 16, 280 * 16);
+        MuiPolygon a(3);
+        a.setPoint(0, g.right() - 1, g.top() + 2);
+        a.setPoint(1, g.right() - 6, g.top() + 4);
+        a.setPoint(2, g.right() - 1, g.top() + 9);
+        p.setBrush(rc);
+        p.drawPolygon(a);
+    }
     p.setPen(m_hover == HitSub ? pal.accent : pal.textMuted);
     p.drawText(ccRect(), Qt::AlignCenter, "CC");
     p.setPen(m_hover == HitEq ? pal.accent : pal.textMuted);
@@ -642,11 +657,14 @@ void PlayerBar::mousePressEvent(QMouseEvent* e)
         emit videoSurfaceRequested();
         return;
     }
-    if (getenv("QLVOTUBE_DEBUG") != 0)
-        fprintf(stderr, "pbar w=%d click=%d,%d vol=%d,%d rate=%d,%d eq=%d,%d shot=%d,%d\n",
-                width(), e->pos().x(), e->pos().y(),
-                volRect().x(), volRect().y(), rateRect().x(), rateRect().y(),
-                eqRect().x(), eqRect().y(), shotRect().x(), shotRect().y());
+    if (getenv("QLVOTUBE_DEBUG") != 0) {
+        qDebug("pbar w=%d click=%d,%d vol=%d,%d rate=%d,%d rotate=%d,%d"
+               " eq=%d,%d shot=%d,%d",
+               width(), e->pos().x(), e->pos().y(),
+               volRect().x(), volRect().y(), rateRect().x(), rateRect().y(),
+               rotateRect().x(), rotateRect().y(),
+               eqRect().x(), eqRect().y(), shotRect().x(), shotRect().y());
+    }
     if (!m_subtitleLine.isEmpty() && subtitleLineRect().contains(e->pos())) {
         emit subtitleListRequested();
     } else if (playRect().contains(e->pos())) {
@@ -668,6 +686,9 @@ void PlayerBar::mousePressEvent(QMouseEvent* e)
         emit autoSkipClicked();
     } else if (rateRect().contains(e->pos())) {
         emit rateMenuRequested(mapToGlobal(e->pos()));
+    } else if (rotateRect().contains(e->pos())
+               && rotateRect().left() > volRect().right() + 4) {
+        emit rotateMenuRequested(mapToGlobal(e->pos()));
     } else if (ccRect().contains(e->pos())) {
         emit subtitleRequested();
     } else if (eqRect().contains(e->pos())) {
@@ -691,6 +712,8 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
     else if (progressRect().contains(e->pos())) h = HitProgress;
     else if (volRect().contains(e->pos())) h = HitVol;
     else if (rateRect().contains(e->pos())) h = HitRate;
+    else if (rotateRect().contains(e->pos())
+             && rotateRect().left() > volRect().right() + 4) h = HitRotate;
     else if (ccRect().contains(e->pos())) h = HitSub;
     else if (eqRect().contains(e->pos())) h = HitEq;
     else if (shotRect().contains(e->pos())) h = HitShot;

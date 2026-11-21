@@ -13,6 +13,7 @@
 #include "cxffathread.h"
 #include "cffsthread.h"
 #include "cxframe.h"
+#include "cxrotate.h"
 #include "limelog.h"
 #include <stdlib.h>
 #include <string>
@@ -106,7 +107,8 @@ CXEngineFfmpeg::CXEngineFfmpeg()
       m_durMs(0), m_curMs(0), m_vIdx(-1), m_aIdx(-1), m_sIdx(-1),
       m_seekPend(0), m_seekTarget(0), m_eosPend(0), m_fatalErr(false),
       m_aCount(0), m_sCount(0), m_audioPrompt(-1), m_subPrompt(-1),
-      m_rateCur(1.0), m_volCur(100), m_muteCur(false)
+      m_rateCur(1.0), m_volCur(100), m_muteCur(false),
+      m_rotation(0)
 {
 }
 
@@ -133,6 +135,7 @@ void CXEngineFfmpeg::resetOpenState(const QString& url)
     m_rateCur = 1.0;
     m_openState.ioAbort = false;   /* 每次新 open 前复位网络读中断标志 */
     m_fatalErr = false;            /* 新会话复位致命错误标记 */
+    m_lastFrameImg = QImage();     /* 丢弃上一段遗留帧 */
 }
 
 bool CXEngineFfmpeg::open(const QString& url)
@@ -554,6 +557,7 @@ void CXEngineFfmpeg::stopThreads()
     m_seekPend = 0;
     m_eosPend = 0;
     m_frameSlot.clear(); // 丢弃在途帧,避免换源后显示旧画面
+    m_lastFrameImg = QImage(); // 停止/换源后不再用遗留帧重绘旋转
 }
 
 void CXEngineFfmpeg::close()
@@ -695,6 +699,23 @@ bool CXEngineFfmpeg::setMute(bool on)
     if (m_athread == 0) return false;
     m_athread->setMute(on);
     return true;
+}
+
+void CXEngineFfmpeg::setRotation(int deg)
+{
+    deg = ((deg % 360) + 360) % 360;
+    if (deg != 0 && deg != 90 && deg != 180 && deg != 270)
+        deg = 0;
+    m_rotation = deg;
+    /* 暂停/静止:立即以未旋转源重绘最近一帧 */
+    if (p_renderer != 0 && !m_lastFrameImg.isNull()) {
+        CXVideoFrame rf;
+        rf.ptsMs = m_curMs;
+        rf.img = cxRotateRgb32(m_lastFrameImg, m_rotation);
+        rf.width = rf.img.width();
+        rf.height = rf.img.height();
+        p_renderer->showFrame(&rf);
+    }
 }
 
 const char* CXEngineFfmpeg::aoBackend() const
@@ -914,8 +935,20 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
             break;
         }
         m_curMs = f->ptsMs;
-        if (p_renderer != 0)
+        /* 保存未旋转源,供暂停时改旋转立即重绘 */
+        m_lastFrameImg = f->img;
+        if (m_rotation != 0) {
+            CXVideoFrame rf;
+            rf.ptsMs = f->ptsMs;
+            rf.isKey = f->isKey;
+            rf.img = cxRotateRgb32(f->img, m_rotation);
+            rf.width = rf.img.width();
+            rf.height = rf.img.height();
+            if (p_renderer != 0)
+                p_renderer->showFrame(&rf);
+        } else if (p_renderer != 0) {
             p_renderer->showFrame(f);
+        }
         emit positionChanged(f->ptsMs);
         cxScanSub(f->ptsMs);
         delete f; // FrameReady 事件 frame 字段为空,此处释放取出的帧

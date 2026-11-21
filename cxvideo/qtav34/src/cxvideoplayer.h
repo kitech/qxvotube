@@ -32,6 +32,7 @@ public:
 
     bool open(const QString& url);
     bool openAsync(const QString& url);   // 异步加载:慢网不阻塞 GUI(非虚,零 ABI 变更)
+    void setRotation(int deg);            // 画面旋转(转发 ffmpeg 引擎;其它引擎忽略)
     void close();
     void play();
     void pause();

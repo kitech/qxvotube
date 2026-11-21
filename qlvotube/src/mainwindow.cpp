@@ -616,6 +616,8 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onRateChanged(double)));
         QObject::connect(playerBar, SIGNAL(rateMenuRequested(const QPoint&)),
                          this, SLOT(onRateMenuRequested(const QPoint&)));
+        QObject::connect(playerBar, SIGNAL(rotateMenuRequested(const QPoint&)),
+                         this, SLOT(onRotateMenuRequested(const QPoint&)));
         QObject::connect(playerBar, SIGNAL(eqRequested()),
                          this, SLOT(onOpenEqDialog()));
         QObject::connect(playerBar, SIGNAL(shotRequested()),
@@ -2092,6 +2094,7 @@ void MainWindow::onPlayerStarted()
     if (m_bufTimer != 0 && !((QTimer*)m_bufTimer)->isActive())
         ((QTimer*)m_bufTimer)->start(250);   // Qt3/Qt4 同签名
     switchToPlayerView(true);
+    if (m_player != 0) m_player->setRotation(m_rotation);   /* 换视频沿用当前旋转 */
     if (m_pendingSeekMs >= 0) {
         const int target = m_pendingSeekMs;
         m_pendingSeekMs = -1;
@@ -2176,6 +2179,50 @@ static int cxShowMenu(QWidget* parent, const QPoint& pos,
     for (int i = 0; i < acts.size(); ++i)
         if (acts[i] == sel)
             return i;
+    return -1;
+#endif
+}
+
+/* 播放器右键菜单:主项 + “旋转”子菜单。
+ * 返回:0 视频详情,1 复制直链,2 浏览器打开,10..13 旋转子项,-1 取消 */
+static int cxShowPlayerMenu(QWidget* parent, const QPoint& pos)
+{
+#ifdef QT3_BUILD
+    QPopupMenu m(parent);
+    m.insertItem(qFromUtf8("视频详情…"), 1);
+    m.insertItem(qFromUtf8("复制直链地址(会过期)"), 2);
+    m.insertItem(qFromUtf8("在浏览器打开"), 3);
+    m.insertSeparator();
+    QPopupMenu* sub = new QPopupMenu(&m);   /* 归 m 所有,exec 后随 m 析构 */
+    sub->insertItem(qFromUtf8("顺时针旋转 90°"), 11);
+    sub->insertItem(qFromUtf8("逆时针旋转 90°"), 12);
+    sub->insertItem(qFromUtf8("旋转 180°"), 13);
+    sub->insertItem(qFromUtf8("重置旋转"), 14);
+    m.insertItem(qFromUtf8("旋转"), sub);
+    const int id = m.exec(pos);             /* 子菜单项也返回其 id */
+    if (id < 0) return -1;
+    if (id >= 11) return 10 + (id - 11);    /* 10..13 */
+    return id - 1;                          /* 0..2 */
+#else
+    QMenu m(parent);
+    QAction* a0 = m.addAction(qFromUtf8("视频详情…"));
+    QAction* a1 = m.addAction(qFromUtf8("复制直链地址(会过期)"));
+    QAction* a2 = m.addAction(qFromUtf8("在浏览器打开"));
+    m.addSeparator();
+    QMenu* sub = m.addMenu(qFromUtf8("旋转"));
+    QAction* r0 = sub->addAction(qFromUtf8("顺时针旋转 90°"));
+    QAction* r1 = sub->addAction(qFromUtf8("逆时针旋转 90°"));
+    QAction* r2 = sub->addAction(qFromUtf8("旋转 180°"));
+    QAction* r3 = sub->addAction(qFromUtf8("重置旋转"));
+    QAction* sel = m.exec(pos);
+    if (sel == 0) return -1;                /* 取消 */
+    if (sel == a0) return 0;
+    if (sel == a1) return 1;
+    if (sel == a2) return 2;
+    if (sel == r0) return 10;
+    if (sel == r1) return 11;
+    if (sel == r2) return 12;
+    if (sel == r3) return 13;
     return -1;
 #endif
 }
@@ -2305,11 +2352,7 @@ void MainWindow::openSubtitleList()
 /* 播放器右键:视频详情 / 复制直链 / 浏览器打开 */
 void MainWindow::onPlayerContextMenu(const QPoint& globalPos)
 {
-    QStringList items;
-    items << qFromUtf8("视频详情…")
-          << qFromUtf8("复制直链地址(会过期)")
-          << qFromUtf8("在浏览器打开");
-    const int sel = cxShowMenu(this, globalPos, items);
+    const int sel = cxShowPlayerMenu(this, globalPos);
     if (sel == 0) {
         applyVideoInfo();
         VideoInfoDialog dlg(m_videoInfo, this);
@@ -2326,6 +2369,14 @@ void MainWindow::onPlayerContextMenu(const QPoint& globalPos)
         else
             SharedStatusBar::instance()->showMessage(
                 qFromUtf8("该源未提供网页地址"), 3000);
+    } else if (sel == 10) {
+        applyRotation((m_rotation + 90) % 360);
+    } else if (sel == 11) {
+        applyRotation((m_rotation + 270) % 360);
+    } else if (sel == 12) {
+        applyRotation((m_rotation + 180) % 360);
+    } else if (sel == 13) {
+        applyRotation(0);
     }
 }
 
@@ -2673,6 +2724,30 @@ void MainWindow::onRateMenuRequested(const QPoint& globalPos)
     SharedStatusBar::instance()->showMessage(
         qFromUtf8("倍速 %1x → %2x")
             .arg(cur, 0, 'f', 2).arg(r, 0, 'f', 2), 1500);
+}
+
+void MainWindow::onRotateMenuRequested(const QPoint& globalPos)
+{
+    QStringList items;
+    items << qFromUtf8("顺时针旋转 90°")
+          << qFromUtf8("逆时针旋转 90°")
+          << qFromUtf8("旋转 180°")
+          << qFromUtf8("重置旋转");
+    const int sel = cxShowMenu(playerBar, globalPos, items);
+    if (sel == 0) applyRotation((m_rotation + 90) % 360);
+    else if (sel == 1) applyRotation((m_rotation + 270) % 360);
+    else if (sel == 2) applyRotation((m_rotation + 180) % 360);
+    else if (sel == 3) applyRotation(0);
+}
+
+void MainWindow::applyRotation(int deg)
+{
+    deg = ((deg % 360) + 360) % 360;
+    m_rotation = deg;
+    if (m_player != 0) m_player->setRotation(deg);
+    SharedStatusBar::instance()->showMessage(
+        deg == 0 ? qFromUtf8("旋转已重置")
+                 : qFromUtf8("旋转 %1°（顺时针）").arg(deg), 1500);
 }
 
 void MainWindow::onMuteChanged(bool on)
@@ -3455,6 +3530,10 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e)
         break;
     case Qt::Key_C:
         onCycleSubtitle();
+        return true;
+    case Qt::Key_R:
+        if (shift) applyRotation(0);                       /* Shift+R 重置 */
+        else       applyRotation((m_rotation + 90) % 360); /* R 顺时针 90 */
         return true;
     default:
         break;

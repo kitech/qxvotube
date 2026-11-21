@@ -47,6 +47,7 @@ signals:
     void volumeChanged(int pct);
     void rateChanged(double r);
     void rateMenuRequested(const QPoint& globalPos);   /* 倍速按钮 → 请求弹出菜单 */
+    void rotateMenuRequested(const QPoint& globalPos);  /* 旋转按钮 → 弹出菜单 */
     void muteChanged(bool on);           /* 二期同步:静音切换(qskvotube 对齐) */
     void eqRequested();
     void shotRequested();
@@ -71,7 +72,7 @@ private slots:
 
 private:
     enum Hit { HitNone, HitPrev, HitPlay, HitNext, HitProgress,
-               HitVol, HitRate, HitEq, HitShot, HitSub, HitDownload, HitBuffered,
+               HitVol, HitRate, HitRotate, HitEq, HitShot, HitSub, HitDownload, HitBuffered,
                HitRepeat, HitShuffle, HitAutoSkip, HitSubLine };
     void setProgressFromX(int x);
     QRect coverRect() const;
@@ -82,6 +83,7 @@ private:
     QRect progressRect() const;
     QRect volRect() const;
     QRect rateRect() const;
+    QRect rotateRect() const;
     QRect eqRect() const;
     QRect shotRect() const;
     QRect ccRect() const;
