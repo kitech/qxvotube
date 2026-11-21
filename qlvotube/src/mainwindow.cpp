@@ -1373,6 +1373,7 @@ void MainWindow::setupVideoProviders()
         m_providers[i]->setProxy(pc);
         ids.append(m_providers[i]->id());
     }
+    ids.append(qFromUtf8("retv"));   /* 占位站点:retv美剧(暂未实现,仅列表入口) */
     if (getenv("QLVOTUBE_DEBUG") != 0)
 #if QT_VERSION >= 0x060000
         qDebug() << "providers:" << int(m_providers.size()) << "sources"
@@ -1403,6 +1404,37 @@ void MainWindow::onSiteChanged(const QString& providerId)
     m_netTvRegion = QString();          /* 离开网络电视,回到站点浏览 */
     sideNav->setCurrentNetTvRegion(QString());
     if (contentView) contentView->setPlayingVideoId(QString());
+
+    /* retv 美剧:占位站点,暂未实现(仅站点入口 + 空列表提示) */
+    if (providerId == qFromUtf8("retv")) {
+        sideNav->clearVideoCategories();
+        sideNav->setVideoCategoriesLoading(false);
+        m_videoTitles.clear();
+        m_videoCards.clear();
+        m_videoIds.clear();
+        m_videoQueue.clear();
+        m_videoIdx = -1;
+        m_videoMode = false;
+        m_gridChip = QString();
+        m_chipList.clear();
+        m_gridPage = 1;
+        m_gridHasMore = false;
+        m_gridLoading = false;
+        m_gridIsSearch = false;
+        m_gridSearchKw = QString();
+        ++m_gridGen;                       /* 作废在途请求 */
+        const QString siteKey = QString::fromUtf8("site.") + providerId;
+        QString siteName = _(qToUtf8(siteKey).data());
+        if (siteName.isEmpty() || siteName == siteKey) siteName = providerId;
+        m_gridSiteName = siteName;
+        if (contentView) {
+            contentView->showVideoGrid(siteName);
+            contentView->replaceVideoCards(std::vector<VideoCard>(), false);
+        }
+        SharedStatusBar::instance()->showMessage(_("site.retv_todo"), 3000);
+        return;
+    }
+
     for (int i = 0; i < m_providers.size(); ++i)
         if (m_providers[i]->id() == providerId) {
             m_curProv = m_providers[i];
