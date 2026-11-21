@@ -2128,6 +2128,18 @@ void MainWindow::switchToPlayerView(bool on)
                                      : (QWidget*)contentView);
 }
 
+/* 列表页/播放页判据(Qt3 QWidgetStack / Qt4 QStackedWidget) */
+bool MainWindow::isPlayerViewActive() const
+{
+    if (centerStack == 0 || videoPane == 0)
+        return false;
+#ifdef QT3_BUILD
+    return centerStack->visibleWidget() == (QWidget*)videoPane;
+#else
+    return centerStack->currentWidget() == (QWidget*)videoPane;
+#endif
+}
+
 void MainWindow::onVideoBackRequested()
 {
     switchToPlayerView(false);
@@ -2937,6 +2949,9 @@ void MainWindow::onPlayerError(int code, const QString& msg)
 void MainWindow::onSeekRequested(int ms)
 {
     if (m_playFinished) {
+        /* 列表页拖动:仅忽略,不重播跳页 */
+        if (!isPlayerViewActive())
+            return;
         /* 播完态拖进度:先从头重播当前项,started 后跳到目标位置并继续播放 */
         m_pendingSeekMs = ms;
         m_playFinished = false;
@@ -3428,9 +3443,12 @@ void MainWindow::toggleFullscreen()
 
 void MainWindow::toggleVideoFullscreen()
 {
-    if (videoPane == 0) {
+    if (videoPane == 0 || centerStack == 0) {
         return;
     }
+    /* 列表页按 F:不进入视频全屏(否则会随退出全屏切到播放页) */
+    if (!m_videoFullscreen && !isPlayerViewActive())
+        return;
     if (!m_videoFullscreen) {
         m_videoFullscreen = true;
 #ifdef QT3_BUILD
@@ -3486,6 +3504,9 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e)
     switch (k) {
     case Qt::Key_Space:
     case Qt::Key_K:
+        /* 列表页播完态:不重播跳页(后台播放中的暂停/继续仍生效) */
+        if (!isPlayerViewActive() && m_playFinished)
+            return true;
         onPlayPause();
         return true;
     case Qt::Key_Left:
@@ -3510,6 +3531,8 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e)
         toggleMuteShortcut();
         return true;
     case Qt::Key_F:
+        if (!isPlayerViewActive())
+            return true;   /* 列表页:F 不响应,已消费 */
         if (m_fullscreen) { toggleFullscreen(); }   /* 应用全屏 → 视频全屏,状态互斥 */
         toggleVideoFullscreen();
         return true;
@@ -3542,6 +3565,8 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e)
         onCycleSubtitle();
         return true;
     case Qt::Key_R:
+        if (!isPlayerViewActive())
+            return true;   /* 列表页无画面:不旋转、不提示,也不影响下一部 */
         if (shift) applyRotation(0);                       /* Shift+R 重置 */
         else       applyRotation((m_rotation + 90) % 360); /* R 顺时针 90 */
         return true;

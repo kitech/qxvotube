@@ -104,6 +104,7 @@ private slots:
     /* 播放引擎接线(cxvideo/qtav34;backend-abstraction.md Phase 1) */
     void onPlayerStarted();
     void switchToPlayerView(bool on);    /* M5-A 播放页切换 */
+    bool isPlayerViewActive() const;     /* 中栏当前页是否为播放页 */
     void onVideoBackRequested();
     void onVideoSurfaceRequested();  /* 点 playbar 封面/标题 → 回播放页 */
     void onQaAutoplay();     /* QA 钩子:QLVOTUBE_AUTOPLAY=<url> 自动起播 */
