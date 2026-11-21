@@ -65,12 +65,16 @@ public:
     void setVideoGridLoading(bool loading);
     void setVideoGridError(const QString& text);   // 空=清错
     void setVideoGridTitle(const QString& title);   /* 只更新视频列表页页头标题 */
+    void dismissTip();                              /* Esc/外部主动收起标题提示 */
 
 public slots:
     /* TracksMode：本地库歌单（SideNav::playlistSelected 连接目标） */
     void showPlaylist(int playlistId);
 
     void onScroll(int value);
+
+private slots:
+    void onTipTimer();          // 500ms 到点显示标题提示
 
 signals:
     void trackActivated(int playlistId, int trackIndex);
@@ -91,6 +95,7 @@ protected:
     void wheelEvent(QWheelEvent* e);
     void resizeEvent(QResizeEvent* e);
     void leaveEvent(QEvent* e);
+    void hideEvent(QHideEvent* e);          // 切到播放页/隐藏时收提示
     void customEvent(CustomEventBase* e);   // 封面解码完成(泵线程 → GUI)
 
 private:
@@ -114,6 +119,9 @@ private:
     QRect cardRect(int i) const;
     void statBadgeRects(int i, QRect* viewRect, QRect* replyRect) const;  /* 封面左下角两徽标(绘制与命中共用) */
     int  badgeAt(const QPoint& p) const;   /* 0=无 1=播放 2=评论 */
+    void cancelTip();                      // 停表 + 隐藏 + 清目标
+    QRect videoTitleRect(int rowPos) const;// 卡片标题矩形(与 paint 同公式)
+    void updateVideoTip(const QPoint& pos);// 命中/截断判断 + 起延时
     int    gridCols() const;
     int    gridCardH() const;
 
@@ -145,6 +153,9 @@ private:
     bool m_loadingNow;
     QString m_playingVideoId;   // 当前播放视频 id(空=无)
     int m_gridPage;             // 视频列表当前页(0=未知)
+    /* 主视频网格标题 Tooltip:-1=无,>=0=m_rows 下标;timer 活动=延时中 */
+    int m_tipRow;
+    QTimer* m_tipTimer;
 };
 
 #endif // CONTENTVIEW_H

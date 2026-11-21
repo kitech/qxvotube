@@ -9,6 +9,7 @@
 #include <qevent.h>
 #include <qdatetime.h>
 #include <qfontmetrics.h>
+#include <qtimer.h>
 #ifdef QT3_BUILD
 #include <qpointarray.h>
 typedef QPointArray MuiPolygon;
@@ -99,7 +100,8 @@ ContentView::ContentView(QWidget* parent)
     : QWidget(parent), m_pl(0), m_mode(TracksMode), m_scrollBar(0), m_scrollY(0),
       m_scrollDelta(0), m_hover(-1), m_current(-1), m_playlistId(-1),
       m_headerH(64), m_rowH(48), m_lastMoreAt(0),
-      m_hasMore(false), m_loadingNow(false), m_gridPage(0)
+      m_hasMore(false), m_loadingNow(false), m_gridPage(0),
+      m_tipRow(-1), m_tipTimer(0)
 {
     setMouseTracking(true);
     /* 可聚焦:点击网格后把焦点从搜索框拿回,快捷键(空格/方向键)才生效 */
@@ -110,6 +112,8 @@ ContentView::ContentView(QWidget* parent)
 #endif
     m_scrollBar = new LimeScrollBar(Qt::Vertical, this);
     QObject::connect(m_scrollBar, SIGNAL(valueChanged(int)), this, SLOT(onScroll(int)));
+    m_tipTimer = new QTimer(this);
+    QObject::connect(m_tipTimer, SIGNAL(timeout()), this, SLOT(onTipTimer()));
     retranslateUi();
 }
 
@@ -298,6 +302,7 @@ int ContentView::gridCardH() const
 
 void ContentView::rebuildRows()
 {
+    cancelTip();                 /* 数据/模式/几何变化:提示锚点一律作废 */
     m_rows.clear();
     if (m_mode == TracksMode) {
         if (!m_pl) return;
@@ -517,6 +522,7 @@ int ContentView::rowAt(const QPoint& p) const
 void ContentView::onScroll(int value)
 {
     if (value == m_scrollY) return;
+    cancelTip();                 /* 滚动后卡片位置变化 */
     m_scrollY = value;
     update();
     maybeLoadMore();
@@ -539,6 +545,7 @@ void ContentView::updateScrollBar()
 
 void ContentView::resizeEvent(QResizeEvent* e)
 {
+    cancelTip();                 /* 列数/卡片宽度变化,矩形失效 */
     QWidget::resizeEvent(e);
     if (m_scrollBar)
         m_scrollBar->setGeometry(width() - 12, m_headerH, 12, qMax(0, height() - m_headerH));
@@ -549,6 +556,7 @@ void ContentView::resizeEvent(QResizeEvent* e)
 
 void ContentView::wheelEvent(QWheelEvent* e)
 {
+    cancelTip();                 /* 滚轮滚动:旧锚点失效 */
     m_scrollDelta += qWheelDeltaY(e);
     int steps = m_scrollDelta / 120;
     if (steps == 0) return;
@@ -906,6 +914,7 @@ void ContentView::paintEvent(QPaintEvent*)
 
 void ContentView::mousePressEvent(QMouseEvent* e)
 {
+    cancelTip();  /* 点击即收标题提示 */
     setFocus();   /* 点内容区 = 退出文本输入焦点,启用播放器快捷键 */
     /* M7:右键交给 contextMenuEvent,不能顺带激活条目 */
     if (e->button() != Qt::LeftButton)
@@ -1000,6 +1009,8 @@ void ContentView::mousePressEvent(QMouseEvent* e)
 
 void ContentView::mouseMoveEvent(QMouseEvent* e)
 {
+    if (m_mode != VideoGridMode)
+        cancelTip();             /* 其它模式/切换后不保留提示 */
     if (m_mode == VideoGridMode) {
         int h = rowAt(e->pos());
         if (h < 0 && !m_gridErr.isEmpty()) {
@@ -1017,6 +1028,7 @@ void ContentView::mouseMoveEvent(QMouseEvent* e)
             }
         }
         if (h != m_hover) { m_hover = h; update(); }
+        updateVideoTip(e->pos());
         return;
     }
     if (m_mode == PlaylistListMode) {
@@ -1047,9 +1059,94 @@ void ContentView::mouseMoveEvent(QMouseEvent* e)
 
 void ContentView::leaveEvent(QEvent* e)
 {
+    cancelTip();
     QWidget::leaveEvent(e);
     if (m_hover != -1) {
         m_hover = -1;
         update();
     }
+}
+
+void ContentView::hideEvent(QHideEvent* e)
+{
+    cancelTip();                 /* 切到播放页/窗口隐藏,别把提示留在屏幕上 */
+    QWidget::hideEvent(e);
+}
+
+/* 卡片标题矩形(与 paint 的 titleRect/titleLeft 完全一致) */
+QRect ContentView::videoTitleRect(int rowPos) const
+{
+    if (rowPos < 0 || rowPos >= (int)m_rows.size())
+        return QRect();
+    const Row& row = m_rows[rowPos];
+    if (row.index < 0 || row.index >= (int)m_videos.size())
+        return QRect();
+    QRect cr = cardRect(rowPos);
+    cr.moveTop(row.y - m_scrollY);
+    const int coverH = cr.width() * 9 / 16;
+    int left = cr.x();
+    const VideoCard& c = m_videos[row.index];
+    if (!m_playingVideoId.isEmpty() && c.id == m_playingVideoId)
+        left += 18;              /* 与 paint 的 ▶ 偏移一致 */
+    return QRect(left, cr.y() + coverH + 4, cr.right() - left + 1, 18);
+}
+
+void ContentView::cancelTip()
+{
+    if (m_tipTimer != 0)
+        m_tipTimer->stop();
+    if (m_tipRow == -1)
+        return;
+    m_tipRow = -1;
+    showTempTooltip(this, QRect(), QString());   /* 空文本 = 隐藏 */
+}
+
+void ContentView::dismissTip()
+{
+    cancelTip();
+}
+
+void ContentView::updateVideoTip(const QPoint& pos)
+{
+    /* 命中卡片 -> 必须落在标题行内才提示(封面/作者/徽标不算) */
+    int rowPos = -1;
+    for (size_t k = 0; k < m_rows.size(); ++k) {
+        QRect cr = cardRect((int)k);
+        cr.moveTop(m_rows[k].y - m_scrollY);
+        if (cr.contains(pos)) { rowPos = (int)k; break; }
+    }
+    if (rowPos >= 0 && !videoTitleRect(rowPos).contains(pos))
+        rowPos = -1;
+    if (rowPos == m_tipRow)
+        return;                  /* 同一目标:延时中/已显示,不重置 */
+    cancelTip();                 /* 目标变化:先收旧提示 */
+    if (rowPos < 0)
+        return;
+    const VideoCard& c = m_videos[m_rows[rowPos].index];
+    QFont tf = font();
+    tf.setBold(true);            /* 与 paint 标题字体一致 */
+    if (qFontWidth(QFontMetrics(tf), c.title) <= videoTitleRect(rowPos).width())
+        return;                  /* 未截断:不提示 */
+    m_tipRow = rowPos;
+    m_tipTimer->start(500);      /* 延时显示 */
+}
+
+void ContentView::onTipTimer()
+{
+    m_tipTimer->stop();          /* Qt3 无 setSingleShot:到点手动停 */
+    if (m_tipRow < 0 || m_tipRow >= (int)m_rows.size())
+        return;
+    if (m_mode != VideoGridMode) { m_tipRow = -1; return; }
+    const Row& row = m_rows[m_tipRow];
+    if (row.index < 0 || row.index >= (int)m_videos.size()) { m_tipRow = -1; return; }
+    const VideoCard& c = m_videos[row.index];
+    const QRect r = videoTitleRect(m_tipRow);
+    QFont tf = font();
+    tf.setBold(true);
+    if (qFontWidth(QFontMetrics(tf), c.title) <= r.width()) {
+        m_tipRow = -1;
+        return;
+    }
+    /* 60s 兜底,实际由移出/滚动/缩放/点击/Esc/隐藏主动关闭 */
+    showTempTooltip(this, r, c.title, 60000);
 }

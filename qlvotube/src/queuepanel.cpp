@@ -8,6 +8,7 @@
 #include <qpainter.h>
 #include <qevent.h>
 #include <qfontmetrics.h>
+#include <qtimer.h>
 #ifdef QT3_BUILD
 #include <qpointarray.h>
 typedef QPointArray MuiPolygon;
@@ -31,24 +32,30 @@ static void drawPlayTriangle(QPainter& p, const QRect& r, const QColor& c)
 
 QueuePanel::QueuePanel(QWidget* parent)
     : QWidget(parent), m_hasCurrent(false), m_currentIdx(-1),
-      m_scrollBar(0), m_scrollY(0), m_scrollDelta(0), m_listTop(46)
+      m_scrollBar(0), m_scrollY(0), m_scrollDelta(0), m_listTop(46),
+      m_tipRow(-1), m_tipTimer(0)
 {
     setMinimumWidth(200);
     setMaximumWidth(320);
+    setMouseTracking(true);
     m_scrollBar = new LimeScrollBar(Qt::Vertical, this);
     m_scrollBar->hide();
     connect(m_scrollBar, SIGNAL(valueChanged(int)), this, SLOT(onScroll(int)));
+    m_tipTimer = new QTimer(this);
+    connect(m_tipTimer, SIGNAL(timeout()), this, SLOT(onTipTimer()));
     retranslateUi();
 }
 
 void QueuePanel::retranslateUi()
 {
+    cancelTip();
     m_title = _("queue.title");
     update();
 }
 
 void QueuePanel::setCurrentTrack(const Track& t)
 {
+    cancelTip();
     m_current = t;
     m_hasCurrent = true;
     updateScrollBar();
@@ -58,12 +65,14 @@ void QueuePanel::setCurrentTrack(const Track& t)
 void QueuePanel::setCurrentIndex(int index)
 {
     if (m_currentIdx == index) return;
+    cancelTip();                       /* 高亮行变了,旧提示锚点失效 */
     m_currentIdx = index;
     update();
 }
 
 void QueuePanel::setQueue(const std::vector<Track>& queue, int startIndex)
 {
+    cancelTip();
     m_queue = queue;
     m_currentIdx = startIndex;
     m_scrollY = 0;
@@ -97,6 +106,7 @@ void QueuePanel::onScroll(int v)
 
 void QueuePanel::wheelEvent(QWheelEvent* e)
 {
+    cancelTip();                       /* 滚动后悬停行已变,立即收提示 */
     m_scrollDelta += qWheelDeltaY(e);
     int steps = m_scrollDelta / 120;
     if (steps == 0) return;
@@ -110,6 +120,7 @@ void QueuePanel::wheelEvent(QWheelEvent* e)
 
 void QueuePanel::resizeEvent(QResizeEvent* e)
 {
+    cancelTip();                       /* 宽度/位置变化,矩形失效 */
     QWidget::resizeEvent(e);
     if (m_scrollBar)
         m_scrollBar->setGeometry(width() - 12, m_listTop, 12, qMax(0, height() - m_listTop));
@@ -125,6 +136,121 @@ void QueuePanel::customEvent(CustomEventBase* e)
         return;
     }
     QWidget::customEvent(e);
+}
+
+/* 封面下方当前大标题的矩形(与 paint 同公式) */
+QRect QueuePanel::currentTitleRect() const
+{
+    const int coverSize = qMin(width() - 48, 150);
+    return QRect(16, 46 + coverSize + 12, width() - 32, 22);
+}
+
+QRect QueuePanel::rowTitleRect(int row) const
+{
+    return QRect(40, m_listTop + row * 44 - m_scrollY + 3,
+                 width() - 56, 20);
+}
+
+void QueuePanel::cancelTip()
+{
+    if (m_tipTimer != 0)
+        m_tipTimer->stop();
+    if (m_tipRow == -1)
+        return;
+    m_tipRow = -1;
+    showTempTooltip(this, QRect(), QString());   /* 空文本 = 隐藏 */
+}
+
+void QueuePanel::dismissTip()
+{
+    cancelTip();
+}
+
+void QueuePanel::onTipTimer()
+{
+    m_tipTimer->stop();   /* Qt3 无 setSingleShot:到点手动停,保持单次语义 */
+    /* 延时到点:按当前滚动/尺寸重新取矩形与文字,避免用到过期坐标 */
+    if (m_tipRow == -1)
+        return;
+    QRect r;
+    QString text;
+    QFont tf = font();
+    if (m_tipRow == -2) {
+        if (!m_hasCurrent) { m_tipRow = -1; return; }
+        r = currentTitleRect();
+        text = m_current.title;
+        tf.setBold(true);
+    } else {
+        if (m_tipRow < 0 || m_tipRow >= (int)m_queue.size()) {
+            m_tipRow = -1;
+            return;
+        }
+        r = rowTitleRect(m_tipRow);
+        text = m_queue[m_tipRow].title;
+        if (m_tipRow == m_currentIdx)
+            tf.setBold(true);
+    }
+    /* 二次校验:期间可能变宽/换行,已不截断就不再提示 */
+    if (qFontWidth(QFontMetrics(tf), text) <= r.width()) {
+        m_tipRow = -1;
+        return;
+    }
+    /* 60s 兜底,实际由移出/换行/滚动/点击/Esc 主动关闭 */
+    showTempTooltip(this, r, text, 60000);
+}
+
+void QueuePanel::mouseMoveEvent(QMouseEvent* e)
+{
+    int row = -1;
+    if (e->pos().y() < m_listTop) {
+        if (m_hasCurrent && currentTitleRect().contains(e->pos()))
+            row = -2;
+    } else {
+        const int idx = (e->pos().y() - m_listTop + m_scrollY) / 44;
+        if (idx >= 0 && idx < (int)m_queue.size()
+            && rowTitleRect(idx).contains(e->pos()))
+            row = idx;
+    }
+    if (row == m_tipRow)
+        return;          /* 同一目标:延时中/已显示,不重置、不闪烁 */
+    cancelTip();         /* 目标变化:先收旧提示 */
+    if (row == -1)
+        return;
+    QString text;
+    QRect r;
+    QFont tf = font();
+    if (row == -2) {
+        text = m_current.title;
+        r = currentTitleRect();
+        tf.setBold(true);
+    } else {
+        text = m_queue[row].title;
+        r = rowTitleRect(row);
+        if (row == m_currentIdx)
+            tf.setBold(true);
+    }
+    if (qFontWidth(QFontMetrics(tf), text) <= r.width())
+        return;          /* 未截断:不提示 */
+    m_tipRow = row;
+    m_tipTimer->start(500);   /* 延时显示 */
+}
+
+void QueuePanel::mousePressEvent(QMouseEvent* e)
+{
+    cancelTip();         /* 点击立刻收起(不新增行点击行为) */
+    QWidget::mousePressEvent(e);
+}
+
+void QueuePanel::leaveEvent(QEvent* e)
+{
+    cancelTip();
+    QWidget::leaveEvent(e);
+}
+
+void QueuePanel::hideEvent(QHideEvent* e)
+{
+    cancelTip();
+    QWidget::hideEvent(e);
 }
 
 void QueuePanel::paintEvent(QPaintEvent*)
@@ -168,7 +294,7 @@ void QueuePanel::paintEvent(QPaintEvent*)
 
         p.setFont(bold);
         p.setPen(pal.textPrimary);
-        p.drawText(QRect(16, y, width() - 32, 22), Qt::AlignVCenter | Qt::AlignHCenter, m_current.title);
+        p.drawText(currentTitleRect(), Qt::AlignVCenter | Qt::AlignHCenter, m_current.title);
         y += 22;
         p.setFont(small);
         p.setPen(pal.textMuted);
@@ -200,7 +326,7 @@ void QueuePanel::paintEvent(QPaintEvent*)
         p.drawText(QRect(16, ry, 22, 40), Qt::AlignVCenter | Qt::AlignLeft, QString::number((int)i + 1));
         p.setFont(selected ? bold : font());
         p.setPen(selected ? pal.accent : pal.textPrimary);
-        p.drawText(QRect(40, ry + 3, width() - 56, 20), Qt::AlignVCenter | Qt::AlignLeft, t.title);
+        p.drawText(rowTitleRect((int)i), Qt::AlignVCenter | Qt::AlignLeft, t.title);
         p.setFont(small);
         p.setPen(pal.textMuted);
         p.drawText(QRect(40, ry + 21, width() - 56, 18), Qt::AlignVCenter | Qt::AlignLeft, t.artist);

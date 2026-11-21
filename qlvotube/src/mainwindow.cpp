@@ -3548,6 +3548,8 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e)
             _("shortcut.log_todo"), 2000);
         return true;
     case Qt::Key_Escape:
+        if (queuePanel != 0) queuePanel->dismissTip();   /* 先收标题提示 */
+        if (contentView != 0) contentView->dismissTip();
         if (m_videoFullscreen) { toggleVideoFullscreen(); return true; }
         if (m_fullscreen) { toggleFullscreen(); return true; }
         break;
