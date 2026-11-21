@@ -119,6 +119,7 @@ private slots:
     /* M5-A2:音量/倍速/EQ/截图/引擎切换 */
     void onVolumeChanged(int pct);
     void onRateChanged(double r);
+    void onRateMenuRequested(const QPoint& globalPos);   /* 倍速弹出菜单 */
     void onMuteChanged(bool on);   /* 二期同步:静音切换 */
     void onOpenEqDialog();
     void onEqChanged();

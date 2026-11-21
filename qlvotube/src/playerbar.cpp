@@ -667,13 +667,7 @@ void PlayerBar::mousePressEvent(QMouseEvent* e)
     } else if (autoSkipRect().contains(e->pos())) {
         emit autoSkipClicked();
     } else if (rateRect().contains(e->pos())) {
-        static const double kRates[5] = { 0.5, 1.0, 1.25, 1.5, 2.0 };
-        int idx = 0;
-        for (int i = 0; i < 5; i++)
-            if (kRates[i] == m_rate) idx = i;
-        m_rate = kRates[(idx + 1) % 5];
-        update();
-        emit rateChanged(m_rate);
+        emit rateMenuRequested(mapToGlobal(e->pos()));
     } else if (ccRect().contains(e->pos())) {
         emit subtitleRequested();
     } else if (eqRect().contains(e->pos())) {

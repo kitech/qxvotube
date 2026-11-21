@@ -607,6 +607,8 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onAutoSkipClicked()));
         QObject::connect(playerBar, SIGNAL(rateChanged(double)),
                          this, SLOT(onRateChanged(double)));
+        QObject::connect(playerBar, SIGNAL(rateMenuRequested(const QPoint&)),
+                         this, SLOT(onRateMenuRequested(const QPoint&)));
         QObject::connect(playerBar, SIGNAL(eqRequested()),
                          this, SLOT(onOpenEqDialog()));
         QObject::connect(playerBar, SIGNAL(shotRequested()),
@@ -2602,6 +2604,30 @@ void MainWindow::onRateChanged(double r)
     if (m_player != 0) m_player->setRate(r);
 }
 
+void MainWindow::onRateMenuRequested(const QPoint& globalPos)
+{
+    static const double kRates[] = { 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0 };
+    const int n = (int)(sizeof(kRates) / sizeof(kRates[0]));
+    const double cur = (playerBar != 0) ? playerBar->rate()
+                                        : (m_player ? m_player->rate() : 1.0);
+    QStringList items;
+    for (int i = 0; i < n; ++i) {
+        QString label = QString::number(kRates[i], 'g', 3) + "x";
+        const double d = (kRates[i] > cur) ? (kRates[i] - cur) : (cur - kRates[i]);
+        if (d < 0.001) label = qFromUtf8("● ") + label;   /* 标记当前倍速 */
+        items << label;
+    }
+    const int sel = cxShowMenu(playerBar, globalPos, items);
+    if (sel < 0) return;                                  /* 取消 */
+    const double r = kRates[sel];
+    if (r == cur) return;                                 /* 未变化,不提示 */
+    if (playerBar) playerBar->setRate(r);
+    onRateChanged(r);                                     /* 应用到引擎 */
+    SharedStatusBar::instance()->showMessage(
+        qFromUtf8("倍速 %1x → %2x")
+            .arg(cur, 0, 'f', 2).arg(r, 0, 'f', 2), 1500);
+}
+
 void MainWindow::onMuteChanged(bool on)
 {
     if (m_player != 0) m_player->setMute(on);
@@ -3244,13 +3270,16 @@ void MainWindow::toggleMuteShortcut()
 void MainWindow::adjustRate(double delta)
 {
     if (m_player == 0) return;
-    double r = m_player->rate() + delta;
+    const double old = m_player->rate();
+    double r = old + delta;
     if (r < 0.25) r = 0.25;
     if (r > 2.0) r = 2.0;
+    if (r == old) return;
     m_player->setRate(r);
     if (playerBar) playerBar->setRate(r);
     SharedStatusBar::instance()->showMessage(
-        qFromUtf8("倍速 %1x").arg(r, 0, 'f', 2), 1200);
+        qFromUtf8("倍速 %1x → %2x")
+            .arg(old, 0, 'f', 2).arg(r, 0, 'f', 2), 1500);
 }
 
 void MainWindow::toggleFullscreen()

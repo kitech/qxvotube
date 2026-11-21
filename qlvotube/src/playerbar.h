@@ -46,6 +46,7 @@ signals:
     /* M5-A2:音量/倍速/EQ/截图 */
     void volumeChanged(int pct);
     void rateChanged(double r);
+    void rateMenuRequested(const QPoint& globalPos);   /* 倍速按钮 → 请求弹出菜单 */
     void muteChanged(bool on);           /* 二期同步:静音切换(qskvotube 对齐) */
     void eqRequested();
     void shotRequested();
