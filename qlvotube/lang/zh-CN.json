@@ -133,7 +133,11 @@
     "test_video_playing": "正在播放测试视频（后端：%1）…",
     "quality_tab": "播放分辨率",
     "quality_label": "默认分辨率",
-    "quality_hint": "默认 360P;auto = 各源默认。B站游客上限 720P,YouTube 360P 走渐进流。"
+    "quality_hint": "默认 360P;auto = 各源默认。B站游客上限 720P,YouTube 360P 走渐进流。",
+    "cache_tab": "缓存",
+    "image_cache_label": "图片缓存上限（MB）",
+    "video_cache_label": "视频缓存上限（MB）",
+    "cache_hint": "图片缓存超出上限时按最近最少使用自动清理；视频缓存后续版本接入。"
   },
   "action": {
     "new": "新建",

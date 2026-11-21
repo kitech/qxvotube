@@ -11,6 +11,7 @@
 #include "StyleParams.h"
 #include "appsetup.h"
 #include "config.h"
+#include "filecache.h"
 #include "globaluiutil.h"
 #include "version.h"
 #include "storage.h"
@@ -399,6 +400,11 @@ MainWindow::MainWindow(QWidget* parent)
 #endif
     );
 
+    /* 封面磁盘缓存:初始化 + 启动后异步 trim(不阻塞启动) */
+    filecache::init(dataDir);
+    thumbcache::refreshImageLimit();   /* GUI 线程读配置,泵线程只读原子值 */
+    filecache::requestTrim(filecache::coversDir(), thumbcache::imageLimitBytes());
+
     setGeometry(100, 50, 980, 640);
     /* mac/Qt4:布局最小宽可能把窗口顶到数屏宽 → 解除布局尺寸约束 */
 #ifndef QT3_BUILD
@@ -428,6 +434,7 @@ MainWindow::MainWindow(QWidget* parent)
 MainWindow::~MainWindow() {
     s_trayIcon = 0;
     EventPoller::stop();          // 先停泵线程，再关库（qldox mainwindow.cpp:943-945 顺序）
+    filecache::shutdown();        // 停后台 trim 线程(有界 join)
     Storage::instance().close();
 }
 
@@ -1930,6 +1937,32 @@ void MainWindow::openSettings()
     dlg->addCategory(_("settings.quality_tab"), qpage);
     dlg->registerConfigItem(qItem);
 
+    /* —— 缓存页:图片上限生效;视频上限本次仅持久化(视频缓存后续接入) —— */
+    CategoryPage* cpage = new CategoryPage(_("settings.cache_tab"), dlg);
+    int imgMb = Config::value(qFromUtf8("cache.image_max_mb")).toInt();
+    if (imgMb <= 0) imgMb = 500;
+    IntConfigItem* imgItem = new IntConfigItem(
+        "cache/image_max_mb", imgMb, _("settings.image_cache_label"),
+        50, 5000, cpage);
+    cpage->addLabeledControl(_("settings.image_cache_label"), imgItem->spinBox());
+    int vidMb = Config::value(qFromUtf8("cache.video_max_mb")).toInt();
+    if (vidMb <= 0) vidMb = 1000;
+    IntConfigItem* vidItem = new IntConfigItem(
+        "cache/video_max_mb", vidMb, _("settings.video_cache_label"),
+        100, 20000, cpage);
+    cpage->addLabeledControl(_("settings.video_cache_label"), vidItem->spinBox());
+    QLabel* chint = new QLabel(_("settings.cache_hint"), cpage);
+#if QT_VERSION >= 0x040000
+    chint->setWordWrap(true);
+#else
+    chint->setAlignment(Qt::WordBreak | Qt::AlignLeft);
+    chint->setMinimumHeight(44);
+#endif
+    cpage->addWidget(chint);
+    dlg->addCategory(_("settings.cache_tab"), cpage);
+    dlg->registerConfigItem(imgItem);
+    dlg->registerConfigItem(vidItem);
+
     /* —— 关于页 —— */
     CategoryPage* about = new CategoryPage(_("menu.help"), dlg);
     QLabel* aboutLabel = new QLabel(
@@ -1942,12 +1975,26 @@ void MainWindow::openSettings()
     QObject::connect(dlg, SIGNAL(settingsSaved(const SettingsChangedMap&)),
                      this, SLOT(onSettingsSaved(const SettingsChangedMap&)));
     dlg->loadSettings();
+    /* 迁移:旧版 IntConfigItem 未应用范围,500/1000 被 QSpinBox 夹成 99 并可能已落盘 */
+    if (imgItem->spinBox()->value() == 99) imgItem->spinBox()->setValue(500);
+    if (vidItem->spinBox()->value() == 99) vidItem->spinBox()->setValue(1000);
     dlg->exec();
     delete dlg;
 }
 
 void MainWindow::onSettingsSaved(const SettingsChangedMap& changed)
 {
+    if (changed.contains("cache/image_max_mb")) {
+        int mb = changed["cache/image_max_mb"].toInt();
+        Config::setValue("cache.image_max_mb", QString::number(mb));
+        thumbcache::refreshImageLimit();
+        filecache::requestTrim(filecache::coversDir(), thumbcache::imageLimitBytes());
+    }
+    if (changed.contains("cache/video_max_mb")) {
+        /* 视频缓存后续接入,本次仅持久化 */
+        Config::setValue("cache.video_max_mb",
+                         QString::number(changed["cache/video_max_mb"].toInt()));
+    }
     if (changed.contains("ui/lang")) {
         QString code = langCodeForLabel(changed["ui/lang"].toString());
         if (!code.isEmpty() && code != Translator::instance().currentLang()) {

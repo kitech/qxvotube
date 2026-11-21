@@ -133,7 +133,11 @@
     "test_video_playing": "Playing test video (backend: %1)...",
     "quality_tab": "Playback quality",
     "quality_label": "Default quality",
-    "quality_hint": "Default 360P; auto = provider default. Bilibili guests cap at 720P; YouTube 360P uses progressive."
+    "quality_hint": "Default 360P; auto = provider default. Bilibili guests cap at 720P; YouTube 360P uses progressive.",
+    "cache_tab": "Cache",
+    "image_cache_label": "Image cache limit (MB)",
+    "video_cache_label": "Video cache limit (MB)",
+    "cache_hint": "Image cache is trimmed by LRU when over the limit; video caching will be added later."
   },
   "action": {
     "new": "New",

@@ -1,6 +1,9 @@
 #include "videothumbcache.h"
+#include "filecache.h"
+#include "config.h"
 
 #include "providers/common/compat.h"
+#include <atomic>
 #include <qapplication.h>
 #include <qmap.h>
 #include <qstringlist.h>
@@ -26,6 +29,8 @@ QStringList& lru() { static QStringList l; return l; }
 int g_requested = 0;
 int g_failed = 0;
 const int kMaxThumbs = 300;
+/* 图片磁盘缓存上限(GUI 线程刷新,泵线程只读) */
+std::atomic<long long> g_imageLimit(500LL * 1024 * 1024);
 
 void thumbLog(const QString& s)
 {
@@ -122,6 +127,52 @@ struct ThumbCtx {
     QWidget* target;
 };
 
+/* 从内存字节解码(原 onThumbDone 内联逻辑抽出,供磁盘命中复用) */
+QImage decodeImageBytes(const uchar* p, int n, const char** usedOut)
+{
+    const char* fmt = sniffFormat(p, n);
+    QImage img;
+    bool ok = false;
+    const char* used = "-";
+#ifdef QT3_BUILD
+    if (*fmt && img.loadFromData(p, (uint)n, fmt) && !img.isNull()) { ok = true; used = "qt-hint"; }
+    if (!ok) { img = QImage(); if (img.loadFromData(p, (uint)n) && !img.isNull()) { ok = true; used = "qt-auto"; } }
+#else
+    if (*fmt) { img = QImage::fromData(p, n, QByteArray(fmt)); if (!img.isNull()) { ok = true; used = "qt-hint"; } }
+    if (!ok) { img = QImage::fromData(p, n); if (!img.isNull()) { ok = true; used = "qt-auto"; } }
+#endif
+    if (!ok) {
+        int w = 0, h = 0, ch = 0;
+        stbi_uc* raw = stbi_load_from_memory(p, n, &w, &h, &ch, 4);
+        if (raw && w > 0 && h > 0) {
+#ifdef QT3_BUILD
+            QImage tmp(w, h, 32);
+#else
+            QImage tmp(w, h, QImage::Format_ARGB32);
+#endif
+            for (int y = 0; y < h; ++y) {
+                uchar* dst = tmp.scanLine(y);
+                const stbi_uc* src = raw + (size_t)y * w * 4;
+                for (int x = 0; x < w; ++x) {
+                    dst[x*4+0] = src[x*4+2];
+                    dst[x*4+1] = src[x*4+1];
+                    dst[x*4+2] = src[x*4+0];
+                    dst[x*4+3] = src[x*4+3];
+                }
+            }
+            stbi_image_free(raw);
+            img = tmp;
+            ok = !img.isNull();
+            used = ok ? "stb" : "-";
+        }
+        if (!raw && getenv("QLVOTUBE_DEBUG"))
+            thumbLog(qFromUtf8("[thumb] stb fail ")
+                     + qFromUtf8(stbi_failure_reason() ? stbi_failure_reason() : "?"));
+    }
+    if (usedOut) *usedOut = used;
+    return img;
+}
+
 void onThumbDone(const HttpResponse& resp, void* udata)
 {
     ThumbCtx* ctx = static_cast<ThumbCtx*>(udata);
@@ -129,45 +180,19 @@ void onThumbDone(const HttpResponse& resp, void* udata)
     if (resp.httpCode == 200 && !resp.body.empty()) {
         const uchar* p = reinterpret_cast<const uchar*>(resp.body.data());
         const int n = static_cast<int>(resp.body.size());
-        const char* fmt = sniffFormat(p, n);
-        bool ok = false;
         const char* used = "-";
-#ifdef QT3_BUILD
-        if (*fmt && img.loadFromData(p, (uint)n, fmt) && !img.isNull()) { ok = true; used = "qt-hint"; }
-        if (!ok) { img = QImage(); if (img.loadFromData(p, (uint)n) && !img.isNull()) { ok = true; used = "qt-auto"; } }
-#else
-        if (*fmt) { img = QImage::fromData(p, n, QByteArray(fmt)); if (!img.isNull()) { ok = true; used = "qt-hint"; } }
-        if (!ok) { img = QImage::fromData(p, n); if (!img.isNull()) { ok = true; used = "qt-auto"; } }
-#endif
-        /* 路径 C：stb_image（绕开 Qt 插件；JPEG/PNG/GIF/BMP，WebP 由 Qt 负责）*/
-        if (!ok) {
-            int w = 0, h = 0, ch = 0;
-            stbi_uc* raw = stbi_load_from_memory(p, n, &w, &h, &ch, 4);
-            if (raw && w > 0 && h > 0) {
-#ifdef QT3_BUILD
-                QImage tmp(w, h, 32);
-#else
-                QImage tmp(w, h, QImage::Format_ARGB32);
-#endif
-                for (int y = 0; y < h; ++y) {
-                    uchar* dst = tmp.scanLine(y);
-                    const stbi_uc* src = raw + (size_t)y * w * 4;
-                    for (int x = 0; x < w; ++x) {   /* stb RGBA → Qt BGRA 字节序 */
-                        dst[x*4+0] = src[x*4+2];
-                        dst[x*4+1] = src[x*4+1];
-                        dst[x*4+2] = src[x*4+0];
-                        dst[x*4+3] = src[x*4+3];
-                    }
-                }
-                stbi_image_free(raw);
-                img = tmp;
-                ok = !img.isNull();
-                used = ok ? "stb" : "-";
-            }
-            if (!raw && getenv("QLVOTUBE_DEBUG"))
-                thumbLog(qFromUtf8("[thumb] stb fail ")
-                         + qFromUtf8(stbi_failure_reason() ? stbi_failure_reason() : "?"));
+        img = decodeImageBytes(p, n, &used);
+        if (!img.isNull()) {
+            /* 落盘:原始字节 → covers/<key>;每 50 次异步 trim */
+            const QByteArray rawBytes = qbaFromData((const char*)p, n);
+            filecache::writeFile(filecache::coversDir(),
+                                 filecache::keyForUrl(ctx->url), rawBytes);
+            static std::atomic<int> s_writes(0);
+            if (++s_writes % 50 == 0)
+                filecache::requestTrim(filecache::coversDir(),
+                                       thumbcache::imageLimitBytes());
         }
+        const char* fmt = sniffFormat(p, n);
         thumbLog(QString(qFromUtf8("thumb: decode http=%1 size=%2 head=%3 fmt=%4 path=%5 %6"))
                  .arg(resp.httpCode).arg(n).arg(headHex(p, n))
                  .arg(qFromUtf8(fmt)).arg(qFromUtf8(used)).arg(ctx ? ctx->url : QString()));
@@ -186,12 +211,37 @@ void onThumbDone(const HttpResponse& resp, void* udata)
 
 namespace thumbcache {
 
+void refreshImageLimit()
+{
+    int mb = Config::value(qFromUtf8("cache.image_max_mb")).toInt();
+    if (mb <= 0) mb = 500;
+    g_imageLimit.store((long long)mb * 1024 * 1024);
+}
+
+long long imageLimitBytes() { return g_imageLimit.load(); }
+
 void request(const QString& urlRaw, QWidget* target)
 {
     const QString url = normUrl(urlRaw);
     if (url.isEmpty() || !target) return;
     logImageCaps();
     if (cache().contains(url) || state().contains(url)) return;
+
+    /* 磁盘命中:解码后回投,不发网络;损坏则删掉再走网络 */
+    {
+        const QString key = filecache::keyForUrl(url);
+        QByteArray raw = filecache::readFile(filecache::coversDir(), key);
+        if (!raw.isEmpty()) {
+            const char* used = "-";
+            QImage dimg = decodeImageBytes(
+                reinterpret_cast<const uchar*>(raw.data()), raw.size(), &used);
+            if (!dimg.isNull()) {
+                QApplication::postEvent(target, new ThumbReadyEvent(url, dimg));
+                return;
+            }
+            filecache::removeFile(filecache::coversDir(), key);
+        }
+    }
 
     HttpRequest req;
     req.url = qToUtf8(url).data();

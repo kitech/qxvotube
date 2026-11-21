@@ -43,6 +43,11 @@ int failed();
 // 事件落地(ContentView::customEvent 调用;GUI 线程)
 void accept(const QString& url, const QImage& image);
 
+// 图片磁盘缓存上限:refreshImageLimit() 仅在 GUI 线程调用(读 Config);
+// imageLimitBytes() 可在任意线程读(原子缓存值)。
+void refreshImageLimit();
+long long imageLimitBytes();
+
 } // namespace thumbcache
 
 #endif // VIDEOTHUMBCACHE_H

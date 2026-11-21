@@ -133,7 +133,11 @@
     "test_video_playing": "正在播放測試影片（後端：%1）…",
     "quality_tab": "播放解析度",
     "quality_label": "預設解析度",
-    "quality_hint": "預設 360P;auto = 各源預設。B站訪客上限 720P,YouTube 360P 走漸進流。"
+    "quality_hint": "預設 360P;auto = 各源預設。B站訪客上限 720P,YouTube 360P 走漸進流。",
+    "cache_tab": "快取",
+    "image_cache_label": "圖片快取上限（MB）",
+    "video_cache_label": "影片快取上限（MB）",
+    "cache_hint": "圖片快取超出上限時依最近最少使用自動清理；影片快取後續版本接入。"
   },
   "action": {
     "new": "新增",
