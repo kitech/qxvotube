@@ -90,12 +90,14 @@ protected:
             }
 
             if (p.eos) {
-                /* 先投递 EOS(role=video),再做 drain:
-                 * drain 会按主时钟 pacing,音频卡死时可能永远出不来。 */
-                post(CxFFmpegEvFinished, 0, 1);
+                /* 先 drain 再报 EOS:m_draining 已关闭时钟/节拍等待,
+                 * drain 只受解码速度约束;提前投递会让 UI 立即切集,
+                 * 丢掉解码器尾部延迟帧(实测约 1~3 帧)。 */
                 m_draining = true;
                 drain();
                 m_draining = false;
+                if (!stopFlag)
+                    post(CxFFmpegEvFinished, 0, 1);
                 break;
             }
 

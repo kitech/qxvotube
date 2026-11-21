@@ -21,6 +21,7 @@
 #include <qapplication.h>
 #include <qstring.h>
 #include <qthread.h>
+#include <qtimer.h>
 #include <qmutex.h>
 #include <stdio.h>
 
@@ -108,7 +109,7 @@ CXEngineFfmpeg::CXEngineFfmpeg()
       m_seekPend(0), m_seekTarget(0), m_eosPend(0), m_fatalErr(false),
       m_aCount(0), m_sCount(0), m_audioPrompt(-1), m_subPrompt(-1),
       m_rateCur(1.0), m_volCur(100), m_muteCur(false),
-      m_rotation(0)
+      m_rotation(0), m_eosTimer(0)
 {
 }
 
@@ -123,6 +124,9 @@ CXEngineFfmpeg::~CXEngineFfmpeg()
 
 void CXEngineFfmpeg::resetOpenState(const QString& url)
 {
+    if (m_eosTimer != 0)
+        m_eosTimer->stop();
+    m_eosPend = 0;
     m_url = url;
     m_paused = false;
     m_running = false;
@@ -313,7 +317,8 @@ bool CXEngineFfmpeg::finishOpen(AVFormatContext* fmt)
         m_sthread->start();
     }
     m_running = true;
-    m_eosPend = 1 + (m_athread != 0 ? 1 : 0) + (m_sthread != 0 ? 1 : 0); // 三路都完才 finished
+    /* 只等主流:有视频=视频(+音频真正排空),纯音频=音频;字幕不参与 */
+    m_eosPend = eosPrimaryCount();
 
     /* 落地 Opening 期暂存的音量/静音(线程已起,走 Ready 分支) */
     if (m_athread != 0) {
@@ -427,6 +432,10 @@ void CXEngineFfmpeg::cancelOpen()
 
 void CXEngineFfmpeg::stopThreads()
 {
+    if (m_eosTimer != 0)
+        m_eosTimer->stop();   // 本轮作废,别让看门狗打到下一轮
+    m_eosPend = 0;
+    m_running = false;        // 停止后不再接受在途 EOS(避免误连播)
     // 1) 全员先请求停止;2) 唤醒全部队列——队列满时阻塞 push 是 demux
     //    停不下来的根因(消费者先停,队列塞满,demux 卡死在 push);
     //    阻塞中的 push/take 被唤醒后立即返回,各线程得以退出
@@ -645,6 +654,10 @@ bool CXEngineFfmpeg::seek(long ms)
         return false;
     const int sIdx = (m_vIdx >= 0) ? m_vIdx : m_aIdx; // 纯音频亦能 seek
     if (sIdx < 0)
+        return false;
+    /* 已收到部分主流 EOS:本轮消费线程已退出,再清队列只会让它僵死;
+     * UI 此时也应在推进下一项,直接拒绝这次 seek。 */
+    if (m_eosPend < eosPrimaryCount())
         return false;
     if (ms < 0) ms = 0;
     if (m_durMs > 1000 && ms > m_durMs - 1000) ms = m_durMs - 1000;
@@ -957,21 +970,24 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
     case CxFFmpegEvFinished: {
         if (!m_running)
             break;
-        /* code: 1=video 2=audio 3=sub。以主流 EOS 判定结束:
-         * 音频排空/字幕线程可能阻塞,不能用来 gate finished。 */
+        /* code: 1=video 2=audio 3=sub。只统计主流,两者(或唯一主流)
+         * 都 drain 完才收尾;先到的先记数,并起看门狗等后到的。 */
         const int role = ev->code;
         const bool primary = (m_vIdx >= 0) ? (role == 1) : (role == 2);
         if (!primary)
             break;
-        m_running = false;
-        m_eosPend = 0;
-        if (m_fatalErr)     /* 致命读错误已走 skipOnError,避免双重推进 */
+        if (m_eosPend > 0)
+            --m_eosPend;
+        if (m_eosPend > 0) {
+            if (m_eosTimer == 0) {
+                m_eosTimer = new QTimer(this);
+                QObject::connect(m_eosTimer, SIGNAL(timeout()),
+                                 this, SLOT(onEosWatchdog()));
+            }
+            m_eosTimer->start(3000);
             break;
-        if (!m_subCur.isEmpty()) { // 收尾清屏
-            m_subCur = QString();
-            emit subtitleChanged(QString());
         }
-        emit finished();
+        finishEos();
         break;
     }
     case CxFFmpegEvSeekDone:
@@ -990,8 +1006,12 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
         }
         break;
     case CxFFmpegEvError:
-        if (ev->code != (int)CxErrSeek)   /* seek 超界非致命;其它视为致命读错误 */
+        if (ev->code != (int)CxErrSeek) { /* seek 超界非致命;其它视为致命读错误 */
             m_fatalErr = true;
+            if (m_eosTimer != 0)
+                m_eosTimer->stop();
+            m_eosPend = 0;                /* 后续 EOS 由 finishEos 吞掉 */
+        }
         emit noticedError(ev->code, QString("ffmpeg"));
         break;
     case CxFFmpegEvDuration:
@@ -1001,4 +1021,38 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
     default:
         break;
     }
+}
+
+/* 本次会话需要等待 EOS 的主流数量:有视频则视频+音频,纯音频则仅音频 */
+int CXEngineFfmpeg::eosPrimaryCount() const
+{
+    int n = 0;
+    if (m_vIdx >= 0 && m_vthread != 0)
+        n++;
+    if (m_athread != 0)
+        n++;
+    return n > 0 ? n : 1;   /* 兜底:任何会话都要有一个事件能收尾 */
+}
+
+void CXEngineFfmpeg::finishEos()
+{
+    if (m_eosTimer != 0)
+        m_eosTimer->stop();
+    m_eosPend = 0;
+    if (!m_running)
+        return;
+    m_running = false;
+    if (m_fatalErr)     /* 致命读错误已走 skipOnError,避免双重推进 */
+        return;
+    if (!m_subCur.isEmpty()) { // 收尾清屏
+        m_subCur = QString();
+        emit subtitleChanged(QString());
+    }
+    emit finished();
+}
+
+void CXEngineFfmpeg::onEosWatchdog()
+{
+    /* AO drain 卡死兜底:宁可少等,不能让连播永久停住 */
+    finishEos();
 }

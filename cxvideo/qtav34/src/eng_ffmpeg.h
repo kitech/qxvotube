@@ -25,11 +25,14 @@ class CxClock;
 class CxPacketQueue;
 class AVFormatContext;
 class CxFFmpegUiEvent;
+class QTimer;
 struct CxFFmpegOpenCtx;      // 异步打开上下文(eng_ffmpeg.cpp 内定义)
 class CxFFmpegOpenThread;    // 异步打开线程(eng_ffmpeg.cpp 内定义)
 
 class CXEngineFfmpeg : public CXEngine {
     Q_OBJECT
+private slots:
+    void onEosWatchdog();   // AO drain 卡死兜底:到点强制收尾
 public:
     const char* name() const { return "ffmpeg"; }
     bool isAvailable() const { return true; }
@@ -107,6 +110,8 @@ private:
     void cancelOpen();                       // 作废/回收在途异步 open
     void resetOpenState(const QString& url); // 重置本次打开状态
     void dispatchEvent(const CxFFmpegUiEvent* ev);
+    int eosPrimaryCount() const;  // 本次会话需等待的主流数(视频/音频)
+    void finishEos();             // 全部主流排空后统一收尾(防重入)
     void cxScanSub(long ms); // 字幕轴查询/变化即 emit(仅 UI 线程)
     bool reopenAt(long posMs, bool wasPlaying); // 换轨重启
 
@@ -133,8 +138,9 @@ private:
     int m_sIdx;
     int m_seekPend;
     long m_seekTarget;      /* 本次 seek 目标(丢弃迟到旧帧事件) */
-    int m_eosPend; // 活动线程 EOS 计数(视频+音频+字幕都完才 finished)
+    int m_eosPend; // 待到达的主流 EOS 数(各自 drain 完才减;字幕不参与)
     bool m_fatalErr;        // 本次会话出现过致命读错误(避免 finished 与 skip 双推进)
+    QTimer* m_eosTimer;     // EOS 看门狗(3s;防 AO drain 阻塞导致不连播)
     int m_aCount;
     int m_sCount;
     int m_audioPrompt; // 换轨重启时按枚举序挑第 N 个音轨(-1=默认首个;-2=关)
