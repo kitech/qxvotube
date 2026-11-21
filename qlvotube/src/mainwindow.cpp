@@ -2131,6 +2131,9 @@ void MainWindow::switchToPlayerView(bool on)
 /* 列表页/播放页判据(Qt3 QWidgetStack / Qt4 QStackedWidget) */
 bool MainWindow::isPlayerViewActive() const
 {
+    /* 视频全屏时 videoPane 已脱离中栏,仍属播放页 */
+    if (m_videoFullscreen)
+        return true;
     if (centerStack == 0 || videoPane == 0)
         return false;
 #ifdef QT3_BUILD

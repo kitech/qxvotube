@@ -423,11 +423,13 @@ void PlayerBar::paintEvent(QPaintEvent*)
     if (m_hasTrack && ((m_maxBytes > 0 && m_bufferedBytes > 0)
                        || (m_durationMs > 0 && m_bufferedMs > 0))) {
         int br = 0;
-        if (m_maxBytes > 0 && m_bufferedBytes > 0)
-            br = (int)((double)m_bufferedBytes / m_maxBytes * pr.width());
-        else
+        /* 有时长(VOD):按已读入的时间点画,才是"已缓冲到哪";
+         * 直播/未知时长:退回队列字节占比 */
+        if (m_durationMs > 0 && m_bufferedMs > 0)
             br = (int)((double)qMin(m_bufferedMs, (long)m_durationMs)
                        / m_durationMs * pr.width());
+        else if (m_maxBytes > 0 && m_bufferedBytes > 0)
+            br = (int)((double)m_bufferedBytes / m_maxBytes * pr.width());
         br = qBound(0, br, pr.width());
         if (br > 0) {
             const QColor& a = pal.accent;
