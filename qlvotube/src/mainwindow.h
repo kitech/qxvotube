@@ -180,6 +180,10 @@ private:
     long long m_lastPosWallMs = 0;   /* 上次位置变化的墙钟(ms) */
     int m_stallSec = -1;             /* 已展示的停滞秒数(-1=未展示) */
     bool m_stallRetried = false;     /* 停滞自动恢复是否已尝试 */
+    long m_netRecoverPos = -1;       /* 中途断流待重连位置(ms),-1=无 */
+    /* 当前播放来源:决定 advanceNext 走哪条队列(修复 argv 被恢复队列抢占) */
+    enum PlaySource { SrcNone, SrcVideoQueue, SrcArgv, SrcPlaylist };
+    PlaySource m_playSource = SrcNone;
     long m_seekPendingTarget = -1;   /* 长按 seek:合并中的目标(ms),-1=无 */
     long long m_seekLastIssueMs = 0; /* 上次真正提交 seek 的墙钟(ms) */
     void* m_seekTimer = nullptr;     /* QTimer*:150ms 合并提交 */

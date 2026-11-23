@@ -32,6 +32,20 @@
 // ─────────────────────────────────────────────────────────────
 const int kcxFFmpegOpenEventRaw = 4005;
 
+/* 网络抖动:HTTP 断流重连 + IO 超时(非 http 协议会忽略这些选项)。
+ * 不设 reconnect_at_eof:VOD 正常结尾不能被当成错误反复重连。 */
+static void cxSetNetResilience(AVDictionary** opts)
+{
+    av_dict_set(opts, "reconnect", "1", 0);
+    av_dict_set(opts, "reconnect_streamed", "1", 0);
+    av_dict_set(opts, "reconnect_on_network_error", "1", 0);
+    av_dict_set(opts, "reconnect_on_http_error", "5xx", 0);
+    av_dict_set(opts, "reconnect_delay_max", "4", 0);
+    av_dict_set(opts, "reconnect_max_retries", "4", 0);
+    av_dict_set(opts, "reconnect_delay_total_max", "20", 0);
+    av_dict_set(opts, "rw_timeout", "12000000", 0);   // 12s 读超时
+}
+
 struct CxFFmpegOpenCtx {
     CxFFmpegOpenCtx() : gen(0), cancel(false), pAbort(0), sinkAlive(true), sink(0) {}
     QString url;
@@ -74,6 +88,7 @@ public:
         if (!hdr.empty()) av_dict_set(&opts, "headers", hdr.c_str(), 0);
         if (!ctx->net.proxy.isEmpty())
             av_dict_set(&opts, "http_proxy", qToUtf8(ctx->net.proxy).data(), 0);
+        cxSetNetResilience(&opts);
         AVFormatContext* fmt = avformat_alloc_context();
         int rc = -1;
         if (fmt != 0) {
@@ -127,6 +142,13 @@ void CXEngineFfmpeg::resetOpenState(const QString& url)
     if (m_eosTimer != 0)
         m_eosTimer->stop();
     m_eosPend = 0;
+    /* 丢弃上一会话仍排在事件队列里的媒体事件(EOS/Error 等),
+     * 避免陈旧 finished 打到新视频上造成“没播完就跳下一集”。 */
+#ifdef QT3_BUILD
+    QApplication::removePostedEvents(this);   /* Qt3 只有不带类型的公开接口 */
+#else
+    QApplication::removePostedEvents(this, toEventType34(kcxFFmpegEventRaw));
+#endif
     m_url = url;
     m_paused = false;
     m_running = false;
@@ -165,6 +187,7 @@ bool CXEngineFfmpeg::open(const QString& url)
     if (!m_net.proxy.isEmpty())
         av_dict_set(&opts, "http_proxy",
                     qToUtf8(m_net.proxy).data(), 0);
+    cxSetNetResilience(&opts);
     const int openRc = avformat_open_input(&fmt, ba.data(), 0, &opts);
     if (opts) av_dict_free(&opts);
     if (openRc < 0) {
@@ -1020,6 +1043,9 @@ void CXEngineFfmpeg::dispatchEvent(const CxFFmpegUiEvent* ev)
                 m_eosTimer->stop();
             m_eosPend = 0;                /* 后续 EOS 由 finishEos 吞掉 */
         }
+        if (getenv("QLVOTUBE_DEBUG") != 0)
+            qDebug("engine error: code=%d pos=%ld dur=%ld",
+                   ev->code, m_curMs, m_durMs);
         emit noticedError(ev->code, QString("ffmpeg"));
         break;
     case CxFFmpegEvDuration:
@@ -1056,6 +1082,9 @@ void CXEngineFfmpeg::finishEos()
         m_subCur = QString();
         emit subtitleChanged(QString());
     }
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+        qDebug("eos: pos=%ld dur=%ld v=%d a=%d fatal=%d",
+               m_curMs, m_durMs, m_vIdx, m_aIdx, int(m_fatalErr));
     emit finished();
 }
 

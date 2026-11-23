@@ -1057,6 +1057,8 @@ void MainWindow::showTrackStub(int playlistId, int trackIndex)
     const Playlist* pl = findPlaylist(m_library, playlistId);
     if (!pl) return;
     if (trackIndex < 0 || trackIndex >= (int)pl->tracks.size()) return;
+    m_playSource = SrcPlaylist;
+    m_netRecoverPos = -1;
 
     const Track& t = pl->tracks[trackIndex];
     m_curPlaylistId = playlistId;
@@ -1154,6 +1156,8 @@ void MainWindow::playArgvAt(int idx)
         return;
     }
     m_argvIdx = idx;
+    m_playSource = SrcArgv;
+    m_netRecoverPos = -1;
     /* 候选项 a:argv 播放列表持久化(仅 argv 列表,不做库列表) */
     Config::setValue("argv_playlist", m_argvUrls.join("\n"));
     Config::setValue("argv_idx", QString::number(idx));
@@ -1778,6 +1782,8 @@ void MainWindow::enterVideoMode(int index)
 void MainWindow::playVideoAt(int index)
 {
     if (index < 0 || index >= (int)m_videoIds.size()) return;
+    m_playSource = SrcVideoQueue;
+    m_netRecoverPos = -1;
     const QString id = m_videoIds[index];
 
     /* 网络电视旁路:跳过 provider resolve,直接把 m3u8 直链交播放器。
@@ -2096,6 +2102,15 @@ void MainWindow::onPlayPause()
 {
     if (m_player == 0 || m_player->engine() == 0) {
         SharedStatusBar::instance()->showMessage(qFromUtf8("播放引擎未接入"), 2000);
+        return;
+    }
+    /* 中途断流后:空格 = 从断点重连当前项,而不是空 play() */
+    if (m_netRecoverPos >= 0) {
+        const long p = m_netRecoverPos;
+        m_netRecoverPos = -1;
+        m_playFinished = false;
+        m_pendingSeekMs = (int)p;
+        replayCurrent();
         return;
     }
     if (m_player->state() == CxPlaying)
@@ -2501,7 +2516,8 @@ bool MainWindow::skipOnError(const QString& why)
  * fromAuto=true 自然播完仅 repeat=all 环绕;shuffle 随机≠当前。 */
 void MainWindow::advanceNext(bool fromAuto)
 {
-    if (m_videoMode && !m_videoIds.empty()) {
+    if (m_playSource != SrcArgv && m_playSource != SrcPlaylist
+        && m_videoMode && !m_videoIds.empty()) {
         const int n = (int)m_videoIds.size();
         if (m_shuffle && n > 1) {
             int nx = m_videoIdx;
@@ -2524,7 +2540,9 @@ void MainWindow::advanceNext(bool fromAuto)
         playVideoAt(nx);
         return;
     }
-    if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
+    if (!m_argvUrls.isEmpty()
+        && (m_playSource == SrcArgv
+            || (m_playSource == SrcNone && m_curPlaylistId < 0))) {
         const int n = (int)m_argvUrls.size();
         if (m_repeatMode == 2 && m_argvIdx >= 0) { playArgvAt(m_argvIdx); return; }
         int nx = m_argvIdx + 1;
@@ -2626,11 +2644,31 @@ void MainWindow::onDownloadCurrent()
 void MainWindow::onPlayerFinished()
 {
     m_playFinished = true;    /* 记录自然播完,供 onPlayPause 从头重播 */
+    /* 先取 pos,后面会清 m_lastPosMs */
+    const long pos = (m_lastPosMs >= 0) ? m_lastPosMs
+                                        : (m_player ? m_player->position() : 0);
+    long metaDur = 0;
+    if (m_playSource == SrcVideoQueue && m_videoMode && m_videoIdx >= 0
+        && m_videoIdx < (int)m_videoQueue.size())
+        metaDur = m_videoQueue[m_videoIdx].durationMs;
+    const long dur = m_durMs > 0 ? m_durMs : metaDur;
     m_stallSec = -1;
     m_lastPosMs = -1;
     if (playerBar) playerBar->setPlaying(false);
     if (m_bufTimer != 0) ((QTimer*)m_bufTimer)->stop();
     if (playerBar) playerBar->setBufferedMs(0);
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+        qDebug("finished: pos=%ld dur=%ld meta=%ld src=%d",
+               pos, dur, metaDur, (int)m_playSource);
+    /* 位置明显没到结尾:视为流被截断/元数据偏差,停止自动连播并可断点重连 */
+    if (dur > 3000 && pos + 2000 < dur) {
+        m_netRecoverPos = pos;
+        SharedStatusBar::instance()->showMessageTyped(
+            qFromUtf8("播放意外结束（%1/%2）：空格从断点重连，N 播下一集")
+                .arg(pos / 1000).arg(dur / 1000),
+            StatusError, 8000);
+        return;
+    }
     advanceNext(true);   /* 自然播完:仅 repeat=all 环绕(qlmusic 语义) */
 }
 
@@ -2697,10 +2735,13 @@ void MainWindow::onListRefresh()
 
 void MainWindow::replayCurrent()
 {
-    if (m_videoMode && !m_videoIds.empty() && m_videoIdx >= 0
+    if (m_playSource != SrcArgv && m_playSource != SrcPlaylist
+        && m_videoMode && !m_videoIds.empty() && m_videoIdx >= 0
         && m_videoIdx < (int)m_videoIds.size()) {
         playVideoAt(m_videoIdx);
-    } else if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0
+    } else if (!m_argvUrls.isEmpty()
+               && (m_playSource == SrcArgv
+                   || (m_playSource == SrcNone && m_curPlaylistId < 0))
                && m_argvIdx >= 0 && m_argvIdx < (int)m_argvUrls.size()) {
         playArgvAt(m_argvIdx);
     } else if (m_curPlaylistId >= 0 && m_curTrackIndex >= 0) {
@@ -2997,6 +3038,24 @@ void MainWindow::onPlayerError(int code, const QString& msg)
     SharedStatusBar::instance()->showMessageTyped(msg, StatusError, 4000);
     if (code == (int)CxErrAudio || code == (int)CxErrSeek)
         return;   /* 非致命:音频回退 silent / seek 超界,不自动跳集 */
+    const long dur = m_durMs > 0 ? m_durMs
+                                 : (m_player ? m_player->duration() : 0);
+    const long pos = (m_lastPosMs >= 0) ? m_lastPosMs
+                                        : (m_player ? m_player->position() : 0);
+    /* 已播一段后的引擎读错误:一律停在断点,不替用户跳集 */
+    if (code == (int)CxErrEngine && pos > 3000) {
+        m_netRecoverPos = pos;
+        if (m_player != 0) m_player->pause();
+        if (getenv("QLVOTUBE_DEBUG") != 0)
+            qDebug("net error: pos=%ld dur=%ld -> wait retry", pos, dur);
+        SharedStatusBar::instance()->showMessageTyped(
+            qFromUtf8("播放中断（已播 %1/%2）：空格从断点重连，N 播下一集")
+                .arg(pos / 1000).arg(dur / 1000),
+            StatusError, 8000);
+        return;
+    }
+    if (getenv("QLVOTUBE_DEBUG") != 0)
+        qDebug("error skip: code=%d pos=%ld dur=%ld", code, pos, dur);
     skipOnError(msg);   /* autoskip 开:换下一项;关闭则停在错误上 */
 }
 
@@ -3023,12 +3082,15 @@ void MainWindow::onSeekRequested(int ms)
 
 void MainWindow::onPrev()
 {
-    if (m_videoMode && !m_videoIds.empty()) {
+    if (m_playSource != SrcArgv && m_playSource != SrcPlaylist
+        && m_videoMode && !m_videoIds.empty()) {
         const int n = (int)m_videoIds.size();
         playVideoAt((m_videoIdx - 1 + n) % n);   /* 回绕,与音频一致 */
         return;
     }
-    if (!m_argvUrls.isEmpty() && m_curPlaylistId < 0) {
+    if (!m_argvUrls.isEmpty()
+        && (m_playSource == SrcArgv
+            || (m_playSource == SrcNone && m_curPlaylistId < 0))) {
         playArgvAt(m_argvIdx - 1);   /* 到头回绕 */
         return;
     }

@@ -8,6 +8,7 @@
 #include <qmutex.h>
 #include <qwaitcondition.h>
 #include <qapplication.h>
+#include <stdlib.h>          // getenv
 
 // 解包线程(detail.md §5:av_read_frame 循环;EOS 双投;停位唤醒)
 // M3-A:第三队列(字幕流,文本型)——sq/sIdx 传 0/-1 即旧行为
@@ -75,6 +76,10 @@ protected:
                 continue;            // 重新取包(marker 已入队)
             int r = av_read_frame(fmtCtx, pkt);
             if (r < 0) {
+                if (getenv("QLVOTUBE_DEBUG") != 0)
+                    qDebug("demux: read=%d eof=%d buffered=%ld",
+                           r, int(r == AVERROR_EOF),
+                           (long)(m_bufferedMs));
                 // EOF = 正常收尾;其它错误上报(不再静默当 EOF 吞掉)
                 if (r != AVERROR_EOF && sink != 0)
                     qApp->postEvent(sink, new CxFFmpegUiEvent(
@@ -201,20 +206,30 @@ private:
         pkt = 0; // 所有权已交队列
     }
 
-    /* 音视频推包最多等 500ms:超时丢弃该包并回循环顶部,
-     * 保证一路队满时不会饿死另一路、也不会让 seek 永远排不上。 */
+    /* 音视频推包:队列满时最多等 500ms;只有 seek 挂起或停止时才丢弃该包。
+     * 暂停/慢消费时**不主动丢数据**,否则 demux 会一路读到 EOF 制造假 EOS。 */
     void pushPktWait(CxPacketQueue* q, AVPacket*& pkt, int streamIdx)
     {
         CxPkt p;
         p.pkt = pkt;
         p.streamIdx = streamIdx;
         p.eos = false;
-        if (q->pushTimeout(p, 500)) {
-            pkt = 0;              // 所有权交队列
-            return;
+        while (!stopFlag) {
+            if (q->pushTimeout(p, 500)) {
+                pkt = 0;          // 所有权交队列
+                return;
+            }
+            if (seekPending())    // seek 优先:丢弃本包,回循环顶部处理
+                break;
         }
-        av_packet_free(&p.pkt);   // 队列持续满:丢弃,等下一关键帧重建
+        av_packet_free(&p.pkt);
         pkt = 0;
+    }
+
+    bool seekPending()
+    {
+        QMutexLocker lk(&seekMx);
+        return seekReq;
     }
 
     void postEos()
