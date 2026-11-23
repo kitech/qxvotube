@@ -217,11 +217,11 @@ while(!stop):
 - **新增文件**(src/):
   - `cxffclock.h`:`CxClock`(QMutex+QWaitCondition;value/updateValue/setSpeed/waitAndCheck(delay/speed)/interrupt/reset;header-only);
   - `cxffdeca.{h,cpp}`:`CxDecoderAudio`——decode 同 CxDecoder m_out/stash 契约;convert(in,outCh,outRate) 用 swr→交错 S16 写内部 av_malloc arena(按 `swr_get_out_samples` 上界,增长复用),convertFlush 冲洗;flush 重建 swr;按 **传入帧** 的 ch_layout/format/sample_rate 建 swr;
-  - `cffao.{h,cpp}`:`CXAudioOut` 抽象(open/write 阻塞/pause/resume/clear/latencyMs/drain/close + outCh/outRate);silent 恒编(实时节流虚拟延迟,`gettimeofday` 时钟);工厂 `cffaoCreate(want)`:**auto=alsa→pulse→sdl→silent**(Linux ALSA 直通最稳;pulse-simple 阻塞写不可中断,列为次级/显式;SDL 跨平台兜底;CI 无设备落 silent);
+  - `cffao.{h,cpp}`:`CXAudioOut` 抽象(open/write 阻塞/pause/resume/clear/latencyMs/drain/close + outCh/outRate);silent 恒编(实时节流虚拟延迟,`gettimeofday` 时钟);工厂 `cffaoCreate(want)`:**auto=alsa→pulse→sdl→silent**(Linux ALSA 直通最稳;pulse-simple 阻塞写不可中断,列为次级/显式;SDL 跨平台兜底;CI 无设备落 silent)。ALSA 目标延迟默认 200ms(原 500ms),`QXVOTUBE_AO_LATENCY_MS` 可覆盖,失败回退 500ms。
   - `cffao_pulse.cpp`/`cffao_alsa.cpp`/`cffao_sdl.cpp`:宏门控 `WITH_CX_FF_AO_PULSE/ALSA/SDL`;SDL push 水位 ≈120ms 轮询(带等待上限,防 device 暂停卡死);
   - `cxffathread.{h,cpp}`:`CXFFmpegAudioThread`——take→decode(负 pts 钳 0)→convert→≈40ms 分块 writeScaled(软音量/静音 int16 缩放)→`clock.updateValue`+post `CxFFmpegEvAudioPos`;倍速按块丢弃/复写补偿(m_skipAcc/m_dupAcc);EOS→convertFlush 残余→`ao->drain()`→Finished。
 - **修改**:
-  - `cxffvthread.h`:emitFrame 主时钟分支——每帧重算 `target=pts−ao->latencyMs()`,未到则 ≤100ms 打盹由 clock 唤醒重算;无音频回退 M2.0 盲等;新增 setClock/setAo;事件枚举增 `CxFFmpegEvAudioPos=6`;
+  - `cxffvthread.h`:emitFrame 主时钟分支——每帧重算 `played = written − ao->latencyMs()`,`remain = pts − played`,未到则 ≤100ms 打盹由 clock 唤醒重算;无音频回退 M2.0 盲等;`CxFFmpegEvAudioPos` 发已播放位置;
   - `eng_ffmpeg.{h,cpp}`:m_adec/m_athread/m_ao/m_clock/m_seekPend/m_eosPend;open 建音频链(adec init 失败→aIdx=-1 降级;AO open 失败→silent 兜底并发非致命 CxErrAudio);seek 用 `sIdx=vIdx≥0?vIdx:aIdx`(纯音频可 seek),flush 双解码器+双队列 reset+ao clear+clock reset,双线程 setRenderPts0;setRate/setVolume/setMute 接入 athread;`aoBackend()` 访问器;finished 由 m_eosPend 计数(视频+音频皆完),SeekDone 由 m_seekPend 防重;AudioPos 仅在纯音频时驱动 positionChanged;stopThreads 顺序 vthread→athread→demux→queues→dec/adec→ao→clock→fmt,**athread wait 超时(不可中断后端)则泄漏该组对象而非 delete 运行中线程**;
   - `cxvideo.pri`:FF_DEPS/FF_CFLAGS 增 **libswresample**;AO 后端 pkg-config 探测(命中才编入+宏);新增 7 源/5 头;
   - `cxff_wrap.h`:补 swresample/avutil opt/channel_layout;
@@ -572,6 +572,40 @@ M0 落 `cxvideo_global.h/cxthread/cxengine.h/cxvideoplayer.h` stub(接口可链�
 - 网络/登录/风控/会员/地区类解析错误 → 停住提示,不自动跳;
 - 404/410、重试后仍 403、Unsupported → 才自动下一条(≤3 次,间隔 600ms);
 - 停滞看门狗:8s 自动 seek 一次,20s 仍无进展则暂停并给出可操作提示。
+
+## 音画同步(2026-11-23)
+
+**主时钟 = 音频已播放位置**,不是“已写入位置”:
+```
+written = 已写入 AO 的媒体时间(音频线程 40ms 块推进)
+played  = written - ao->latencyMs()        // ALSA snd_pcm_delay / Pulse get_latency / SDL 队列
+video   在 pts 到达 played 时送显
+```
+- 早期实现写成 `remain = pts - latency - written`,等于把视频提前约 2×latency;
+  ALSA 500ms 缓冲时可差近 1 秒。已改为与 ffplay/HarmonyOS/ExoPlayer 一致的
+  “减延迟”公式。
+- 时钟未初始化(open/seek 后 `value < 0`)时视频只等待,不算“停摆”;
+  3s 仍无时钟才回退帧节拍。
+- 设备延迟读数本身有抖动/可能无效(ALSA `snd_pcm_avail_delay` 非原子、Pulse 插件
+  可能报 `PA_ERR_NODATA`):音频线程对 `latencyMs()` 做 EMA 平滑后写入
+  `played`;`CxClock::playedNow()` 在两次写入之间按墙钟插值(上限 40ms),
+  避免 40ms 阶梯。
+- 丢帧阈值按帧间隔自适应:`1.5 × frameDur`,钳到 **40~100ms**
+  (25fps≈60ms);晚于阈值才丢帧,`QLVOTUBE_DEBUG` 下每秒最多一条:
+  `avsync drop: pts=… played=… late=…ms dropLate=… window=… total=…`;
+  正常每秒汇总 `avsync: pts=… written=… played=… diff=… dropLate=…`。
+- 视频落后但未到丢帧阈值时**跳过 emit-gap 限速**,允许自然追平;
+  落后 >250ms 视为时钟异常,仍保留限速防事件洪水。
+- 纯音频进度事件改为发 `played`,避免进度条领先声音。
+
+同步诊断日志(均需 `QLVOTUBE_DEBUG`,限流):
+- `avsync` 每秒汇总:`pts/written/played/diff/dropLate/drop/s/total`;
+- `avsync drop` 丢帧(1s):`late/dropLate/window/total`;
+- `avsync warn ahead|late` 持续不同步(连续 2 次、2s):`diff/dropLate`;
+- `avsync clock stalled` 主时钟 500ms 不前进(5s):`played/frozen`;
+- `avsync clock wait timeout` 启动/seek 后 3s 无音频时钟(每会话一次);
+- `avsync latency invalid` 设备延迟越界/异常(每会话一次,含 backend);
+- `avsync summary` 线程退出:`frames/drops/avg|diff|`。
 
 ## EOS 结束判定(连播稳定性,2026-11-20;2026-11-23 修订)
 

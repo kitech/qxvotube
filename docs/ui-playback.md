@@ -15,6 +15,12 @@
   `player.volume`/`player.mute` 持久化。
 - 下载 pie:0-100 扇形 / -1 未定 / -2 失败红斜杠 / 100 后 1.2s 自动隐。
 
+音画同步:以音频“已播放位置”(written − AO latency)为主时钟;
+晚于阈值(1.5×帧间隔,40~100ms)才丢帧,落后未达阈值时跳过限速自然追平。
+`QLVOTUBE_DEBUG=1` 可见 `avsync` 汇总与 `avsync drop`。
+另有 `avsync warn ahead|late`(持续不同步)、`clock stalled/wait timeout`、
+`latency invalid` 与退出时 `avsync summary`，便于用户上报时定位。
+
 ## 播放错误与自动下一条(2026-11-23)
 
 分层策略(与 ExoPlayer/主流视频 App 对齐:网络类错误不自动切集):

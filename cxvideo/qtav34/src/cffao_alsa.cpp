@@ -1,6 +1,7 @@
 #ifdef WITH_CX_FF_AO_ALSA
 #include "cffao.h"
 #include <alsa/asoundlib.h>
+#include <stdlib.h>   // getenv/atoi
 
 // ALSA 阻塞模式(网搜核对:alsa-project PCM R/W 接口 + SO 50103858/23092895:
 // RW_INTERLEAVED + snd_pcm_set_params(latency≈500ms)、writei 短写循环、
@@ -14,12 +15,30 @@ public:
 
     bool open(int ch, int rate)
     {
+        /* 默认 200ms(500ms 会给音画同步留下过大的绝对值);
+         * QXVOTUBE_AO_LATENCY_MS 可覆盖;失败回退 500ms 兼容老插件。 */
+        unsigned int latUs = 200000;
+        const char* e = getenv("QXVOTUBE_AO_LATENCY_MS");
+        if (e != 0 && *e != 0) {
+            int ms = atoi(e);
+            if (ms >= 40 && ms <= 1000)
+                latUs = (unsigned int)ms * 1000;
+        }
+        if (openWithLatency(ch, rate, latUs))
+            return true;
+        if (latUs != 500000 && openWithLatency(ch, rate, 500000))
+            return true;
+        return false;
+    }
+
+    bool openWithLatency(int ch, int rate, unsigned int latUs)
+    {
         if (snd_pcm_open(&m_h, "default", SND_PCM_STREAM_PLAYBACK, 0) < 0)
             return false;
         if (snd_pcm_set_params(m_h, SND_PCM_FORMAT_S16_LE,
                                SND_PCM_ACCESS_RW_INTERLEAVED,
                                (unsigned int)ch, (unsigned int)rate,
-                               1, 500000) < 0) {
+                               1, latUs) < 0) {
             close();
             return false;
         }

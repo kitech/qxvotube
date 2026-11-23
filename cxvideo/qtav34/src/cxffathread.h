@@ -25,7 +25,7 @@ public:
           stopFlag(false), paused(false), renderPts0(-1),
           volumePermil(1000), muted(false), rate(1.0),
           m_skipAcc(0), m_dupAcc(0), m_lastMs(-1),
-          m_blkBuf(0), m_blkCap(0)
+          m_blkBuf(0), m_blkCap(0), m_latEma(-1), m_latWarned(false)
     {
     }
 
@@ -69,6 +69,7 @@ private:
     void ensureBuf(int bytes);
     void post(int ev, long ms);
     void tailFlush();
+    int takeLatency();      // 读取并校验设备延迟(异常仅告警一次)
 
     CxPacketQueue* aQueue;
     CxDecoderAudio* dec;
@@ -88,6 +89,8 @@ private:
     QWaitCondition paceCond;
     uint8_t* m_blkBuf;
     int m_blkCap;
+    double m_latEma;   // 平滑后的设备未播延迟(ms)
+    bool m_latWarned;  // latency 异常是否已记录
 };
 
 #endif // CXFFATHREAD_H

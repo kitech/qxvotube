@@ -3,12 +3,21 @@
 
 #include <qmutex.h>
 #include <qwaitcondition.h>
+#include <sys/time.h>
 #include "limelog.h"
+
+inline long long cxClockNowUs()
+{
+    struct timeval tv;
+    gettimeofday(&tv, 0);
+    return (long long)tv.tv_sec * 1000000LL + tv.tv_usec;
+}
 
 // 主时钟(detail.md §5 CXClock;音频驱动:athread 写块后 updateValue 推进)
 class CxClock {
 public:
-    CxClock() : m_value(-1), m_speed(1.0), m_stopped(false), m_clampLogged(false) { }
+    CxClock() : m_value(-1), m_played(-1), m_playedUs(0),
+                m_speed(1.0), m_stopped(false), m_clampLogged(false) { }
 
     long value()
     {
@@ -16,11 +25,37 @@ public:
         return m_value;
     }
 
+    /* 已播放位置(音频线程用平滑后的 latency 换算后写入);
+     * playedNow 在两次写入之间按墙钟插值,避免 40ms 阶梯与延迟抖动。 */
+    void updatePlayed(long ms)
+    {
+        QMutexLocker lk(&mx);
+        if (ms < 0) ms = 0;
+        if (m_played >= 0 && ms < m_played - 50)
+            ms = m_played - 50;   // 限制异常回退
+        if (ms > m_played)
+            m_played = ms;
+        m_playedUs = cxClockNowUs();
+        cond.wakeAll();
+    }
+
+    long playedNow()
+    {
+        QMutexLocker lk(&mx);
+        if (m_played < 0 || m_playedUs <= 0)
+            return m_played;
+        long extra = (long)((cxClockNowUs() - m_playedUs) / 1000);
+        if (extra < 0) extra = 0;
+        if (extra > 40) extra = 40;
+        return m_played + extra;
+    }
+
     void updateValue(long ms)
     {
         QMutexLocker lk(&mx);
-        if (ms >= m_value)
+        if (ms >= m_value) {
             m_value = ms;
+        }
         cond.wakeAll(); // vthread 打盹更新重算
     }
 
@@ -67,6 +102,8 @@ public:
         QMutexLocker lk(&mx);
         m_stopped = false;
         m_value = -1;
+        m_played = -1;
+        m_playedUs = 0;
     }
 
     bool isStopped() const
@@ -79,6 +116,8 @@ private:
     mutable QMutex mx;
     QWaitCondition cond;
     long m_value;
+    long m_played;           // 已播放媒体时间(平滑 latency 后)
+    long long m_playedUs;    // m_played 的墙钟(us)
     double m_speed;
     bool m_stopped;
     bool m_clampLogged; // waitAndCheck 钳位是否已记日志(一次性)

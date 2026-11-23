@@ -142,7 +142,13 @@ bool CXFFmpegAudioThread::writePcmChunks(const uint8_t* src, int bytes,
         long endMs = baseMs +
             (long)((double)(off / bpf) * 1000.0 / aRate);
         m_clock->updateValue(endMs);
-        post(CxFFmpegEvAudioPos, endMs);
+        int lat = takeLatency();
+        if (m_latEma < 0) m_latEma = lat;
+        else m_latEma = m_latEma * 0.8 + lat * 0.2;   // 平滑设备延迟
+        long played = endMs - (long)m_latEma;
+        if (played < 0) played = 0;
+        m_clock->updatePlayed(played);
+        post(CxFFmpegEvAudioPos, played);
     }
     int rem = bytes - off;
     if (rem > 0 && !stopFlag) {
@@ -234,10 +240,30 @@ void CXFFmpegAudioThread::tailFlush()
     long endMs = (m_lastMs >= 0 ? m_lastMs : 0) +
         (long)((double)(dec->pcmBytes() / (int)bpf2) * 1000.0 / aRate);
     m_clock->updateValue(endMs);
-    post(CxFFmpegEvAudioPos, endMs);
+    int lat = takeLatency();
+    if (m_latEma < 0) m_latEma = lat;
+    else m_latEma = m_latEma * 0.8 + lat * 0.2;
+    long played = endMs - (long)m_latEma;
+    if (played < 0) played = 0;
+    m_clock->updatePlayed(played);
+    post(CxFFmpegEvAudioPos, played);
 }
 
 void CXFFmpegAudioThread::post(int ev, long ms)
 {
     QApplication::postEvent(sink, new CxFFmpegUiEvent(ev, ms, 0, 0));
+}
+
+int CXFFmpegAudioThread::takeLatency()
+{
+    int raw = (out != 0) ? out->latencyMs() : 0;
+    if ((raw < 0 || raw > 500) && !m_latWarned) {
+        m_latWarned = true;
+        if (getenv("QLVOTUBE_DEBUG") != 0)
+            qDebug("avsync latency invalid: raw=%d backend=%s",
+                   raw, out ? out->backend() : "null");
+    }
+    if (raw < 0) raw = 0;
+    if (raw > 500) raw = 500;
+    return raw;
 }

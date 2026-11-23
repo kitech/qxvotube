@@ -15,6 +15,7 @@
 #include <qobject.h>
 #include <qstring.h>
 #include <qimage.h>
+#include <stdlib.h>      // getenv
 
 // ffmpeg 自定事件(复用 M1 pump 的 CustomEventBase 模式;避开 4002 mpv)
 const int kcxFFmpegEventRaw = 4004;
@@ -52,7 +53,11 @@ public:
         : vQueue(vq), decoder(dec), sink(sink), stopFlag(false), paused(false),
           renderPts0(-1), rate(1.0), m_clock(0), m_ao(0),
           m_frameSlot(0), m_lastEmitUs(0), m_draining(false),
-          m_lastClockMs(-2), m_lastClockUs(0)
+          m_lastClockMs(-2), m_lastClockUs(0),
+          m_dropTotal(0), m_dropWindow(0), m_lastAvLogUs(0),
+          m_avWarnUs(0), m_avLateRun(0), m_avAheadRun(0),
+          m_clockWaitLogged(false), m_clockStallLogUs(0),
+          m_frameCount(0), m_absDiffSum(0), m_absDiffN(0)
     { }
 
     void requestStop() { stopFlag = true; if (m_clock) m_clock->interrupt(true); wake(); }
@@ -108,9 +113,17 @@ protected:
             if (frame != 0)
                 emitFrame(frame); // decode 契约:仅本次有效
         }
+        /* 线程退出时输出同步总结(仅 debug) */
+        if (getenv("QLVOTUBE_DEBUG") != 0)
+            qDebug("avsync summary: frames=%ld drops=%ld avg|diff|=%ldms",
+                   m_frameCount, m_dropTotal,
+                   m_absDiffN > 0 ? (long)(m_absDiffSum / m_absDiffN) : 0L);
     }
 
 private:
+    /* 丢帧阈值按帧间隔自适应:1.5×frameDur,钳到 40..100ms */
+    enum { kAvDropLateMinMs = 40, kAvDropLateMaxMs = 100 };
+
     void drain()
     {
         while (!stopFlag) {
@@ -151,6 +164,7 @@ private:
         }
 
         bool clockStalled = false;
+        long avDiff = 0;   // pts - played:>0 超前,<=0 已到/落后
         if (!m_draining && m_clock != 0 && m_ao != 0) {
             // M2.1 主时钟:帧应显示于 pts − ao 延迟(留 AO 缓冲);
             // 每轮重算,≤100ms 打盹(clock 提前唤醒即败絮新值)
@@ -162,15 +176,89 @@ private:
                     return false; // 暂停时主时钟冻结,退回 run() 顶部由 waitIfPaused() 阻塞
                 }
                 const long clk = m_clock->value();
+                const long played = m_clock->playedNow();
                 const long long nowUs = av_gettime_relative();
-                if (m_lastClockUs == 0 || clk != m_lastClockMs) {
-                    m_lastClockMs = clk;
+                if (played < 0) {
+                    /* 音频尚未起播(open/seek 后):纯等待,不判"停摆";
+                     * 3s 仍无时钟才退回帧节拍,避免无声源永久卡住 */
+                    if (m_lastClockUs == 0)
+                        m_lastClockUs = nowUs;
+                    else if (nowUs - m_lastClockUs > 3000000) {
+                        clockStalled = true;
+                        if (!m_clockWaitLogged) {
+                            m_clockWaitLogged = true;
+                            if (getenv("QLVOTUBE_DEBUG") != 0)
+                                qDebug("avsync clock wait timeout: 3000ms");
+                        }
+                        break;
+                    }
+                    if (!m_clock->waitAndCheck(100))
+                        return false;
+                    continue;
+                }
+                if (m_lastClockUs == 0 || played != m_lastClockMs) {
+                    m_lastClockMs = played;
                     m_lastClockUs = nowUs;
                 } else if (nowUs - m_lastClockUs > 500000) {
                     clockStalled = true;   /* 主时钟 500ms 不前进:音频停摆 */
+                    if (getenv("QLVOTUBE_DEBUG") != 0
+                        && nowUs - m_clockStallLogUs > 5000000) {
+                        m_clockStallLogUs = nowUs;
+                        qDebug("avsync clock stalled: played=%ld frozen=%ldms",
+                               played,
+                               (long)((nowUs - m_lastClockUs) / 1000));
+                    }
                     break;
                 }
-                long remain = (pts - m_ao->latencyMs()) - clk;
+                const long diff = pts - played;
+                avDiff = diff;
+                m_absDiffSum += (diff < 0 ? -diff : diff);
+                ++m_absDiffN;
+                /* 丢帧阈值随帧间隔:25fps≈60ms,低帧率封顶 100ms;
+                 * 晚到阈值才丢帧,继续解码追赶。日志 1s 一条。 */
+                long dropLate = (long)(dur * 1.5);
+                if (dropLate < kAvDropLateMinMs) dropLate = kAvDropLateMinMs;
+                if (dropLate > kAvDropLateMaxMs) dropLate = kAvDropLateMaxMs;
+                if (diff < -dropLate) {
+                    ++m_dropTotal;
+                    ++m_dropWindow;
+                    if (getenv("QLVOTUBE_DEBUG") != 0
+                        && nowUs - m_lastAvLogUs > 1000000) {
+                        m_lastAvLogUs = nowUs;
+                        qDebug("avsync drop: pts=%ld played=%ld late=%ldms"
+                               " dropLate=%ld window=%ld total=%ld",
+                               pts, played, -diff, dropLate,
+                               m_dropWindow, m_dropTotal);
+                        m_dropWindow = 0;
+                    }
+                    return false;
+                }
+                if (getenv("QLVOTUBE_DEBUG") != 0
+                    && nowUs - m_lastAvLogUs > 1000000) {
+                    m_lastAvLogUs = nowUs;
+                    qDebug("avsync: pts=%ld written=%ld played=%ld"
+                           " diff=%ld dropLate=%ld drop/s=%ld total=%ld",
+                           pts, clk, played, diff, dropLate,
+                           m_dropWindow, m_dropTotal);
+                    m_dropWindow = 0;
+                }
+                /* 持续不同步告警:跳过启动前 ~2s;连续 2 次采样;2s 限流 */
+                if (m_frameCount > 50) {
+                    if (diff < -100) ++m_avLateRun; else m_avLateRun = 0;
+                    if (diff > 100) ++m_avAheadRun; else m_avAheadRun = 0;
+                    if ((m_avLateRun >= 2 || m_avAheadRun >= 2)
+                        && getenv("QLVOTUBE_DEBUG") != 0
+                        && nowUs - m_avWarnUs > 2000000) {
+                        m_avWarnUs = nowUs;
+                        qDebug("avsync warn %s: pts=%ld played=%ld"
+                               " diff=%+ldms dropLate=%ld",
+                               m_avAheadRun >= 2 ? "ahead" : "late",
+                               pts, played, diff, dropLate);
+                        m_avLateRun = 0;
+                        m_avAheadRun = 0;
+                    }
+                }
+                long remain = diff;
                 if (remain <= 0)
                     break;
                 long nap = (remain > 100) ? 100 : remain;
@@ -186,11 +274,16 @@ private:
             if (!waitPace((long)(dur / rate)))
                 return false; // 音频缺席回退 M2.0
         }
+        /* 视频已落后但未达丢帧阈值:跳过 emit-gap 限速,让画面自然追平。
+         * 落后过多(>250ms)时仍保留限速,防止“主时钟异常偏高”导致全速出帧
+         * 把 QImage 事件队列打爆(该限速原本就是为此加的)。 */
+        const bool avCatchup = (avDiff < -5 && avDiff > -250);
         // 第一层防护:自适应出帧下限。HLS 分段回退/主时钟卡高时 remain 恒<=0,
         // 原路径零等待全速出帧 → QImage 事件队列暴涨(2-3G)+UI 冻结无法暂停。
         // 用单调墙钟限制相邻出帧间隔,与时钟值解耦;dur 自适应片源帧率并钳
         // 到 10..100ms(ffplay 同款),倍速时按比例缩短,不牺牲正常/倍速播放。
-        if (!m_draining && !clockStalled && m_clock != 0 && m_ao != 0 && m_lastEmitUs > 0) {
+        if (!m_draining && !clockStalled && !avCatchup
+            && m_clock != 0 && m_ao != 0 && m_lastEmitUs > 0) {
             int gap = (int)dur;
             if (gap < 10) gap = 10;
             if (gap > 100) gap = 100;
@@ -214,6 +307,7 @@ private:
         QImage img = decoder->convert(frame);
         if (img.isNull())
             return false;
+        ++m_frameCount;
 
         // 第二层防护:帧入最新帧槽,只投一条轻量通知事件(不携带 QImage)。
         // 槽里新帧覆盖旧帧,事件队列恒定 O(1);UI 卡顿/暂停时不再被帧淹没。
@@ -254,8 +348,19 @@ private:
     CxLatestFrameSlot* m_frameSlot; // 引擎持有,生命周期长于本线程
     long long m_lastEmitUs;         // 上次出帧单调墙钟(us),出帧限速兜底
     volatile bool m_draining;       // EOS 尾帧排空:跳过 pacing,避免等冻结音频时钟
-    long m_lastClockMs;             // 上次观察到的音频主时钟值
+    long m_lastClockMs;             // 上次观察到的已播放位置
     long long m_lastClockUs;        // 该值最近变化的墙钟(0=未初始化)
+    long m_dropTotal;               // 累计丢帧数
+    long m_dropWindow;              // 本秒窗口丢帧数
+    long long m_lastAvLogUs;        // 上一条 avsync 日志墙钟(1s 限流)
+    long long m_avWarnUs;           // 持续不同步告警限流(2s)
+    long m_avLateRun;               // 连续落后采样数
+    long m_avAheadRun;              // 连续超前采样数
+    bool m_clockWaitLogged;         // 启动 3s 无时钟已记录
+    long long m_clockStallLogUs;    // 时钟停摆日志限流(5s)
+    long m_frameCount;              // 实际送显帧数
+    long long m_absDiffSum;         // |diff| 累计(结束总结)
+    long m_absDiffN;                // |diff| 采样数
 };
 
 #endif // CXFFVTHREAD_H
