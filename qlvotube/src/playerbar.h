@@ -23,7 +23,7 @@ public:
     /* 播放模式(qlmusic 同款) */
     void setRepeatMode(int mode);        /* 0=off 1=all 2=one */
     void setShuffle(bool on);
-    void setAutoSkip(bool on);           /* 播放失败自动跳过 */
+    void setAutoSkipUnplayable(bool on); /* 无法播放时自动下一条 */
     /* 下载进度 pie:0-100 / -1 未定 / -2 失败 / 100 完成(短暂留痕后隐) */
     void setDownloadState(int pct);
     /* 缓冲信息:比例=已缓冲字节/后端上限;秒数/字节/速度同刷新;常驻显示 */
@@ -55,7 +55,7 @@ signals:
     void subtitleListRequested(); /* 点击底部字幕行 → 打开字幕列表 */
     void repeatClicked();
     void shuffleClicked();
-    void autoSkipClicked();
+    void autoSkipUnplayableClicked();
 
 protected:
     void paintEvent(QPaintEvent* e);
@@ -73,7 +73,7 @@ private slots:
 private:
     enum Hit { HitNone, HitPrev, HitPlay, HitNext, HitProgress,
                HitVol, HitRate, HitRotate, HitEq, HitShot, HitSub, HitDownload, HitBuffered,
-               HitRepeat, HitShuffle, HitAutoSkip, HitSubLine };
+               HitRepeat, HitShuffle, HitAutoSkipUnplayable, HitSubLine };
     void setProgressFromX(int x);
     QRect coverRect() const;
     QRect titleRect() const;
@@ -89,7 +89,7 @@ private:
     QRect ccRect() const;
     QRect repeatRect() const;
     QRect shuffleRect() const;
-    QRect autoSkipRect() const;
+    QRect autoSkipUnplayableRect() const;
     QRect subtitleLineRect() const;
     QRect downloadRect() const;
     QRect bufferedRect() const;
@@ -107,7 +107,7 @@ private:
     bool m_muted;
     int m_repeatMode;
     bool m_shuffle;
-    bool m_autoSkip;
+    bool m_autoSkipUnplayable;
     int m_dlPct;                         /* -1 未定 / 0-100 / -2 失败 */
     bool m_dlVisible;
     long m_bufferedMs;                   /* 已缓冲总时长(ms),0=未知 */

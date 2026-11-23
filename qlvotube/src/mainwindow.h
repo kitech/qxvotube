@@ -80,7 +80,8 @@ private slots:
     void onNetTvRegion(const QString& region);   /* 网络电视地区切换 */
     void onRepeatClicked();
     void onShuffleClicked();
-    void onAutoSkipClicked();
+    void onAutoSkipUnplayableClicked();
+    void onSkipDelay();                 /* 600ms 防抖后执行下一项 */
     void onDownloadCurrent();
     void onVideoActivated(const QString& id);
     void onVideoContextMenu(const QString& id, const QPoint& globalPos);  /* M7 */
@@ -157,9 +158,11 @@ private:
     /* 播放模式/连播(qlmusic 语义) */
     void advanceNext(bool fromAuto);
     QString videoGridTitle() const;   /* 视频列表页标题:站点 · 分类名 */
-    /* 失败自动跳过(qlmusic skipOnError):连续失败止损 */
-    bool skipOnError(const QString& why);
-    enum { kErrSkipStopAt = 99 };
+    /* 无法播放时自动下一条(条目级不可用):连续失败止损 */
+    bool skipUnplayableItem(const QString& why);
+    void cancelPendingSkip();
+    void stopForPlaybackError();        /* 停住:网络/登录/风控/会员/地区等 */
+    enum { kErrSkipStopAt = 3 };        /* 连续最多自动跳 3 次 */
     void saveQueueSnapshot();
     void restoreQueueSnapshot();
     QRect m_normGeom;
@@ -168,9 +171,12 @@ private:
     long m_durMs = 0;   /* 引擎时长(ffmpeg 的 duration() 可能返回 0) */
     int m_repeatMode = 0;          /* 0 off 1 all 2 one */
     bool m_shuffle = false;
-    bool m_autoSkip = true;
+    bool m_autoSkipUnplayable = true;
     int m_errSkipRun = 0;
     QString m_skipGuardId;
+    QString m_pendingSkipWhy;       /* 待执行的自动跳过原因 */
+    void* m_skipTimer = nullptr;    /* QTimer*:600ms 防抖 */
+    QString m_resolveRetryId;       /* 403 已重解析过的条目 id */
     class Downloader* m_dl = nullptr;
     void* m_bufTimer = nullptr;  // QTimer*:250ms 独立刷新缓冲进度
     bool m_playFinished = false; // 当前项自然播完且未被自动切歌覆盖

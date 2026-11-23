@@ -510,6 +510,9 @@ M0 落 `cxvideo_global.h/cxthread/cxengine.h/cxvideoplayer.h` stub(接口可链�
   clock->updateValue(flushMs)`(时钟不再停在 -1)。
 - `CXEngineFfmpeg::seek()` 只做 clamp + `emit positionChanged` +
   `requestSeek`(UI 先动),另加 3s 看门狗(无帧则上报,不静默冻结)。
+- 长按 seek(2026-11-23):UI 维护“待提交目标”,最多每 150ms 提交一次;
+  引擎在 `m_seekPend` 期间只更新目标与 `requestSeek`,不重复清队列;
+  解复用推包超时仅在 seek 挂起时丢包,避免“清队列风暴”引发 A/V 互等。
 - 修正换算:`av_rescale_q(ms * 1000LL, AV_TIME_BASE_Q, tb)`。
 - seek 期间 UI 只接受目标 ±2s 内的帧事件,丢弃队列中残留旧帧(防进度回跳)。
 
@@ -542,7 +545,35 @@ M0 落 `cxvideo_global.h/cxthread/cxengine.h/cxvideoplayer.h` stub(接口可链�
   demux),代际作废 + 有界 `wait()`;停不下来按既有策略泄漏,
   绝不 delete 运行中 QThread。
 
-## EOS 结束判定(连播稳定性,2026-11-20)
+## 网络断流与恢复(2026-11-23)
+
+**症状**:弱网/断网时视频"没播完就跳下一集";之后每下一个都失败,列表被连续刷过。
+
+**根因**:
+1. ffmpeg HTTP 在对端中途关闭/chunked 结束时会返回 `AVERROR_EOF`(不是错误码),
+   demux 按自然 EOF 投 EOS → 引擎 `finished()` → UI 连播下一项;
+2. 打开时未启用 ffmpeg HTTP 重连,也无 `rw_timeout`,`av_read_frame` 可长时间阻塞;
+3. 旧版 UI 对任何错误都自动跳到下一项(原 `skipOnError`,上限 99,等同整表重试)。
+
+**引擎侧修复**:
+- 两个 open 路径都设置:
+  `reconnect=1`、`reconnect_streamed=1`、`reconnect_on_network_error=1`、
+  `reconnect_on_http_error=5xx`、`reconnect_delay_max=4`、
+  `reconnect_max_retries=4`、`reconnect_delay_total_max=20`、
+  `rw_timeout=12000000`(12s);**不设** `reconnect_at_eof`(VOD 正常结尾不重连)。
+  `timeout` 只影响建连,已建立连接必须用 `rw_timeout`。
+- demux 仍区分 EOF 与错误:`QLVOTUBE_DEBUG` 下打印
+  `demux: read=… eof=… buffered=…`,错误才投 `CxErrEngine`。
+- 新会话 `resetOpenState()` 清掉上一会话滞留的媒体事件,避免陈旧 `finished`
+  打到新视频。
+
+**UI 侧策略**(完整错误矩阵见 `docs/ui-playback.md`):
+- `CxErrEngine` 且已播 >3s → 暂停在断点,空格重连,N 手动下一集;
+- 网络/登录/风控/会员/地区类解析错误 → 停住提示,不自动跳;
+- 404/410、重试后仍 403、Unsupported → 才自动下一条(≤3 次,间隔 600ms);
+- 停滞看门狗:8s 自动 seek 一次,20s 仍无进展则暂停并给出可操作提示。
+
+## EOS 结束判定(连播稳定性,2026-11-20;2026-11-23 修订)
 
 **症状**:带音频的视频播完后偶发/频繁"永久停住",不进下一项;纯视频正常。
 
@@ -552,12 +583,18 @@ M0 落 `cxvideo_global.h/cxthread/cxengine.h/cxvideoplayer.h` stub(接口可链�
 永不 `finished` → 不推进。视频线程的 EOS `drain()` 也会按冻结的音频时钟
 pacing,存在同类风险。
 
-**修复**:
-- EOS 事件携带角色(`code`:1=video/2=audio/3=sub),且视频/音频线程**先投递
-  EOS,再做可能阻塞的 drain**。
-- 引擎以**主流**判定结束:有视频以 video EOS 为准,否则以 audio EOS 为准;
-  音频/字幕 EOS 不再 gate `finished`。
-- EOS 尾帧 drain 期间跳过主时钟 pacing(`m_draining`)。
+**修复(2026-11-20)**:
+- EOS 事件携带角色(`code`:1=video/2=audio/3=sub)。
 - 致命读错误(`CxFFmpegEvError` 非 `CxErrSeek`)标记 `m_fatalErr`,随后抑制
-  `finished`,避免与 `skipOnError` 一起"跳两集";`onPlayerError` 对
-  `CxErrAudio/CxErrSeek` 非致命错误不再自动跳集。
+  `finished`。
+
+**2026-11-23 修订(播放未完成就跳下一项)**:
+- 视频/音频线程都改为 **drain 完再投递 EOS**:`m_draining` 期间跳过时钟 pacing,
+  drain 只受解码速度约束,不会再卡在冻结的音频时钟上。
+- 引擎按 `eosPrimaryCount()` 等**全部活动主流**(有音频=视频+音频;纯音频=音频)
+  到齐才 `finishEos()`;3s 看门狗兜底 AO `drain` 卡死。
+- 视频线程增加主时钟停摆检测:连续 500ms 不前进则退回帧节拍,避免视频停摆
+  把 demux 拖死(音频队列饿死 → 队列互等)。
+- 意外 EOF/截断由 UI 侧用 `pos + 2s < duration` 判定(引擎时长缺失时回退队列
+  元数据),不再当自然播完直接连播。
+- 相关 UI 策略见 `docs/ui-playback.md` 的「播放错误与自动下一条」。

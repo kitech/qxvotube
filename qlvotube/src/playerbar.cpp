@@ -146,7 +146,7 @@ PlayerBar::PlayerBar(QWidget* parent)
     : QWidget(parent), m_hasTrack(false), m_playing(false),
       m_progressMs(0), m_durationMs(0), m_hover(HitNone), m_dragging(false),
       m_volume(100), m_lastVolume(100), m_rate(1.0), m_muted(false),
-      m_repeatMode(0), m_shuffle(false), m_autoSkip(true),
+      m_repeatMode(0), m_shuffle(false), m_autoSkipUnplayable(true),
       m_dlPct(0), m_dlVisible(false), m_bufferedMs(0),
       m_bufferedBytes(0), m_maxBytes(0), m_bytesPerSec(0),
       m_dlHideTimer(0), m_volumePopup(0), m_volumeSlider(0), m_muteCheck(0),
@@ -243,7 +243,7 @@ QRect PlayerBar::repeatRect() const  { int cx = width() / 2; return QRect(cx + 1
 QRect PlayerBar::shuffleRect() const { int cx = width() / 2; return QRect(cx + 43, 19, 20, 20); }
 QRect PlayerBar::downloadRect() const{ int cx = width() / 2; return QRect(cx + 99, 19, 20, 20); }
 QRect PlayerBar::bufferedRect() const{ int cx = width() / 2; return QRect(cx + 121, 19, 20, 20); }
-QRect PlayerBar::autoSkipRect() const{ int cx = width() / 2; return QRect(cx - 155, 19, 20, 20); }
+QRect PlayerBar::autoSkipUnplayableRect() const{ int cx = width() / 2; return QRect(cx - 155, 19, 20, 20); }
 /* 单行字幕:右侧 EQ 按钮下方一行(夹在按钮行 y42 与进度条 y58 之间),
  * 右对齐到 width-14;不再占底部整行。绘制/命中均走此矩形。 */
 QRect PlayerBar::subtitleLineRect() const { return QRect(width() - 174, 44, 160, 13); }
@@ -542,11 +542,11 @@ void PlayerBar::paintEvent(QPaintEvent*)
         p.restore();
     }
 
-    /* 失败自动跳过:圆圈+勾(开=accent) */
+    /* 无法播放时自动下一条:圆圈+勾(开=accent) */
     {
-        QRect as = autoSkipRect();
-        const QColor asCol = (m_hover == HitAutoSkip) ? pal.accent
-                           : (m_autoSkip ? pal.accent : pal.textMuted);
+        QRect as = autoSkipUnplayableRect();
+        const QColor asCol = (m_hover == HitAutoSkipUnplayable) ? pal.accent
+                           : (m_autoSkipUnplayable ? pal.accent : pal.textMuted);
         p.save();
         p.setPen(QPen(asCol, 1));
         p.setBrush(Qt::NoBrush);
@@ -684,8 +684,8 @@ void PlayerBar::mousePressEvent(QMouseEvent* e)
         emit repeatClicked();
     } else if (shuffleRect().contains(e->pos())) {
         emit shuffleClicked();
-    } else if (autoSkipRect().contains(e->pos())) {
-        emit autoSkipClicked();
+    } else if (autoSkipUnplayableRect().contains(e->pos())) {
+        emit autoSkipUnplayableClicked();
     } else if (rateRect().contains(e->pos())) {
         emit rateMenuRequested(mapToGlobal(e->pos()));
     } else if (rotateRect().contains(e->pos())
@@ -723,7 +723,7 @@ void PlayerBar::mouseMoveEvent(QMouseEvent* e)
     else if (bufferedRect().contains(e->pos())) h = HitBuffered;
     else if (repeatRect().contains(e->pos())) h = HitRepeat;
     else if (shuffleRect().contains(e->pos())) h = HitShuffle;
-    else if (autoSkipRect().contains(e->pos())) h = HitAutoSkip;
+    else if (autoSkipUnplayableRect().contains(e->pos())) h = HitAutoSkipUnplayable;
     if (h != m_hover) {
         m_hover = h;
         update();
@@ -769,10 +769,10 @@ void PlayerBar::setRepeatMode(int mode)
     update();
 }
 
-void PlayerBar::setAutoSkip(bool on)
+void PlayerBar::setAutoSkipUnplayable(bool on)
 {
-    if (m_autoSkip == on) return;
-    m_autoSkip = on;
+    if (m_autoSkipUnplayable == on) return;
+    m_autoSkipUnplayable = on;
     update();
 }
 

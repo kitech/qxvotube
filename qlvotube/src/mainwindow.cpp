@@ -576,7 +576,7 @@ void MainWindow::buildCentralWidget()
     m_shuffle = Config::value("player.shuffle") == qFromUtf8("1");
     {
         const QString as = Config::value("player.autoskip");
-        m_autoSkip = as.isEmpty() ? true : (as != qFromUtf8("0"));
+        m_autoSkipUnplayable = as.isEmpty() ? true : (as != qFromUtf8("0"));
     }
     {
         const QString vol = Config::value("player.volume");
@@ -587,7 +587,7 @@ void MainWindow::buildCentralWidget()
     if (playerBar) {
         playerBar->setRepeatMode(m_repeatMode);
         playerBar->setShuffle(m_shuffle);
-        playerBar->setAutoSkip(m_autoSkip);
+        playerBar->setAutoSkipUnplayable(m_autoSkipUnplayable);
     }
     restoreQueueSnapshot();
 
@@ -610,8 +610,8 @@ void MainWindow::buildCentralWidget()
                          this, SLOT(onRepeatClicked()));
         QObject::connect(playerBar, SIGNAL(shuffleClicked()),
                          this, SLOT(onShuffleClicked()));
-        QObject::connect(playerBar, SIGNAL(autoSkipClicked()),
-                         this, SLOT(onAutoSkipClicked()));
+        QObject::connect(playerBar, SIGNAL(autoSkipUnplayableClicked()),
+                         this, SLOT(onAutoSkipUnplayableClicked()));
         QObject::connect(playerBar, SIGNAL(rateChanged(double)),
                          this, SLOT(onRateChanged(double)));
         QObject::connect(playerBar, SIGNAL(rateMenuRequested(const QPoint&)),
@@ -1779,6 +1779,20 @@ void MainWindow::enterVideoMode(int index)
     playVideoAt(m_videoIdx);
 }
 
+/* 条目级不可用(可安全跳过);httpStatus 供 403 判定 */
+static bool cxSkipWorthy(const qxv::Result& r, int* httpStatus)
+{
+    int st = qMapValue(r.detail, qFromUtf8("httpStatus"), QVariant()).toInt();
+    if (st <= 0)
+        st = qMapValue(r.detail, qFromUtf8("http.status"), QVariant()).toInt();
+    if (httpStatus) *httpStatus = st;
+    if (r.code == qxv::Err::NotFound || r.code == qxv::Err::Unsupported)
+        return true;                          /* 已删除/不支持 */
+    if (r.code == qxv::Err::Http)
+        return st == 404 || st == 410 || st == 403;
+    return false;                             /* 网络/登录/风控/会员/地区等:不跳 */
+}
+
 void MainWindow::playVideoAt(int index)
 {
     if (index < 0 || index >= (int)m_videoIds.size()) return;
@@ -1846,10 +1860,28 @@ void MainWindow::playVideoAt(int index)
         if (r.code != qxv::Err::Ok || pr.streams.isEmpty()) {
             ev->text = qFromUtf8("|err|") + QString::number((int)r.code)
                        + qFromUtf8("|") + r.message;
-            skipOnError(r.message);   /* autoskip:解析失败换下一项 */
+            int st = 0;
+            const bool worth = cxSkipWorthy(r, &st);
+            const bool http403 = (r.code == qxv::Err::Http && st == 403);
+            const QString vid = m_videoIds[index];
+            if (http403 && m_resolveRetryId != vid) {
+                m_resolveRetryId = vid;       /* 403:先重解析当前项一次 */
+                delete ev;
+                SharedStatusBar::instance()->showMessage(
+                    qFromUtf8("签名可能过期，正在重试当前项…"), 2500);
+                playVideoAt(index);
+                return;
+            }
+            if (worth) {
+                skipUnplayableItem(r.message); /* 404/410/重试后仍 403/不支持 */
+            } else {
+                m_skipGuardId = vid;
+                stopForPlaybackError();        /* 网络/登录/风控/会员/地区:停住 */
+            }
         } else {
             m_errSkipRun = 0;         /* 成功即清零连续失败计数 */
             m_skipGuardId = QString();
+            m_resolveRetryId = QString();
             const qxv::Stream& st = pr.streams.first();
             ev->text = st.url;
             ev->referer = qMapValue(st.extra, qFromUtf8("referer"),
@@ -2134,6 +2166,10 @@ void MainWindow::onPlayPause()
 void MainWindow::onPlayerStarted()
 {
     m_playFinished = false;   /* 新一段播放开始,清掉播完标记 */
+    cancelPendingSkip();
+    m_errSkipRun = 0;         /* 起播成功:清零连续失败配额 */
+    m_skipGuardId = QString();
+    m_resolveRetryId = QString();
     m_lastPosMs = -1;
     m_lastPosWallMs = wallMs();
     m_stallSec = -1;
@@ -2457,21 +2493,21 @@ void MainWindow::onShuffleClicked()
                                                   : qFromUtf8("0"));
 }
 
-void MainWindow::onAutoSkipClicked()
+void MainWindow::onAutoSkipUnplayableClicked()
 {
-    m_autoSkip = !m_autoSkip;
-    if (playerBar) playerBar->setAutoSkip(m_autoSkip);
-    Config::setValue("player.autoskip", m_autoSkip ? qFromUtf8("1")
-                                                   : qFromUtf8("0"));
+    m_autoSkipUnplayable = !m_autoSkipUnplayable;
+    if (playerBar) playerBar->setAutoSkipUnplayable(m_autoSkipUnplayable);
+    Config::setValue("player.autoskip",
+                     m_autoSkipUnplayable ? qFromUtf8("1") : qFromUtf8("0"));
     SharedStatusBar::instance()->showMessage(
-        m_autoSkip ? qFromUtf8("播放失败自动跳过:开")
-                   : qFromUtf8("播放失败自动跳过:关"), 2500);
+        m_autoSkipUnplayable ? qFromUtf8("无法播放时自动下一条:开")
+                             : qFromUtf8("无法播放时自动下一条:关"), 2500);
 }
 
-/* 失败自动跳过(qlmusic skipOnError):同曲只跳一次;连续失败到阈值停播 */
-bool MainWindow::skipOnError(const QString& why)
+/* 无法播放时自动下一条:只处理条目级不可用;3 次上限 + 600ms 防抖 */
+bool MainWindow::skipUnplayableItem(const QString& why)
 {
-    if (!m_autoSkip) return false;
+    if (!m_autoSkipUnplayable) return false;
     bool hasNext = false;
     QString gid;
     if (m_videoMode && !m_videoIds.empty()) {
@@ -2493,29 +2529,59 @@ bool MainWindow::skipOnError(const QString& why)
     if (!hasNext) {
         if (playerBar) playerBar->setPlaying(false);
         SharedStatusBar::instance()->showMessageTyped(
-            qFromUtf8("播放失败且无下一项: %1").arg(why), StatusError, 5000);
+            qFromUtf8("无法播放且无下一项: %1").arg(why), StatusError, 5000);
         return false;
     }
-    if (!gid.isEmpty() && gid == m_skipGuardId) return true;  /* 同曲双通道只跳一次 */
+    if (!gid.isEmpty() && gid == m_skipGuardId) return true;  /* 同条只处理一次 */
     m_skipGuardId = gid;
-    if (++m_errSkipRun >= kErrSkipStopAt) {
+    if (m_errSkipRun + 1 > kErrSkipStopAt) {
         m_errSkipRun = 0;
         if (playerBar) playerBar->setPlaying(false);
         SharedStatusBar::instance()->showMessageTyped(
-            qFromUtf8("连续 %1 次失败,已停止自动跳过").arg(kErrSkipStopAt),
+            qFromUtf8("已连续跳过 %1 个无法播放的条目,停止自动跳过")
+                .arg(kErrSkipStopAt),
             StatusError, 5000);
         return false;
     }
+    m_pendingSkipWhy = why;
+    if (m_skipTimer == 0) {
+        m_skipTimer = new QTimer(this);
+        QObject::connect((QTimer*)m_skipTimer, SIGNAL(timeout()),
+                         this, SLOT(onSkipDelay()));
+    }
+    ((QTimer*)m_skipTimer)->start(600);
     SharedStatusBar::instance()->showMessage(
-        qFromUtf8("播放失败,自动跳过: %1").arg(why), 4000);
-    advanceNext(true);
+        qFromUtf8("无法播放,自动下一条: %1").arg(why), 2500);
     return true;
+}
+
+void MainWindow::onSkipDelay()
+{
+    if (m_skipTimer != 0) ((QTimer*)m_skipTimer)->stop();
+    if (m_pendingSkipWhy.isEmpty()) return;
+    m_pendingSkipWhy = QString();
+    ++m_errSkipRun;
+    advanceNext(true);
+}
+
+void MainWindow::cancelPendingSkip()
+{
+    if (m_skipTimer != 0) ((QTimer*)m_skipTimer)->stop();
+    m_pendingSkipWhy = QString();
+}
+
+void MainWindow::stopForPlaybackError()
+{
+    cancelPendingSkip();
+    if (playerBar) playerBar->setPlaying(false);
+    if (m_player != 0) m_player->pause();
 }
 
 /* 统一推进(qlmusic 语义):fromAuto=false 手动 next 恒环绕;
  * fromAuto=true 自然播完仅 repeat=all 环绕;shuffle 随机≠当前。 */
 void MainWindow::advanceNext(bool fromAuto)
 {
+    cancelPendingSkip();      /* 手动/定时推进只保留一个 */
     if (m_playSource != SrcArgv && m_playSource != SrcPlaylist
         && m_videoMode && !m_videoIds.empty()) {
         const int n = (int)m_videoIds.size();
@@ -3055,8 +3121,8 @@ void MainWindow::onPlayerError(int code, const QString& msg)
         return;
     }
     if (getenv("QLVOTUBE_DEBUG") != 0)
-        qDebug("error skip: code=%d pos=%ld dur=%ld", code, pos, dur);
-    skipOnError(msg);   /* autoskip 开:换下一项;关闭则停在错误上 */
+        qDebug("error stop: code=%d pos=%ld dur=%ld", code, pos, dur);
+    stopForPlaybackError();   /* 加载阶段/未分类错误:停住,不自动跳 */
 }
 
 void MainWindow::onSeekRequested(int ms)
@@ -3082,6 +3148,7 @@ void MainWindow::onSeekRequested(int ms)
 
 void MainWindow::onPrev()
 {
+    cancelPendingSkip();
     if (m_playSource != SrcArgv && m_playSource != SrcPlaylist
         && m_videoMode && !m_videoIds.empty()) {
         const int n = (int)m_videoIds.size();
