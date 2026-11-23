@@ -44,6 +44,23 @@ public:
         notEmpty.wakeAll();
     }
 
+    // 带超时 push:满则最多等 timeoutMs;false=超时或已停,调用方可先处理 seek/停止
+    bool pushTimeout(const CxPkt& p, int timeoutMs)
+    {
+        QMutexLocker lk(&mx);
+        while (!stopped && (int)items.size() >= cap) {
+            if (!notFull.wait(&mx, timeoutMs))
+                return false;
+        }
+        if (stopped)
+            return false;
+        if (p.pkt != 0)
+            bytes += p.pkt->size;
+        items.push_back(p);
+        notEmpty.wakeAll();
+        return true;
+    }
+
     // 阻塞取;队列停/空(停止位)返回 invalid CxPkt(调用方判 eos/校验 pkt)
     CxPkt take()
     {

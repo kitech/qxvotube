@@ -140,11 +140,13 @@ private slots:
     void onRefreshBuffered();    // 独立定时器:缓冲进度与播放进度分开刷新
     void onPlayerError(int code, const QString& msg);
     void onSeekRequested(int ms); // 与 PlayerBar::seekRequested(int) 同型
+    void onSeekFlush();           // 150ms 合并到期:提交最终 seek
 
 private:
     /* 快捷键(YouTube/MPV 惯例;搜索框聚焦时自动让行) */
     bool shortcutsDisabledByFocus() const;
     void seekBy(long deltaMs);
+    void applyPendingSeek();      // 提交 m_seekPendingTarget
     void adjustVolume(int deltaPct);
     void toggleMuteShortcut();
     void adjustRate(double delta);
@@ -177,6 +179,10 @@ private:
     long m_lastPosMs = -1;           /* 上次播放位置(ms,-1=未定) */
     long long m_lastPosWallMs = 0;   /* 上次位置变化的墙钟(ms) */
     int m_stallSec = -1;             /* 已展示的停滞秒数(-1=未展示) */
+    bool m_stallRetried = false;     /* 停滞自动恢复是否已尝试 */
+    long m_seekPendingTarget = -1;   /* 长按 seek:合并中的目标(ms),-1=无 */
+    long long m_seekLastIssueMs = 0; /* 上次真正提交 seek 的墙钟(ms) */
+    void* m_seekTimer = nullptr;     /* QTimer*:150ms 合并提交 */
 
     struct MenuItemRef {
         const char* key;

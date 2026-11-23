@@ -60,7 +60,9 @@
     "mid_click_ni": "中键点击：暂未实现",
     "wheel_up_ni": "滚轮向上：暂未实现",
     "wheel_down_ni": "滚轮向下：暂未实现",
-    "stalled_secs": "缓冲中… %1 秒"
+    "stalled_secs": "缓冲中… %1 秒",
+    "stalled_retry": "播放停滞，正在尝试恢复…",
+    "stalled_fail": "缓冲停滞，已暂停；按空格重试或切换站点"
   },
   "error": {
     "network": "网络错误",

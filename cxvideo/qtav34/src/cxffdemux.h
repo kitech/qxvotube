@@ -84,9 +84,9 @@ protected:
             }
             notePkt(pkt);   // 记录缓冲前沿,先于 pushPkt(所有权移交)
             if (pkt->stream_index == vStream && vQueue != 0)
-                pushPkt(vQueue, pkt, vStream);
+                pushPktWait(vQueue, pkt, vStream);
             else if (pkt->stream_index == aStream && aQueue != 0)
-                pushPkt(aQueue, pkt, aStream);
+                pushPktWait(aQueue, pkt, aStream);
             else if (pkt->stream_index == sStream && sQueue != 0)
                 pushPkt(sQueue, pkt, sStream);
             else
@@ -199,6 +199,22 @@ private:
         p.eos = false;
         q->push(p);
         pkt = 0; // 所有权已交队列
+    }
+
+    /* 音视频推包最多等 500ms:超时丢弃该包并回循环顶部,
+     * 保证一路队满时不会饿死另一路、也不会让 seek 永远排不上。 */
+    void pushPktWait(CxPacketQueue* q, AVPacket*& pkt, int streamIdx)
+    {
+        CxPkt p;
+        p.pkt = pkt;
+        p.streamIdx = streamIdx;
+        p.eos = false;
+        if (q->pushTimeout(p, 500)) {
+            pkt = 0;              // 所有权交队列
+            return;
+        }
+        av_packet_free(&p.pkt);   // 队列持续满:丢弃,等下一关键帧重建
+        pkt = 0;
     }
 
     void postEos()

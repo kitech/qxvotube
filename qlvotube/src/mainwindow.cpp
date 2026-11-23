@@ -2648,6 +2648,24 @@ void MainWindow::onRefreshBuffered()
                     _("player.stalled_secs").arg(sec), 1200);
             }
         }
+        /* 8s:自动 seek 回当前位置一次(清队列/重建时钟,通常可解 A/V 互等) */
+        if (idle >= 8000 && !m_stallRetried) {
+            m_stallRetried = true;
+            const long pos = (m_lastPosMs >= 0) ? m_lastPosMs
+                                                : m_player->position();
+            m_player->seek(pos);
+            SharedStatusBar::instance()->showMessage(
+                _("player.stalled_retry"), 2500);
+        }
+        /* 20s:不再无限累计,暂停并给出可操作提示 */
+        if (idle >= 20000 && m_stallRetried
+            && m_player->state() == CxPlaying) {
+            m_player->pause();
+            if (playerBar) playerBar->setPlaying(false);
+            SharedStatusBar::instance()->showMessageTyped(
+                _("player.stalled_fail"), StatusError, 8000);
+            m_stallRetried = false;
+        }
     }
     if (playerBar == 0)
         return;
@@ -2696,6 +2714,7 @@ void MainWindow::onPlayerPosition(long ms)
         m_lastPosMs = ms;
         m_lastPosWallMs = wallMs();
         m_stallSec = -1;
+        m_stallRetried = false;
     }
     if (getenv("QLVOTUBE_DEBUG") != 0) {
         static long lastSec = -1;          /* 1 秒一条,避免 33ms 刷屏 */
@@ -2983,6 +3002,9 @@ void MainWindow::onPlayerError(int code, const QString& msg)
 
 void MainWindow::onSeekRequested(int ms)
 {
+    /* 用户拖进度条:取消键盘 seek 的合并目标,避免旧定时器覆盖 */
+    m_seekPendingTarget = -1;
+    if (m_seekTimer != 0) ((QTimer*)m_seekTimer)->stop();
     if (m_playFinished) {
         /* 列表页拖动:仅忽略,不重播跳页 */
         if (!isPlayerViewActive())
@@ -3419,12 +3441,41 @@ void MainWindow::seekBy(long deltaMs)
 {
     if (m_player == 0 || m_player->engine() == 0) return;
     const long dur = m_durMs > 0 ? m_durMs : m_player->duration();
-    long pos = m_player->position() + deltaMs;
+    /* 长按:以“待提交目标”为基准累加,最多 150ms 提交一次 */
+    long base = (m_seekPendingTarget >= 0) ? m_seekPendingTarget
+                                           : m_player->position();
+    long pos = base + deltaMs;
     if (pos < 0) pos = 0;
     if (dur > 1000 && pos > dur - 1000) pos = dur - 1000;
-    m_player->seek(pos);
+    m_seekPendingTarget = pos;
     SharedStatusBar::instance()->showMessage(
         qFromUtf8("%1s / %2s").arg(pos / 1000).arg(dur / 1000), 1200);
+    if (wallMs() - m_seekLastIssueMs >= 150) {
+        applyPendingSeek();
+        return;
+    }
+    if (m_seekTimer == 0) {
+        m_seekTimer = new QTimer(this);
+        QObject::connect((QTimer*)m_seekTimer, SIGNAL(timeout()),
+                         this, SLOT(onSeekFlush()));
+    }
+    ((QTimer*)m_seekTimer)->start(150);   /* 到期补发最终目标 */
+}
+
+void MainWindow::onSeekFlush()
+{
+    if (m_seekTimer != 0) ((QTimer*)m_seekTimer)->stop();
+    applyPendingSeek();
+}
+
+void MainWindow::applyPendingSeek()
+{
+    if (m_seekPendingTarget < 0) return;
+    const long target = m_seekPendingTarget;
+    m_seekPendingTarget = -1;
+    m_seekLastIssueMs = wallMs();
+    if (m_player != 0 && m_player->engine() != 0)
+        m_player->seek(target);
 }
 
 void MainWindow::adjustVolume(int deltaPct)

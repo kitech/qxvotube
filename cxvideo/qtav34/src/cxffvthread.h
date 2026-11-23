@@ -51,7 +51,8 @@ public:
     CXFFmpegVideoThread(CxPacketQueue* vq, CxDecoder* dec, QObject* sink)
         : vQueue(vq), decoder(dec), sink(sink), stopFlag(false), paused(false),
           renderPts0(-1), rate(1.0), m_clock(0), m_ao(0),
-          m_frameSlot(0), m_lastEmitUs(0), m_draining(false)
+          m_frameSlot(0), m_lastEmitUs(0), m_draining(false),
+          m_lastClockMs(-2), m_lastClockUs(0)
     { }
 
     void requestStop() { stopFlag = true; if (m_clock) m_clock->interrupt(true); wake(); }
@@ -149,6 +150,7 @@ private:
             post(CxFFmpegEvSeekDone, pts, 0);
         }
 
+        bool clockStalled = false;
         if (!m_draining && m_clock != 0 && m_ao != 0) {
             // M2.1 主时钟:帧应显示于 pts − ao 延迟(留 AO 缓冲);
             // 每轮重算,≤100ms 打盹(clock 提前唤醒即败絮新值)
@@ -156,13 +158,28 @@ private:
                 if (stopFlag)
                     return false;
                 if (paused) {
+                    m_lastClockUs = 0;   // 恢复后重新观察时钟
                     return false; // 暂停时主时钟冻结,退回 run() 顶部由 waitIfPaused() 阻塞
                 }
-                long remain = (pts - m_ao->latencyMs()) - m_clock->value();
+                const long clk = m_clock->value();
+                const long long nowUs = av_gettime_relative();
+                if (m_lastClockUs == 0 || clk != m_lastClockMs) {
+                    m_lastClockMs = clk;
+                    m_lastClockUs = nowUs;
+                } else if (nowUs - m_lastClockUs > 500000) {
+                    clockStalled = true;   /* 主时钟 500ms 不前进:音频停摆 */
+                    break;
+                }
+                long remain = (pts - m_ao->latencyMs()) - clk;
                 if (remain <= 0)
                     break;
                 long nap = (remain > 100) ? 100 : remain;
                 if (!m_clock->waitAndCheck(nap))
+                    return false;
+            }
+            if (clockStalled) {
+                /* 退回按帧时长节拍:让视频继续消费,避免把 demux 卡死 */
+                if (!waitPace((long)(dur / rate)))
                     return false;
             }
         } else if (!m_draining) {
@@ -173,7 +190,7 @@ private:
         // 原路径零等待全速出帧 → QImage 事件队列暴涨(2-3G)+UI 冻结无法暂停。
         // 用单调墙钟限制相邻出帧间隔,与时钟值解耦;dur 自适应片源帧率并钳
         // 到 10..100ms(ffplay 同款),倍速时按比例缩短,不牺牲正常/倍速播放。
-        if (!m_draining && m_clock != 0 && m_ao != 0 && m_lastEmitUs > 0) {
+        if (!m_draining && !clockStalled && m_clock != 0 && m_ao != 0 && m_lastEmitUs > 0) {
             int gap = (int)dur;
             if (gap < 10) gap = 10;
             if (gap > 100) gap = 100;
@@ -237,6 +254,8 @@ private:
     CxLatestFrameSlot* m_frameSlot; // 引擎持有,生命周期长于本线程
     long long m_lastEmitUs;         // 上次出帧单调墙钟(us),出帧限速兜底
     volatile bool m_draining;       // EOS 尾帧排空:跳过 pacing,避免等冻结音频时钟
+    long m_lastClockMs;             // 上次观察到的音频主时钟值
+    long long m_lastClockUs;        // 该值最近变化的墙钟(0=未初始化)
 };
 
 #endif // CXFFVTHREAD_H

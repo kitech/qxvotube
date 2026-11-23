@@ -661,6 +661,14 @@ bool CXEngineFfmpeg::seek(long ms)
         return false;
     if (ms < 0) ms = 0;
     if (m_durMs > 1000 && ms > m_durMs - 1000) ms = m_durMs - 1000;
+    /* 已有一轮 seek 在途:只更新最新目标,不重复清队列/广播位置。
+     * 长按方向键时由 demux 合并,避免“清队列风暴”引发 A/V 互等。 */
+    if (m_seekPend) {
+        m_seekTarget = ms;
+        m_curMs = ms;
+        m_demux->requestSeek(ms, sIdx);
+        return true;
+    }
     m_curMs = ms;
     /* UI 先动,不等解码(首帧到位后 vthread 再投 SeekDone) */
     emit positionChanged(ms);

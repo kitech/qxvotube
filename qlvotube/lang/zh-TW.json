@@ -60,7 +60,9 @@
     "mid_click_ni": "中鍵點擊：暫未實作",
     "wheel_up_ni": "滾輪向上：暫未實作",
     "wheel_down_ni": "滾輪向下：暫未實作",
-    "stalled_secs": "緩衝中… %1 秒"
+    "stalled_secs": "緩衝中… %1 秒",
+    "stalled_retry": "播放停滯，正在嘗試恢復…",
+    "stalled_fail": "緩衝停滯，已暫停；按空白鍵重試或切換站點"
   },
   "error": {
     "network": "網路錯誤",

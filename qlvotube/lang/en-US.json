@@ -60,7 +60,9 @@
     "mid_click_ni": "Middle-click: not implemented yet",
     "wheel_up_ni": "Wheel up: not implemented yet",
     "wheel_down_ni": "Wheel down: not implemented yet",
-    "stalled_secs": "Buffering… %1s"
+    "stalled_secs": "Buffering… %1s",
+    "stalled_retry": "Playback stalled, trying to recover…",
+    "stalled_fail": "Buffering stalled; paused. Press Space to retry or switch site"
   },
   "error": {
     "network": "Network error",
