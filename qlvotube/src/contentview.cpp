@@ -615,6 +615,8 @@ void ContentView::paintEvent(QPaintEvent*)
     /* ── 标题区 ── */
     if (m_mode == TracksMode) {
         QString title = m_pl ? m_pl->name : QString();
+        if (m_pl && !m_pl->tracks.empty())
+            title += qFromUtf8(" · %1 首").arg((int)m_pl->tracks.size());
         p.setFont(titleFont);
         p.setPen(pal.textPrimary);
         p.drawText(QRect(20, 4, width() - 180, 30), Qt::AlignVCenter | Qt::AlignLeft, title);
@@ -628,9 +630,13 @@ void ContentView::paintEvent(QPaintEvent*)
         p.drawText(pa, Qt::AlignCenter, m_playAll);
     } else {
         /* List/Grid 模式：标题 + 返回按钮 */
+        QString listTitle = m_listTitle;
+        if (m_mode == VideoGridMode && !m_videos.empty())
+            listTitle += qFromUtf8(" · %1 个").arg((int)m_videos.size());
         p.setFont(titleFont);
         p.setPen(pal.textPrimary);
-        p.drawText(QRect(20, 4, width() - 260, 30), Qt::AlignVCenter | Qt::AlignLeft, m_listTitle);
+        p.drawText(QRect(20, 4, width() - 260, 30),
+                   Qt::AlignVCenter | Qt::AlignLeft, listTitle);
 
         QRect br = backRect();
         p.setPen(Qt::NoPen);

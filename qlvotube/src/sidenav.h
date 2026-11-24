@@ -87,6 +87,7 @@ private:
         QString cat;
         int y;
         int h;
+        int count;      /* 右端灰字计数；<0 不绘制 */
     };
     void relayout();
     void applyScrollBar();

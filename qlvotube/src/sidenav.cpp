@@ -287,6 +287,7 @@ void SideNav::relayout()
     int y = kTop + kUserH + kSearchH + 8;
 
     NavItem it;
+    it.count = -1;
     it.kind = NavHotPlaylists; it.id = -1; it.text = m_navRecommend; it.cat = QString();
     it.y = y; it.h = kItemH; y += kItemH;
     m_items.push_back(it);
@@ -309,11 +310,13 @@ void SideNav::relayout()
         const char* const* regs = tvlist::regions(n);
         y += 8;
         it.kind = NavHeader; it.id = 0; it.text = m_navNetTv; it.cat = QString();
+        it.count = n;                       /* 网络电视：地区数量 */
         it.y = y; it.h = kGroupH; y += kGroupH;
         m_items.push_back(it);
         for (int i = 0; i < n && i < (int)m_netTvRegionNames.size(); ++i) {
             it.kind = NavNetTvRegion; it.id = 0;
             it.text = m_netTvRegionNames[i]; it.cat = qFromUtf8(regs[i]);
+            it.count = -1;
             it.y = y; it.h = kItemH; y += kItemH;
             m_items.push_back(it);
         }
@@ -324,11 +327,13 @@ void SideNav::relayout()
         y += 8;
         it.kind = NavHeader; it.id = 0; it.text = m_groupVideoCats;
         it.cat = QString();
+        it.count = (int)m_videoCatKeys.size();   /* 视频分类：分类个数 */
         it.y = y; it.h = kGroupH; y += kGroupH;
         m_items.push_back(it);
         for (int i = 0; i < (int)m_videoCatKeys.size(); ++i) {
             it.kind = NavVideoCategory; it.id = 0;
             it.text = m_videoCatNames[i]; it.cat = m_videoCatKeys[i];
+            it.count = -1;                  /* 子分类不显示条目数 */
             it.y = y; it.h = kItemH; y += kItemH;
             m_items.push_back(it);
         }
@@ -337,6 +342,7 @@ void SideNav::relayout()
     if (!m_hotCats.isEmpty() || !m_catGroups.isEmpty()) {
         y += 8;
         it.kind = NavHeader; it.id = 0; it.text = m_groupCategories; it.cat = QString();
+        it.count = (int)m_hotCats.size();   /* 分类：热门分类个数 */
         it.y = y; it.h = kGroupH; y += kGroupH;
         m_items.push_back(it);
 
@@ -344,6 +350,7 @@ void SideNav::relayout()
         for (int i = 0; i < (int)m_hotCats.size(); ++i) {
             it.kind = NavCategory; it.id = 0;
             it.text = m_hotCats[i]; it.cat = m_hotCats[i];
+            it.count = -1;
             it.y = y; it.h = kItemH; y += kItemH;
             m_items.push_back(it);
         }
@@ -358,6 +365,7 @@ void SideNav::relayout()
             bool hasItems = (cnt > 0);
             if (hasItems) {
                 it.kind = NavHeader; it.id = 0; it.text = m_catGroups[g]; it.cat = QString();
+                it.count = cnt;             /* 组内分类个数 */
                 it.y = y; it.h = kGroupH; y += kGroupH;
                 m_items.push_back(it);
             }
@@ -366,6 +374,7 @@ void SideNav::relayout()
                 if (idx >= (int)m_catMatrix.size()) break;
                 it.kind = NavCategory; it.id = 0;
                 it.text = m_catMatrix[idx]; it.cat = m_catMatrix[idx];
+                it.count = -1;
                 it.y = y; it.h = kItemH; y += kItemH;
                 m_items.push_back(it);
             }
@@ -375,22 +384,28 @@ void SideNav::relayout()
 
     y += 6;
     it.kind = NavHeader; it.id = 0; it.text = m_groupCreated; it.cat = QString();
+    it.count = (int)((m_lib.size() + 1) / 2);   /* 创建：歌单个数 */
     it.y = y; it.h = kGroupH; y += kGroupH;
     m_items.push_back(it);
     for (size_t i = 0; i < m_lib.size(); ++i) {
         if (i % 2 != 0) continue;
         it.kind = NavPlaylist; it.id = m_lib[i].id; it.text = m_lib[i].name; it.cat = QString();
+        it.count = m_lib[i].trackCount > 0 ? m_lib[i].trackCount
+                                           : (int)m_lib[i].tracks.size();
         it.y = y; it.h = kItemH; y += kItemH;
         m_items.push_back(it);
     }
 
     y += 6;
     it.kind = NavHeader; it.id = 0; it.text = m_groupCollected; it.cat = QString();
+    it.count = (int)(m_lib.size() / 2);        /* 收藏：歌单个数 */
     it.y = y; it.h = kGroupH; y += kGroupH;
     m_items.push_back(it);
     for (size_t i = 0; i < m_lib.size(); ++i) {
         if (i % 2 == 0) continue;
         it.kind = NavPlaylist; it.id = m_lib[i].id; it.text = m_lib[i].name; it.cat = QString();
+        it.count = m_lib[i].trackCount > 0 ? m_lib[i].trackCount
+                                           : (int)m_lib[i].tracks.size();
         it.y = y; it.h = kItemH; y += kItemH;
         m_items.push_back(it);
     }
@@ -505,11 +520,18 @@ void SideNav::paintEvent(QPaintEvent*)
             p.setFont(small);
             p.setPen(pal.textMuted);
             const bool vcat = (it.text == m_groupVideoCats) && m_videoCatsLoading;
-            p.drawText(QRect(18, r.y(), width() - 24 - (vcat ? 22 : 0), r.height()),
+            const bool showCount = (it.count >= 0);
+            int rightPad = (showCount ? 36 : 0) + (vcat ? 22 : 0);
+            p.drawText(QRect(18, r.y(), width() - 24 - rightPad, r.height()),
                        Qt::AlignVCenter | Qt::AlignLeft, it.text);
             if (vcat)
-                p.drawText(QRect(width() - 24, r.y(), 18, r.height()),
+                p.drawText(QRect(width() - 24 - (showCount ? 36 : 0),
+                                 r.y(), 18, r.height()),
                            Qt::AlignVCenter | Qt::AlignRight, qFromUtf8("…"));
+            if (showCount)
+                p.drawText(QRect(width() - 46, r.y(), 36, r.height()),
+                           Qt::AlignVCenter | Qt::AlignRight,
+                           QString::number(it.count));
             continue;
         }
         bool selected = false;
@@ -532,7 +554,17 @@ void SideNav::paintEvent(QPaintEvent*)
         }
         p.setFont(selected ? bold : normal);
         p.setPen(selected ? pal.accent : pal.textPrimary);
-        p.drawText(QRect(20, r.y(), width() - 28, r.height()), Qt::AlignVCenter | Qt::AlignLeft, it.text);
+        const bool showCount = (it.count >= 0);
+        p.drawText(QRect(20, r.y(), width() - 28 - (showCount ? 36 : 0),
+                         r.height()),
+                   Qt::AlignVCenter | Qt::AlignLeft, it.text);
+        if (showCount) {
+            p.setFont(small);
+            p.setPen(pal.textMuted);
+            p.drawText(QRect(width() - 46, r.y(), 36, r.height()),
+                       Qt::AlignVCenter | Qt::AlignRight,
+                       QString::number(it.count));
+        }
     }
 }
 

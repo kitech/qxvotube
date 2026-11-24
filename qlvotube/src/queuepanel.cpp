@@ -268,7 +268,11 @@ void QueuePanel::paintEvent(QPaintEvent*)
 
     p.setFont(hdr);
     p.setPen(pal.textPrimary);
-    p.drawText(QRect(16, 10, width() - 32, 24), Qt::AlignVCenter | Qt::AlignLeft, m_title);
+    p.drawText(QRect(16, 10, width() - 32, 24),
+               Qt::AlignVCenter | Qt::AlignLeft,
+               m_title + QString(" (%1/%2)")
+                             .arg(m_currentIdx >= 0 ? m_currentIdx + 1 : 0)
+                             .arg((int)m_queue.size()));
 
     int y = 46;
     if (m_hasCurrent) {
