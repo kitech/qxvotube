@@ -88,6 +88,7 @@
 - 当前实现:设置 → 账号页粘贴 Cookie(ui.conf `bilibili/cookie`),保存后写入 config `bilibili.cookie`、应用到 provider，并用 `/x/web-interface/nav` 校验;成功更新左上角昵称。
 - B站分类顺序:个人动态(始终显示,未登录点击提示需要登录) → 首页推荐(游客可用) → 全站热门(原“推荐”改名) → 分区。
 - 首页推荐“换一换”:provider 维护 fresh_idx 计数器,刷新/再次点击入口时 +1;
+  进程首次请求取随机起点(避免短时间重启固定同一批);
   CookieJar 挂到 NetClient 并先预热 bilibili.com 再请求,确保 buvid3 已就绪。
 
 ## 设置窗新增字段(ConfigDialog“通用”页扩展/新增页“视频后端”)

@@ -49,6 +49,7 @@ private:
     bool m_jarInit = false;
     QStringList m_dynOffsets;   // 个人动态分页游标(page N → N-1 返回的 offset)
     int m_rcmdFresh = 0;        // 首页推荐“换一换”批次(fresh_idx)
+    bool m_rcmdSeeded = false;  // 进程内首次请求是否已取随机起点
     bool m_warmTried = false;   // buvid3 预热是否已尝试(防止递归)
     streamcache::Cache m_cache;
 };

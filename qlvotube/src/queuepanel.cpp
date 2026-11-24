@@ -33,7 +33,7 @@ static void drawPlayTriangle(QPainter& p, const QRect& r, const QColor& c)
 QueuePanel::QueuePanel(QWidget* parent)
     : QWidget(parent), m_hasCurrent(false), m_currentIdx(-1),
       m_scrollBar(0), m_scrollY(0), m_scrollDelta(0), m_listTop(46),
-      m_tipRow(-1), m_tipTimer(0)
+      m_scrollToCurrent(false), m_tipRow(-1), m_tipTimer(0)
 {
     setMinimumWidth(200);
     setMaximumWidth(320);
@@ -64,9 +64,15 @@ void QueuePanel::setCurrentTrack(const Track& t)
 
 void QueuePanel::setCurrentIndex(int index)
 {
-    if (m_currentIdx == index) return;
+    if (m_currentIdx == index) {
+        /* 同一项重播/重新进入时也把当前行拉回视野 */
+        m_scrollToCurrent = true;
+        update();
+        return;
+    }
     cancelTip();                       /* 高亮行变了,旧提示锚点失效 */
     m_currentIdx = index;
+    m_scrollToCurrent = true;
     update();
 }
 
@@ -76,6 +82,7 @@ void QueuePanel::setQueue(const std::vector<Track>& queue, int startIndex)
     m_queue = queue;
     m_currentIdx = startIndex;
     m_scrollY = 0;
+    m_scrollToCurrent = true;
     updateScrollBar();
     update();
 }
@@ -105,6 +112,23 @@ QString QueuePanel::queueTitle() const
                         .arg((int)m_queue.size());
 }
 
+void QueuePanel::ensureCurrentVisible()
+{
+    if (m_currentIdx < 0) return;
+    const int viewH = qMax(0, height() - m_listTop);
+    if (viewH <= 0) return;
+    const int top = m_currentIdx * 44;
+    const int bottom = top + 44;
+    if (top < m_scrollY)
+        m_scrollY = top;
+    else if (bottom > m_scrollY + viewH)
+        m_scrollY = bottom - viewH;
+    const int max = qMax(0, (int)m_queue.size() * 44 - viewH);
+    if (m_scrollY < 0) m_scrollY = 0;
+    if (m_scrollY > max) m_scrollY = max;
+    updateScrollBar();
+}
+
 void QueuePanel::onScroll(int v)
 {
     m_scrollY = v;
@@ -131,6 +155,7 @@ void QueuePanel::resizeEvent(QResizeEvent* e)
     QWidget::resizeEvent(e);
     if (m_scrollBar)
         m_scrollBar->setGeometry(width() - 12, m_listTop, 12, qMax(0, height() - m_listTop));
+    m_scrollToCurrent = true;          /* 可视高度变化后保持当前行可见 */
     updateScrollBar();
 }
 
@@ -319,6 +344,10 @@ void QueuePanel::paintEvent(QPaintEvent*)
 
     /* 列表区顶部固定，曲目区进入滚动域（对齐 ContentView 滚动模式） */
     m_listTop = y;
+    if (m_scrollToCurrent) {
+        m_scrollToCurrent = false;
+        ensureCurrentVisible();
+    }
     p.setClipRect(0, y, width(), height() - y);
     for (size_t i = 0; i < m_queue.size(); ++i) {
         int ry = y + (int)i * 44 - m_scrollY;

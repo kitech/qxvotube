@@ -31,6 +31,7 @@ protected:
 private:
     void updateScrollBar();
     QString queueTitle() const;             // "播放队列 (i/total)"
+    void ensureCurrentVisible();            // 当前行滚入可视区
     void cancelTip();                       // 停表 + 隐藏 + 清目标
     QRect currentTitleRect() const;         // 封面下方大标题矩形
     QRect rowTitleRect(int row) const;      // 列表行标题矩形
@@ -49,6 +50,7 @@ private:
     int m_scrollDelta;
     int m_listTop;      /* 曲目列表区顶部（paint 时按封面实高刷新） */
     QString m_title;
+    bool m_scrollToCurrent;  // paint 内把当前行滚入视野(索引变化/首次进入)
     /* 标题 Tooltip:-1=无,-2=当前大标题,>=0=列表行;timer 活动=延时中 */
     int m_tipRow;
     QTimer* m_tipTimer;

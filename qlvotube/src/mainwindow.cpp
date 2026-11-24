@@ -1761,6 +1761,14 @@ void MainWindow::onGridLoadMore()
 void MainWindow::onVideoActivated(const QString& id)
 {
     if (!m_curProv && m_netTvRegion.isEmpty()) return;   /* 网络电视为内置旁路,无需 provider */
+    /* 已在当前播放队列中:复用队列,避免重建后列表跳回顶部/重复 */
+    if (m_videoMode) {
+        for (int i = 0; i < (int)m_videoIds.size(); ++i)
+            if (m_videoIds[i] == id) {
+                playVideoAt(i);
+                return;
+            }
+    }
     int idx = -1;
     for (int i = 0; i < (int)m_videoCards.size(); ++i)
         if (m_videoCards[i].id == id) { idx = i; break; }
@@ -1775,8 +1783,12 @@ void MainWindow::enterVideoMode(int index)
 
     m_videoQueue.clear();
     m_videoIds.clear();
+    QStringList seen;
+    int qIndex = -1;
     for (int i = 0; i < (int)m_videoCards.size(); ++i) {
         const VideoCard& c = m_videoCards[i];
+        if (seen.contains(c.id)) continue;   /* 分页/搜索重复条目只保留第一条 */
+        seen.append(c.id);
         Track t;
         t.id = i;
         t.title = c.title;
@@ -1797,15 +1809,20 @@ void MainWindow::enterVideoMode(int index)
         t.ncmId = 0;
         t.albumId = 0;
         t.playable = true;
+        if (i == index) qIndex = (int)m_videoQueue.size();
         m_videoQueue.push_back(t);
         m_videoIds.push_back(c.id);
     }
     m_videoMode = true;
-    m_videoIdx = index;
+    m_videoIdx = (qIndex >= 0) ? qIndex : 0;
+    if (m_videoIdx >= (int)m_videoQueue.size())
+        m_videoIdx = (int)m_videoQueue.size() - 1;
+    if (m_videoIdx < 0) m_videoIdx = 0;
     saveQueueSnapshot();
     if (queuePanel) {
         queuePanel->setQueue(m_videoQueue, m_videoIdx);
         queuePanel->setCurrentTrack(m_videoQueue[m_videoIdx]);
+        queuePanel->setCurrentIndex(m_videoIdx);
     }
     if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
@@ -1870,6 +1887,17 @@ void MainWindow::playVideoAt(int index)
     saveQueueSnapshot();
     if (queuePanel) queuePanel->setCurrentTrack(m_videoQueue[index]);
     if (queuePanel) queuePanel->setCurrentIndex(index);   /* 高亮/三角跟随当前行 */
+    if (getenv("QLVOTUBE_DEBUG") != 0) {
+#if QT_VERSION >= 0x060000
+        qDebug() << "queue sync: idx" << index << "total"
+                 << int(m_videoQueue.size())
+                 << "title" << m_videoQueue[index].title;
+#else
+        qDebug("queue sync: idx=%d total=%d title=%s",
+               index, int(m_videoQueue.size()),
+               qToUtf8(m_videoQueue[index].title).data());
+#endif
+    }
     if (playerBar) playerBar->setTrack(m_videoQueue[index]);
     if (contentView) contentView->setPlayingVideoId(id);   /* 列表 ▶ 标识 */
     if (videoPane) videoPane->setVideoTitle(m_videoQueue[index].title);   /* 视频页顶栏标题 */
@@ -3931,7 +3959,12 @@ void MainWindow::restoreQueueSnapshot()
 
     m_videoQueue.clear();
     m_videoIds.clear();
+    QStringList seen;
+    int qCurrent = -1;
     for (size_t i = 0; i < cards.size(); ++i) {
+        if (cards[i].id.isEmpty() || seen.contains(cards[i].id))
+            continue;                        /* 快照重复/空 id 跳过 */
+        seen.append(cards[i].id);
         Track t;
         t.id = (int)i;
         t.title = cards[i].title;
@@ -3939,22 +3972,32 @@ void MainWindow::restoreQueueSnapshot()
         t.coverUrl = cards[i].cover;
         t.durationMs = (int)cards[i].durationMs;
         t.playable = true;
+        if ((int)i == current) qCurrent = (int)m_videoQueue.size();
         m_videoQueue.push_back(t);
         m_videoIds.push_back(cards[i].id);
     }
     m_videoMode = true;
     m_gridChip = chip;
-    if (current < 0 || current >= (int)m_videoQueue.size()) current = 0;
+    if (m_videoQueue.empty())
+        return;
+    current = (qCurrent >= 0) ? qCurrent : 0;
+    if (current >= (int)m_videoQueue.size()) current = 0;
     m_videoIdx = current;
     if (queuePanel) {
         queuePanel->setQueue(m_videoQueue, m_videoIdx);
         queuePanel->setCurrentTrack(m_videoQueue[m_videoIdx]);
+        queuePanel->setCurrentIndex(m_videoIdx);
     }
     if (playerBar) {
         playerBar->setTrack(m_videoQueue[m_videoIdx]);
         playerBar->setPlaying(false);      /* 摆好但不播(qlmusic 一致) */
     }
-    m_curWebUrl = cards[current].webUrl;
+    m_curWebUrl = QString();
+    for (size_t i = 0; i < cards.size(); ++i)
+        if (cards[i].id == m_videoIds[m_videoIdx]) {
+            m_curWebUrl = cards[i].webUrl;
+            break;
+        }
 }
 
 void MainWindow::showEvent(QShowEvent* event)

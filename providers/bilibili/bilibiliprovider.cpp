@@ -346,15 +346,25 @@ void BilibiliProvider::recommendFeed(int page, SearchCb cb) {
     if (page < 1) page = 1;
     int fresh = 0;
     if (page <= 1) {
-        ++m_rcmdFresh;
+        if (!m_rcmdSeeded) {
+            m_rcmdSeeded = true;
+            /* 进程级随机起点:同一 fresh_idx 永远同一批,
+             * 固定从 1 开始会导致短时间重启看到相同列表 */
+            unsigned seed = (unsigned)::time(0)
+                          ^ (unsigned)(size_t)this;
+            m_rcmdFresh = (int)(seed % 10000) + 1;
+        } else {
+            ++m_rcmdFresh;          // 刷新/再点入口 = 换一换
+        }
         if (m_rcmdFresh < 1) m_rcmdFresh = 1;
         fresh = m_rcmdFresh;
     } else {
         fresh = m_rcmdFresh + page - 1;
+        if (fresh > m_rcmdFresh) m_rcmdFresh = fresh;  // 翻页也推进批次
     }
     QUrlQuery q;
     q.addQueryItem("fresh_type", "4");
-    q.addQueryItem("ps", "12");
+    q.addQueryItem("ps", "20");
     q.addQueryItem("fresh_idx", QString::number(fresh));
     q.addQueryItem("fresh_idx_1h", QString::number(fresh));
     q.addQueryItem("brush", QString::number(fresh));
