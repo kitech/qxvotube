@@ -327,7 +327,16 @@ void SideNav::relayout()
         y += 8;
         it.kind = NavHeader; it.id = 0; it.text = m_groupVideoCats;
         it.cat = QString();
-        it.count = (int)m_videoCatKeys.size();   /* 视频分类：分类个数 */
+        {
+            /* 分类个数只算真实分区,不含“个人动态/首页推荐/全站热门”等入口 */
+            int cats = 0;
+            for (int k = 0; k < (int)m_videoCatKeys.size(); ++k) {
+                const QString& ck = m_videoCatKeys[k];
+                if (!ck.isEmpty() && !ck.startsWith(qFromUtf8("@")))
+                    cats++;
+            }
+            it.count = cats;
+        }
         it.y = y; it.h = kGroupH; y += kGroupH;
         m_items.push_back(it);
         for (int i = 0; i < (int)m_videoCatKeys.size(); ++i) {

@@ -139,7 +139,10 @@
     "cache_tab": "Cache",
     "image_cache_label": "Image cache limit (MB)",
     "video_cache_label": "Video cache limit (MB)",
-    "cache_hint": "Image cache is trimmed by LRU when over the limit; video caching will be added later."
+    "cache_hint": "Image cache is trimmed by LRU when over the limit; video caching will be added later.",
+    "account_tab": "Account",
+    "cookie_label": "Bilibili cookie",
+    "cookie_hint": "Paste browser cookies (at least SESSDATA=...; optionally bili_jct, DedeUserID). Login is verified on save; Personal Feed requires login."
   },
   "action": {
     "new": "New",

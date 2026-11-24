@@ -138,6 +138,13 @@ public:
         cb(Result::fail(Err::Unsupported, "categoriesRefresh not implemented"),
            QList36<CategoryItem>());
     }
+
+    /* 账号校验(可选,追加在虚表末尾保持 ABI):成功返回昵称;
+     * 未登录/失效返回 NeedAuth/AuthExpired。默认不支持。 */
+    virtual void verifyAuth(std::function<void(const Result&, const QString&)> cb) {
+        cb(Result::fail(Err::Unsupported, "verifyAuth not implemented"),
+           QString());
+    }
 };
 
 // 注册表:平台 id → provider 实例(main/UI 层据此枚举源)

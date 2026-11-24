@@ -630,13 +630,13 @@ void ContentView::paintEvent(QPaintEvent*)
         p.drawText(pa, Qt::AlignCenter, m_playAll);
     } else {
         /* List/Grid 模式：标题 + 返回按钮 */
-        QString listTitle = m_listTitle;
-        if (m_mode == VideoGridMode && !m_videos.empty())
-            listTitle += qFromUtf8(" · %1 个").arg((int)m_videos.size());
+        int titleW = width() - 260;
+        if (m_mode == VideoGridMode && m_gridPage > 0)
+            titleW = width() - 320;   /* 给“第 N 页 · N 个”让位 */
         p.setFont(titleFont);
         p.setPen(pal.textPrimary);
-        p.drawText(QRect(20, 4, width() - 260, 30),
-                   Qt::AlignVCenter | Qt::AlignLeft, listTitle);
+        p.drawText(QRect(20, 4, titleW, 30),
+                   Qt::AlignVCenter | Qt::AlignLeft, m_listTitle);
 
         QRect br = backRect();
         p.setPen(Qt::NoPen);
@@ -648,11 +648,14 @@ void ContentView::paintEvent(QPaintEvent*)
     }
 
     if (m_mode == VideoGridMode && m_gridPage > 0) {
+        QString pageText = qFromUtf8("第 %1 页").arg(m_gridPage);
+        if (!m_videos.empty())
+            pageText += qFromUtf8(" · %1 个").arg((int)m_videos.size());
         p.setFont(small);
         p.setPen(pal.textMuted);
-        p.drawText(QRect(width() - 260, 4, 84, 30),
+        p.drawText(QRect(width() - 300, 4, 124, 30),
                    Qt::AlignVCenter | Qt::AlignRight,
-                   qFromUtf8("第 %1 页").arg(m_gridPage));
+                   pageText);
     }
 
     /* 所有列表模式右上角:刷新按钮(在返回按钮左侧,两种模式通用) */

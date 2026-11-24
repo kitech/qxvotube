@@ -98,6 +98,13 @@ void QueuePanel::updateScrollBar()
     }
 }
 
+QString QueuePanel::queueTitle() const
+{
+    return m_title + QString(" (%1/%2)")
+                        .arg(m_currentIdx >= 0 ? m_currentIdx + 1 : 0)
+                        .arg((int)m_queue.size());
+}
+
 void QueuePanel::onScroll(int v)
 {
     m_scrollY = v;
@@ -270,9 +277,7 @@ void QueuePanel::paintEvent(QPaintEvent*)
     p.setPen(pal.textPrimary);
     p.drawText(QRect(16, 10, width() - 32, 24),
                Qt::AlignVCenter | Qt::AlignLeft,
-               m_title + QString(" (%1/%2)")
-                             .arg(m_currentIdx >= 0 ? m_currentIdx + 1 : 0)
-                             .arg((int)m_queue.size()));
+               queueTitle());
 
     int y = 46;
     if (m_hasCurrent) {
@@ -308,7 +313,8 @@ void QueuePanel::paintEvent(QPaintEvent*)
 
     p.setFont(small);
     p.setPen(pal.textMuted);
-    p.drawText(QRect(16, y, width() - 32, 20), Qt::AlignVCenter | Qt::AlignLeft, m_title);
+    p.drawText(QRect(16, y, width() - 32, 20),
+               Qt::AlignVCenter | Qt::AlignLeft, queueTitle());
     y += 24;
 
     /* 列表区顶部固定，曲目区进入滚动域（对齐 ContentView 滚动模式） */

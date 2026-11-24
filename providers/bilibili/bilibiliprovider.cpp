@@ -22,9 +22,13 @@
 
 namespace qxv {
 
+static const char* kCatRcmd    = "@rcmd";
+static const char* kCatDynamic = "@dynamic";
+
 void BilibiliProvider::cancel() {
     m_net.cancel();      // 在途/重试/待投递回调全部作废
     m_cache.clear();     // 直链缓存一并清(避免播到已取消请求对应的旧地址)
+    m_dynOffsets.clear(); // 个人动态游标作废
 }
 
 
@@ -61,10 +65,14 @@ static Result checkApi(const QByteArray& body, JRoot& root,
 
 void BilibiliProvider::apiGet(const QString& path, const QString& query,
                               std::function<void(const NetResponse&)> cb) {
-    static NetClient net;           // 进程级共享(httplib 阻塞型,线程池在内部)
-    static CookieJar jar;
-    if (jar.cookieForUrl(qFromUtf8("https://www.bilibili.com")).isEmpty()) {
-        // 首次:种 buvid3(风控要求)
+    /* CookieJar 必须挂到 NetClient,否则 buvid3/登录 cookie 都不会被回存 */
+    if (!m_jarInit) {
+        m_net.setCookieJar(&m_jar);
+        m_jarInit = true;
+    }
+    if (m_jar.cookieForUrl(qFromUtf8("https://www.bilibili.com")).isEmpty()
+        && !m_warmTried) {
+        m_warmTried = true;
         NetRequest warm;
         warm.url = qFromUtf8("https://www.bilibili.com/");
         for (const auto& h : Fingerprint::chromeWeb(
@@ -75,7 +83,11 @@ void BilibiliProvider::apiGet(const QString& path, const QString& query,
         warm.maxAttempts = 2;
         const QString warmPx = effectiveProxy(m_proxy, mustProxy(), kMod);
         if (!warmPx.isEmpty()) warm.proxy = warmPx;
-        m_net.send(warm, [](const NetResponse&) {});
+        /* 预热完成后再发真实请求(顺序化,确保 buvid3 已就绪) */
+        m_net.send(warm, [this, path, query, cb](const NetResponse&) {
+            this->apiGet(path, query, cb);
+        });
+        return;
     }
 
     NetRequest req;
@@ -86,8 +98,10 @@ void BilibiliProvider::apiGet(const QString& path, const QString& query,
     req.headers.append(qMakePair(qFromUtf8("Referer"),
         qFromUtf8("https://www.bilibili.com/")));
     const QString token = qMapValue(m_cred, qFromUtf8("cookie"), QVariant()).toString();
-    if (!token.isEmpty())
+    if (!token.isEmpty()) {
         req.headers.append({ "Cookie", token });
+        req.autoCookie = false;   /* 手工 Cookie 完整优先,避免被 jar 的 buvid 覆盖 */
+    }
     const QString px = effectiveProxy(m_proxy, mustProxy(), kMod);
     if (!px.isEmpty()) req.proxy = px;
     DBG_P(kMod, Debug, "GET %s", qToUtf8(req.url).data());
@@ -204,7 +218,10 @@ void BilibiliProvider::categories(
                                           + qFromUtf8(" · 0")));
             seen.append(key);
         }
-        regs.prepend(CategoryItem(QString(), QString()));   // 推荐
+        /* 顺序固定:个人动态 → 首页推荐 → 全站热门 → 分区 */
+        regs.prepend(CategoryItem(QString(), qFromUtf8("全站热门")));
+        regs.prepend(CategoryItem(qFromUtf8(kCatRcmd), qFromUtf8("首页推荐")));
+        regs.prepend(CategoryItem(qFromUtf8(kCatDynamic), qFromUtf8("个人动态")));
         g_regions = regs;
         g_regionsAt = (long long)::time(0);
         cb(Result::ok(), regs);
@@ -212,8 +229,23 @@ void BilibiliProvider::categories(
 }
 
 void BilibiliProvider::categoryFeed(const QString& key, int page, SearchCb cb) {
-    if (key.isEmpty()) {   // 推荐
-        DBG_P(kMod, Debug, "categoryFeed: 推荐 -> homeFeed p%d", page);
+    if (key == qFromUtf8(kCatDynamic)) {
+        const QString cookie =
+            qMapValue(m_cred, qFromUtf8("cookie"), QVariant()).toString();
+        if (qTrim(cookie).isEmpty()) {
+            cb(Result::fail(Err::NeedAuth,
+                            qFromUtf8("个人动态需要登录后查看")), {}, false);
+            return;
+        }
+        dynamicFeed(page, std::move(cb));
+        return;
+    }
+    if (key == qFromUtf8(kCatRcmd)) {
+        recommendFeed(page, std::move(cb));
+        return;
+    }
+    if (key.isEmpty()) {   // 全站热门
+        DBG_P(kMod, Debug, "categoryFeed: 全站热门 -> homeFeed p%d", page);
         homeFeed(page, cb);
         return;
     }
@@ -305,6 +337,122 @@ void BilibiliProvider::homeFeed(int page, SearchCb cb) {
         DBG_P(kMod, Debug, "homeFeed p%d -> %d items (hasMore=%d)",
               page, items.size(), int(hasMore));
         cb(Result::ok(), items, hasMore);
+    });
+}
+
+/* 首页推荐:游客可用(实测 code=0),不强制 WBI;失败按网络错误上报。
+ * 换一换 = fresh_idx 递增;同一 fresh_idx 永远返回同一批。 */
+void BilibiliProvider::recommendFeed(int page, SearchCb cb) {
+    if (page < 1) page = 1;
+    int fresh = 0;
+    if (page <= 1) {
+        ++m_rcmdFresh;
+        if (m_rcmdFresh < 1) m_rcmdFresh = 1;
+        fresh = m_rcmdFresh;
+    } else {
+        fresh = m_rcmdFresh + page - 1;
+    }
+    QUrlQuery q;
+    q.addQueryItem("fresh_type", "4");
+    q.addQueryItem("ps", "12");
+    q.addQueryItem("fresh_idx", QString::number(fresh));
+    q.addQueryItem("fresh_idx_1h", QString::number(fresh));
+    q.addQueryItem("brush", QString::number(fresh));
+    q.addQueryItem("fetch_row", "16");
+    q.addQueryItem("y_num", "4");
+    q.addQueryItem("web_location", "1430650");
+    q.addQueryItem("homepage_ver", "1");
+    apiGet("/x/web-interface/wbi/index/top/feed/rcmd", q.toString(),
+           [this, cb, page, fresh](const NetResponse& r) {
+        if (!r.ok()) {
+            cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error),
+                   r.status, QString(), qbaHead(r.body, 200)),
+               {}, false);
+            return;
+        }
+        JRoot root;
+        const Result res = checkApi(r.body, root, credContext(m_cred));
+        if (res.code != Err::Ok) { cb(res, {}, false); return; }
+        bool hasMore = false;
+        const QList36<VideoItem> items =
+            bilibili::parse::homeRecommend(root.p, &hasMore);
+        DBG_P(kMod, Debug, "rcmd fresh=%d p%d -> %d items (first=%s)",
+              fresh, page, items.size(),
+              items.isEmpty() ? "" : qToUtf8(items[0].id).data());
+        cb(Result::ok(), items, hasMore);
+    });
+}
+
+/* 个人动态:必须 SESSDATA;page→offset 游标缓存 */
+void BilibiliProvider::dynamicFeed(int page, SearchCb cb) {
+    if (page < 1) page = 1;
+    QString offset;
+    if (page > 1) {
+        const int idx = page - 2;
+        if (idx < 0 || idx >= m_dynOffsets.size()) {
+            cb(Result::ok(), {}, false);   // 已到末尾
+            return;
+        }
+        offset = m_dynOffsets[idx];
+        if (offset.isEmpty()) { cb(Result::ok(), {}, false); return; }
+    }
+    QUrlQuery q;
+    q.addQueryItem("type", "video");
+    q.addQueryItem("page", QString::number(page));
+    q.addQueryItem("offset", offset);
+    q.addQueryItem("timezone_offset", "-480");
+    q.addQueryItem("features", "itemOpusStyle");
+    apiGet("/x/polymer/web-dynamic/v1/feed/all", q.toString(),
+           [this, cb, page](const NetResponse& r) {
+        if (!r.ok()) {
+            cb(withServer(Result::fail(Err::Network, r.error.isEmpty()
+                   ? qFromUtf8("http %1").arg(r.status) : r.error),
+                   r.status, QString(), qbaHead(r.body, 200)),
+               {}, false);
+            return;
+        }
+        JRoot root;
+        const Result res = checkApi(r.body, root, credContext(m_cred));
+        if (res.code != Err::Ok) { cb(res, {}, false); return; }
+        QString nextOffset;
+        bool hasMore = false;
+        const QList36<VideoItem> items =
+            bilibili::parse::dynamicVideoFeed(root.p, &nextOffset, &hasMore);
+        if (page == 1) m_dynOffsets.clear();
+        if (!nextOffset.isEmpty()) m_dynOffsets.append(nextOffset);
+        DBG_P(kMod, Debug, "dynamic p%d -> %d video items (more=%d)",
+              page, items.size(), int(hasMore));
+        cb(Result::ok(), items, hasMore);
+    });
+}
+
+void BilibiliProvider::verifyAuth(
+        std::function<void(const Result&, const QString&)> cb) {
+    const QString cookie =
+        qMapValue(m_cred, qFromUtf8("cookie"), QVariant()).toString();
+    if (qTrim(cookie).isEmpty()) {
+        cb(Result::fail(Err::NeedAuth, qFromUtf8("未设置 Cookie")), QString());
+        return;
+    }
+    apiGet("/x/web-interface/nav", QString(),
+           [this, cb](const NetResponse& r) {
+        if (!r.ok()) {
+            cb(withServer(Result::fail(Err::Network, qFromUtf8("http %1")
+                   .arg(r.status)), r.status, QString(),
+                   qbaHead(r.body, 200)), QString());
+            return;
+        }
+        JRoot root;
+        const Result res = checkApi(r.body, root, credContext(m_cred));
+        if (res.code != Err::Ok) { cb(res, QString()); return; }
+        const cJSON* data = jobj(root.p, "data");
+        if (!jbool(data, "isLogin")) {
+            cb(Result::fail(Err::AuthExpired,
+                            qFromUtf8("登录已过期，请更新 Cookie")), QString());
+            return;
+        }
+        cb(Result::ok(), jstr(data, "uname"));
     });
 }
 

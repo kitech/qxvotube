@@ -139,7 +139,10 @@
     "cache_tab": "缓存",
     "image_cache_label": "图片缓存上限（MB）",
     "video_cache_label": "视频缓存上限（MB）",
-    "cache_hint": "图片缓存超出上限时按最近最少使用自动清理；视频缓存后续版本接入。"
+    "cache_hint": "图片缓存超出上限时按最近最少使用自动清理；视频缓存后续版本接入。",
+    "account_tab": "账号",
+    "cookie_label": "B站 Cookie",
+    "cookie_hint": "粘贴浏览器 Cookie（至少包含 SESSDATA=...；可选 bili_jct、DedeUserID）。保存后自动校验登录态；个人动态需要登录后才能查看。"
   },
   "action": {
     "new": "新建",

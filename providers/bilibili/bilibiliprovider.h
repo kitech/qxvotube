@@ -35,15 +35,21 @@ public:
     void setProxy(const ProxyConfig& p) override { m_proxy = p; }
     void setCredentials(const QVariantMap& c) override { m_cred = c; }
     void cancel() override;
+    void verifyAuth(std::function<void(const Result&, const QString&)> cb) override;
 
 private:
     void apiGet(const QString& path, const QString& query,
                 std::function<void(const NetResponse&)> cb);
+    void recommendFeed(int page, SearchCb cb);
+    void dynamicFeed(int page, SearchCb cb);
     ProxyConfig m_proxy;
     QVariantMap m_cred;
     NetClient m_net;
     CookieJar m_jar;
     bool m_jarInit = false;
+    QStringList m_dynOffsets;   // 个人动态分页游标(page N → N-1 返回的 offset)
+    int m_rcmdFresh = 0;        // 首页推荐“换一换”批次(fresh_idx)
+    bool m_warmTried = false;   // buvid3 预热是否已尝试(防止递归)
     streamcache::Cache m_cache;
 };
 

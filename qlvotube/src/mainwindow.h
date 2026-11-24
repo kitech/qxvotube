@@ -162,6 +162,8 @@ private:
     bool skipUnplayableItem(const QString& why);
     void cancelPendingSkip();
     void stopForPlaybackError();        /* 停住:网络/登录/风控/会员/地区等 */
+    void applyBilibiliCredentials(const QString& cookie);
+    void verifyBilibiliAuth();
     enum { kErrSkipStopAt = 3 };        /* 连续最多自动跳 3 次 */
     void saveQueueSnapshot();
     void restoreQueueSnapshot();

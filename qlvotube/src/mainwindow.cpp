@@ -1377,6 +1377,7 @@ void MainWindow::setupVideoProviders()
         m_providers[i]->setProxy(pc);
         ids.append(m_providers[i]->id());
     }
+    applyBilibiliCredentials(Config::value(qFromUtf8("bilibili.cookie")));
     ids.append(qFromUtf8("retv"));   /* 占位站点:retv美剧(暂未实现,仅列表入口) */
     if (getenv("QLVOTUBE_DEBUG") != 0)
 #if QT_VERSION >= 0x060000
@@ -1387,6 +1388,38 @@ void MainWindow::setupVideoProviders()
                qToUtf8(ids.join(qFromUtf8(","))).data());
 #endif
     sideNav->setVideoSites(ids);   /* 触发一次 siteChanged(第一个源) */
+}
+
+void MainWindow::applyBilibiliCredentials(const QString& cookie)
+{
+    QVariantMap c;
+    const QString ck = qTrim(cookie);
+    if (!ck.isEmpty()) c.insert(qFromUtf8("cookie"), ck);
+    for (int i = 0; i < m_providers.size(); ++i)
+        if (m_providers[i]->id() == qFromUtf8("bilibili"))
+            m_providers[i]->setCredentials(c);
+}
+
+void MainWindow::verifyBilibiliAuth()
+{
+    for (int i = 0; i < m_providers.size(); ++i) {
+        if (m_providers[i]->id() != qFromUtf8("bilibili"))
+            continue;
+        m_providers[i]->verifyAuth(
+            [this](const qxv::Result& r, const QString& name) {
+            if (r.code == qxv::Err::Ok) {
+                if (sideNav) sideNav->setUserLoggedIn(name, name);
+                SharedStatusBar::instance()->showMessage(
+                    qFromUtf8("已登录: ") + name, 3000);
+            } else {
+                if (sideNav) sideNav->setUserLoggedIn(QString(), QString());
+                SharedStatusBar::instance()->showMessageTyped(
+                    r.message.isEmpty() ? qFromUtf8("登录校验失败") : r.message,
+                    StatusError, 5000);
+            }
+        });
+        return;
+    }
 }
 
 /* M7:默认播放分辨率(配置 video.quality;env QLVOTUBE_QUALITY 可覆盖)。
@@ -1644,7 +1677,13 @@ QString MainWindow::videoGridTitle() const
 
 void MainWindow::onVideoCategorySelected(const QString& key)
 {
-    if (!m_curProv || key == m_gridChip) return;
+    if (!m_curProv) return;
+    if (key == m_gridChip) {
+        /* 再点一次“首页推荐” = 换一换(其余分类保持原行为) */
+        if (key == qFromUtf8("@rcmd"))
+            onListRefresh();
+        return;
+    }
     m_gridChip = key;
     m_gridPage = 1;
     m_gridHasMore = true;
@@ -2035,6 +2074,24 @@ void MainWindow::openSettings()
     dlg->registerConfigItem(imgItem);
     dlg->registerConfigItem(vidItem);
 
+    /* —— 账号页:B站 Cookie(个人动态/高清等需要) —— */
+    CategoryPage* apage = new CategoryPage(_("settings.account_tab"), dlg);
+    StringConfigItem* cookieItem = new StringConfigItem(
+        "bilibili/cookie", Config::value(qFromUtf8("bilibili.cookie")),
+        _("settings.cookie_label"), apage);
+    apage->addLabeledControl(_("settings.cookie_label"),
+                             cookieItem->lineEdit());
+    QLabel* ahint = new QLabel(_("settings.cookie_hint"), apage);
+#if QT_VERSION >= 0x040000
+    ahint->setWordWrap(true);
+#else
+    ahint->setAlignment(Qt::WordBreak | Qt::AlignLeft);
+    ahint->setMinimumHeight(44);
+#endif
+    apage->addWidget(ahint);
+    dlg->addCategory(_("settings.account_tab"), apage);
+    dlg->registerConfigItem(cookieItem);
+
     /* —— 关于页 —— */
     CategoryPage* about = new CategoryPage(_("menu.help"), dlg);
     QLabel* aboutLabel = new QLabel(
@@ -2056,6 +2113,18 @@ void MainWindow::openSettings()
 
 void MainWindow::onSettingsSaved(const SettingsChangedMap& changed)
 {
+    if (changed.contains("bilibili/cookie")) {
+        const QString ck = qTrim(changed["bilibili/cookie"].toString());
+        Config::setValue("bilibili.cookie", ck);
+        applyBilibiliCredentials(ck);
+        verifyBilibiliAuth();
+        if (m_curProv != 0 && m_curProv->id() == qFromUtf8("bilibili")
+            && m_gridChip == qFromUtf8("@dynamic")) {
+            m_gridPage = 1;
+            m_gridLoading = false;
+            loadVideoPage(1);            /* 登录态变化:刷新当前动态 */
+        }
+    }
     if (changed.contains("cache/image_max_mb")) {
         int mb = changed["cache/image_max_mb"].toInt();
         Config::setValue("cache.image_max_mb", QString::number(mb));
@@ -2791,6 +2860,8 @@ void MainWindow::onListRefresh()
         m_gridLoading = false;
         ++m_gridGen;                      /* 作废旧在途响应 */
         contentView->setVideoGridLoading(true);
+        if (m_gridChip == qFromUtf8("@rcmd"))
+            SharedStatusBar::instance()->showMessage(qFromUtf8("换一换…"), 1000);
         loadVideoPage(1);                 /* 保留当前分类/搜索词,重拉首页 */
     } else if (m_curProv != 0) {
         onSiteChanged(m_curProv->id());   /* 歌单/分类宫格:重载当前站点 */
@@ -3380,16 +3451,30 @@ void MainWindow::customEvent(CustomEventBase* event)
                 chips.push_back(CategoryChip(e->catKeys[i], e->catNames[i]));
             if (chips.empty())   /* 无分类能力 → 仅推荐(homeFeed) */
                 chips.push_back(CategoryChip(QString(), QString()));
+
+            /* 默认首页推荐;恢复队列/原地刷新时保留有效 chip(空 chip 不算) */
+            QString want = m_gridChip;
+            bool valid = false;
+            for (int i = 0; i < (int)chips.size(); ++i)
+                if (!want.isEmpty() && chips[i].key == want) valid = true;
+            if (!valid) {
+                want = chips.front().key;
+                for (int i = 0; i < (int)chips.size(); ++i)
+                    if (chips[i].key == qFromUtf8("@rcmd")) {
+                        want = chips[i].key;
+                        break;
+                    }
+            }
             if (getenv("QLVOTUBE_DEBUG") != 0) {
 #if QT_VERSION >= 0x060000
                 qDebug() << "chips:" << int(chips.size())
-                         << "active" << chips.front().key;
+                         << "active" << want;
 #else
                 qDebug("chips: %d active '%s'", int(chips.size()),
-                       qToUtf8(chips.front().key).data());
+                       qToUtf8(want).data());
 #endif
             }
-            m_gridChip = chips.front().key;
+            m_gridChip = want;
             m_chipList = chips;
             /* 动态分类 → 左侧栏(「推荐」+各分类),高亮首个 */
             QStringList names, keys;

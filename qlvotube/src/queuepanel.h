@@ -30,6 +30,7 @@ protected:
 
 private:
     void updateScrollBar();
+    QString queueTitle() const;             // "播放队列 (i/total)"
     void cancelTip();                       // 停表 + 隐藏 + 清目标
     QRect currentTitleRect() const;         // 封面下方大标题矩形
     QRect rowTitleRect(int row) const;      // 列表行标题矩形

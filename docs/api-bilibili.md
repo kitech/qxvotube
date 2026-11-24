@@ -39,6 +39,9 @@
 | 端点 | 鉴权 | 关键参数 | data 关键字段 |
 |---|---|---|---|
 | `/x/web-interface/popular` | 免签(带 cookie 则个性化) | `pn`(页码,默认1)、`ps`(每页,默认20) | `data.list[]`、`data.no_more` |
+| `/x/web-interface/wbi/index/top/feed/rcmd` | 游客可用(实测无 w_rid 也 code=0) | `fresh_type=4`、`ps=12`、`fresh_idx`、`fresh_idx_1h`、`brush`、`fetch_row=16`、`y_num=4`、`web_location=1430650`、`homepage_ver=1` | **首页推荐** `data.item[]`(仅 goto=av)；**同一 fresh_idx 返回同一批，换一换必须递增** |
+| `/x/polymer/web-dynamic/v1/feed/all` | **必须 SESSDATA** | `type=video`、`page`、`offset`、`timezone_offset=-480` | **个人动态** `data.items[]`(DYNAMIC_TYPE_AV)、`data.offset`、`data.has_more` |
+| `/x/web-interface/nav` | 有 cookie 校验 | — | `data.isLogin`、`data.uname`、`data.mid` |
 | `/x/web-interface/popular/series/list` | 免签(可能 -352) | — | 每周必看列表(点进 `popular/series/one?number=`) |
 | `/x/web-interface/popular/series/one` | 免签 | `number`(系列号)、`pn`/`ps` | 视频列表 |
 | `/x/web-interface/dynamic/region` | 免签(旧接口) | `rid`(分区 id: 1=动画 …, 全表入源码)、`pn`、`ps` | `data.archives[]`、`no_more` |

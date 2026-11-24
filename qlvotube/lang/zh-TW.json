@@ -139,7 +139,10 @@
     "cache_tab": "快取",
     "image_cache_label": "圖片快取上限（MB）",
     "video_cache_label": "影片快取上限（MB）",
-    "cache_hint": "圖片快取超出上限時依最近最少使用自動清理；影片快取後續版本接入。"
+    "cache_hint": "圖片快取超出上限時依最近最少使用自動清理；影片快取後續版本接入。",
+    "account_tab": "帳號",
+    "cookie_label": "B站 Cookie",
+    "cookie_hint": "貼上瀏覽器 Cookie（至少包含 SESSDATA=...；可選 bili_jct、DedeUserID）。儲存後自動驗證登入狀態；個人動態需要登入後才能查看。"
   },
   "action": {
     "new": "新增",

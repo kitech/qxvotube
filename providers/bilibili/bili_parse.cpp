@@ -1,6 +1,7 @@
 #include "parse.h"
 
 #include <qmap.h>
+#include <qstringlist.h>
 
 namespace qxv {
 namespace bilibili {
@@ -163,6 +164,66 @@ QList36<VideoItem> popular(cJSON* root, bool* hasMore) {
         if (!vi.id.isEmpty()) items.append(vi);
     }
     if (hasMore) *hasMore = !jbool(data, "no_more");
+    return items;
+}
+
+QList36<VideoItem> homeRecommend(cJSON* root, bool* hasMore) {
+    const cJSON* data = jobj(root, "data");
+    cJSON* arr = jarr(data, "item");
+    QList36<VideoItem> items;
+    for (int i = 0; i < jsize(arr); ++i) {
+        const cJSON* it = jat(arr, i);
+        if (jstr(it, "goto") != qFromUtf8("av"))
+            continue;
+        VideoItem vi;
+        vi.id     = jstr(it, "bvid");
+        vi.title  = stripTags(jstr(it, "title"));
+        vi.author = jstr(jobj(it, "owner"), "name");
+        vi.uid    = QString::number(jint(jobj(it, "owner"), "mid"));
+        vi.cover  = picUrl(jstr(it, "pic"));
+        vi.durationMs = jint(it, "duration") * 1000;
+        vi.publishMs = (qint64)jint(it, "pubdate") * 1000;
+        if (!vi.id.isEmpty())
+            vi.webUrl = qFromUtf8("https://www.bilibili.com/video/") + vi.id;
+        const cJSON* st = jobj(it, "stat");
+        if (st != 0) {
+            vi.stats.viewCount  = jint(st, "view");
+            vi.stats.replyCount = jint(st, "reply");
+        }
+        if (!vi.id.isEmpty()) items.append(vi);
+    }
+    if (hasMore) *hasMore = items.size() >= 20;
+    return items;
+}
+
+QList36<VideoItem> dynamicVideoFeed(cJSON* root, QString* nextOffset,
+                                    bool* hasMore) {
+    const cJSON* data = jobj(root, "data");
+    cJSON* arr = jarr(data, "items");
+    QList36<VideoItem> items;
+    for (int i = 0; i < jsize(arr); ++i) {
+        const cJSON* it = jat(arr, i);
+        if (jstr(it, "type") != qFromUtf8("DYNAMIC_TYPE_AV"))
+            continue;
+        const cJSON* modules = jobj(it, "modules");
+        const cJSON* major = jobj(jobj(modules, "module_dynamic"), "major");
+        const cJSON* arc = jobj(major, "archive");
+        if (arc == 0) continue;
+        VideoItem vi;
+        vi.id     = jstr(arc, "bvid");
+        vi.title  = stripTags(jstr(arc, "title"));
+        vi.cover  = picUrl(jstr(arc, "cover"));
+        vi.durationMs = durationTextMs(jstr(arc, "duration_text"));
+        const cJSON* author = jobj(modules, "module_author");
+        vi.author = jstr(author, "name");
+        vi.uid    = QString::number(jint(author, "mid"));
+        vi.publishMs = (qint64)jint(author, "pub_ts") * 1000;
+        if (!vi.id.isEmpty())
+            vi.webUrl = qFromUtf8("https://www.bilibili.com/video/") + vi.id;
+        if (!vi.id.isEmpty()) items.append(vi);
+    }
+    if (nextOffset) *nextOffset = jstr(data, "offset");
+    if (hasMore) *hasMore = jbool(data, "has_more");
     return items;
 }
 

@@ -25,6 +25,14 @@ QList36<VideoItem> popular(cJSON* root, bool* hasMore);
 // (按出现频次降序;不含「推荐」项,由 provider 补)
 QList36<CategoryItem> popularRegions(cJSON* root);
 
+// /x/web-interface/wbi/index/top/feed/rcmd → data.item[](仅 goto=av)
+QList36<VideoItem> homeRecommend(cJSON* root, bool* hasMore);
+
+// /x/polymer/web-dynamic/v1/feed/all → data.items[](仅 DYNAMIC_TYPE_AV)
+// nextOffset ← data.offset;hasMore ← data.has_more
+QList36<VideoItem> dynamicVideoFeed(cJSON* root, QString* nextOffset,
+                                    bool* hasMore);
+
 // /x/web-interface/newlist?rid=&pn=&ps= → data.archives[]
 // hasMore = data.page.count > 0 && page.num*page.size < page.count
 QList36<VideoItem> newlist(cJSON* root, int page, bool* hasMore);
